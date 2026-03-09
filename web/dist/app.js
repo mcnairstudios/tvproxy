@@ -378,6 +378,7 @@
       container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...'));
 
       let allItems;
+      let searchIndex; // parallel array of pre-lowercased search strings
       try {
         allItems = await api.get(config.apiPath);
       } catch (err) {
@@ -386,20 +387,38 @@
         return;
       }
 
+      const searchKeys = config.searchKeys || config.columns.map(c => c.key);
+
+      function buildSearchIndex() {
+        searchIndex = new Array(allItems.length);
+        for (let i = 0; i < allItems.length; i++) {
+          const parts = [];
+          for (let k = 0; k < searchKeys.length; k++) {
+            const val = allItems[i][searchKeys[k]];
+            if (val != null) parts.push(String(val));
+          }
+          searchIndex[i] = parts.join(' ').toLowerCase();
+        }
+      }
+      buildSearchIndex();
+
       let searchTerm = '';
       let currentPage = 1;
       let searchTimer = null;
+      let filteredCache = null;
 
       function getFiltered() {
         if (!searchTerm) return allItems;
+        if (filteredCache) return filteredCache;
         const q = searchTerm.toLowerCase();
-        const searchKeys = config.searchKeys || config.columns.map(c => c.key);
-        return allItems.filter(item =>
-          searchKeys.some(key => {
-            const val = item[key];
-            return val != null && String(val).toLowerCase().includes(q);
-          })
-        );
+        const result = [];
+        for (let i = 0; i < allItems.length; i++) {
+          if (searchIndex[i].indexOf(q) !== -1) {
+            result.push(allItems[i]);
+          }
+        }
+        filteredCache = result;
+        return result;
       }
 
       function renderView() {
@@ -436,9 +455,10 @@
           clearTimeout(searchTimer);
           searchTimer = setTimeout(() => {
             searchTerm = searchInput.value;
+            filteredCache = null;
             currentPage = 1;
             renderView();
-          }, 200);
+          }, 300);
         });
 
         const countText = searchTerm
@@ -545,6 +565,8 @@
       async function reloadData() {
         try {
           allItems = await api.get(config.apiPath);
+          buildSearchIndex();
+          filteredCache = null;
           renderView();
         } catch (err) {
           toast.error('Failed to reload: ' + err.message);
