@@ -421,16 +421,32 @@
         return result;
       }
 
-      function renderView() {
+      // Persistent DOM elements - built once, updated in place
+      const countEl = h('h3', null, '');
+      const tbodyEl = h('tbody', null);
+      const paginationEl = h('div', {
+        style: 'display: flex; align-items: center; justify-content: center; gap: 8px; padding: 16px; color: var(--text-secondary); font-size: 14px;',
+      });
+
+      const searchInput = h('input', {
+        type: 'text',
+        placeholder: 'Search...',
+        style: 'padding: 6px 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px; width: 220px; outline: none;',
+      });
+      searchInput.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+          searchTerm = searchInput.value;
+          filteredCache = null;
+          currentPage = 1;
+          updateTable();
+        }, 300);
+      });
+
+      // Build the shell once
+      function buildShell() {
         container.innerHTML = '';
 
-        const filtered = getFiltered();
-        const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
-        if (currentPage > totalPages) currentPage = totalPages;
-        const start = (currentPage - 1) * perPage;
-        const pageItems = filtered.slice(start, start + perPage);
-
-        // Header with search + actions
         const headerActions = [];
         if (config.create) {
           headerActions.push(
@@ -445,29 +461,9 @@
           });
         }
 
-        const searchInput = h('input', {
-          type: 'text',
-          placeholder: 'Search...',
-          style: 'padding: 6px 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px; width: 220px; outline: none;',
-        });
-        searchInput.value = searchTerm;
-        searchInput.addEventListener('input', () => {
-          clearTimeout(searchTimer);
-          searchTimer = setTimeout(() => {
-            searchTerm = searchInput.value;
-            filteredCache = null;
-            currentPage = 1;
-            renderView();
-          }, 300);
-        });
-
-        const countText = searchTerm
-          ? filtered.length + ' of ' + allItems.length
-          : String(allItems.length);
-
-        const tableEl = h('div', { className: 'table-container' },
+        container.appendChild(h('div', { className: 'table-container' },
           h('div', { className: 'table-header' },
-            h('h3', null, config.title + ' (' + countText + ')'),
+            countEl,
             h('div', { className: 'btn-group', style: 'align-items: center;' },
               searchInput,
               ...headerActions,
@@ -480,85 +476,118 @@
                 h('th', { style: 'width: 120px' }, 'Actions'),
               ),
             ),
-            h('tbody', null,
-              pageItems.length === 0
-                ? h('tr', { className: 'empty-row' }, h('td', { colspan: String(config.columns.length + 1) }, searchTerm ? 'No matching items' : 'No items found'))
-                : pageItems.map(item => h('tr', null,
-                    ...config.columns.map(col => {
-                      const val = col.render ? col.render(item) : item[col.key];
-                      return h('td', null, val != null ? (typeof val === 'string' || typeof val === 'number' ? String(val) : val) : '-');
-                    }),
-                    h('td', { className: 'actions-cell' },
-                      config.update ? h('button', { className: 'btn btn-secondary btn-sm', onClick: () => openForm(item) }, 'Edit') : null,
-                      config.delete !== false ? h('button', { className: 'btn btn-danger btn-sm', onClick: () => deleteItem(item) }, 'Del') : null,
-                      ...(config.rowActions ? config.rowActions(item, reloadData).map(a =>
-                        h('button', { className: 'btn btn-secondary btn-sm', onClick: a.handler }, a.label)
-                      ) : []),
-                    ),
-                  )),
-            ),
+            tbodyEl,
           ),
-        );
+        ));
+        container.appendChild(paginationEl);
+      }
 
-        container.appendChild(tableEl);
+      // Fast update - only swaps tbody rows, count text, and pagination
+      function updateTable() {
+        const filtered = getFiltered();
+        const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
+        if (currentPage > totalPages) currentPage = totalPages;
+        const start = (currentPage - 1) * perPage;
+        const pageItems = filtered.slice(start, start + perPage);
 
-        // Pagination controls
+        // Update count
+        const countText = searchTerm
+          ? config.title + ' (' + filtered.length + ' of ' + allItems.length + ')'
+          : config.title + ' (' + allItems.length + ')';
+        countEl.textContent = countText;
+
+        // Swap tbody contents
+        tbodyEl.innerHTML = '';
+        if (pageItems.length === 0) {
+          tbodyEl.appendChild(
+            h('tr', { className: 'empty-row' },
+              h('td', { colspan: String(config.columns.length + 1) }, searchTerm ? 'No matching items' : 'No items found'))
+          );
+        } else {
+          for (let i = 0; i < pageItems.length; i++) {
+            const item = pageItems[i];
+            const tr = document.createElement('tr');
+            for (let c = 0; c < config.columns.length; c++) {
+              const col = config.columns[c];
+              const val = col.render ? col.render(item) : item[col.key];
+              const td = document.createElement('td');
+              if (val != null && typeof val === 'object' && val.nodeType) {
+                td.appendChild(val);
+              } else {
+                td.textContent = val != null ? String(val) : '-';
+              }
+              tr.appendChild(td);
+            }
+            const actionsTd = document.createElement('td');
+            actionsTd.className = 'actions-cell';
+            if (config.update) {
+              const editBtn = document.createElement('button');
+              editBtn.className = 'btn btn-secondary btn-sm';
+              editBtn.textContent = 'Edit';
+              editBtn.onclick = () => openForm(item);
+              actionsTd.appendChild(editBtn);
+            }
+            if (config.delete !== false) {
+              const delBtn = document.createElement('button');
+              delBtn.className = 'btn btn-danger btn-sm';
+              delBtn.textContent = 'Del';
+              delBtn.onclick = () => deleteItem(item);
+              actionsTd.appendChild(delBtn);
+            }
+            if (config.rowActions) {
+              const actions = config.rowActions(item, reloadData);
+              for (let a = 0; a < actions.length; a++) {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-secondary btn-sm';
+                btn.textContent = actions[a].label;
+                btn.onclick = actions[a].handler;
+                actionsTd.appendChild(btn);
+              }
+            }
+            tr.appendChild(actionsTd);
+            tbodyEl.appendChild(tr);
+          }
+        }
+
+        // Update pagination
+        paginationEl.innerHTML = '';
         if (totalPages > 1) {
-          const paginationEl = h('div', {
-            style: 'display: flex; align-items: center; justify-content: center; gap: 8px; padding: 16px; color: var(--text-secondary); font-size: 14px;',
-          });
-
-          const prevBtn = h('button', {
-            className: 'btn btn-secondary btn-sm',
-            onClick: () => { currentPage--; renderView(); },
-          }, 'Prev');
+          const prevBtn = h('button', { className: 'btn btn-secondary btn-sm',
+            onClick: () => { currentPage--; updateTable(); } }, 'Prev');
           if (currentPage <= 1) prevBtn.disabled = true;
 
-          const nextBtn = h('button', {
-            className: 'btn btn-secondary btn-sm',
-            onClick: () => { currentPage++; renderView(); },
-          }, 'Next');
+          const nextBtn = h('button', { className: 'btn btn-secondary btn-sm',
+            onClick: () => { currentPage++; updateTable(); } }, 'Next');
           if (currentPage >= totalPages) nextBtn.disabled = true;
 
-          // Page number buttons (show max 7 around current)
-          const pageButtons = [];
-          let startPage = Math.max(1, currentPage - 3);
-          let endPage = Math.min(totalPages, startPage + 6);
-          if (endPage - startPage < 6) startPage = Math.max(1, endPage - 6);
+          paginationEl.appendChild(prevBtn);
 
-          if (startPage > 1) {
-            pageButtons.push(h('button', { className: 'btn btn-secondary btn-sm', onClick: () => { currentPage = 1; renderView(); } }, '1'));
-            if (startPage > 2) pageButtons.push(h('span', { style: 'color: var(--text-muted)' }, '...'));
+          let startPg = Math.max(1, currentPage - 3);
+          let endPg = Math.min(totalPages, startPg + 6);
+          if (endPg - startPg < 6) startPg = Math.max(1, endPg - 6);
+
+          if (startPg > 1) {
+            paginationEl.appendChild(h('button', { className: 'btn btn-secondary btn-sm',
+              onClick: () => { currentPage = 1; updateTable(); } }, '1'));
+            if (startPg > 2) paginationEl.appendChild(h('span', { style: 'color: var(--text-muted)' }, '...'));
           }
-
-          for (let i = startPage; i <= endPage; i++) {
+          for (let i = startPg; i <= endPg; i++) {
             const pg = i;
-            pageButtons.push(h('button', {
+            paginationEl.appendChild(h('button', {
               className: 'btn btn-sm ' + (pg === currentPage ? 'btn-primary' : 'btn-secondary'),
-              onClick: () => { currentPage = pg; renderView(); },
+              onClick: () => { currentPage = pg; updateTable(); },
             }, String(pg)));
           }
-
-          if (endPage < totalPages) {
-            if (endPage < totalPages - 1) pageButtons.push(h('span', { style: 'color: var(--text-muted)' }, '...'));
-            pageButtons.push(h('button', { className: 'btn btn-secondary btn-sm', onClick: () => { currentPage = totalPages; renderView(); } }, String(totalPages)));
+          if (endPg < totalPages) {
+            if (endPg < totalPages - 1) paginationEl.appendChild(h('span', { style: 'color: var(--text-muted)' }, '...'));
+            paginationEl.appendChild(h('button', { className: 'btn btn-secondary btn-sm',
+              onClick: () => { currentPage = totalPages; updateTable(); } }, String(totalPages)));
           }
 
-          paginationEl.appendChild(prevBtn);
-          pageButtons.forEach(b => paginationEl.appendChild(b));
           paginationEl.appendChild(nextBtn);
           paginationEl.appendChild(h('span', { style: 'margin-left: 12px; color: var(--text-muted); font-size: 12px;' },
             'Page ' + currentPage + ' of ' + totalPages +
             ' (' + (start + 1) + '-' + Math.min(start + perPage, filtered.length) + ')'));
-
-          container.appendChild(paginationEl);
-        }
-
-        // Re-focus search after render
-        const newSearch = container.querySelector('input[placeholder="Search..."]');
-        if (newSearch && document.activeElement && document.activeElement.placeholder === 'Search...') {
-          newSearch.focus();
-          newSearch.selectionStart = newSearch.selectionEnd = newSearch.value.length;
         }
       }
 
@@ -567,7 +596,7 @@
           allItems = await api.get(config.apiPath);
           buildSearchIndex();
           filteredCache = null;
-          renderView();
+          updateTable();
         } catch (err) {
           toast.error('Failed to reload: ' + err.message);
         }
@@ -659,7 +688,8 @@
         }
       }
 
-      renderView();
+      buildShell();
+      updateTable();
     };
   }
 
