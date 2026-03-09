@@ -1,0 +1,316 @@
+openapi: "3.0.3"
+info:
+  title: TVProxy API
+  description: IPTV stream management and proxy server
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /api/auth/login:
+    post:
+      summary: Login
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+        "401":
+          description: Invalid credentials
+
+  /api/auth/refresh:
+    post:
+      summary: Refresh access token
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: Token refreshed
+        "401":
+          description: Invalid refresh token
+
+  /api/auth/me:
+    get:
+      summary: Get current user
+      tags: [Auth]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current user info
+
+  /api/m3u/accounts:
+    get:
+      summary: List M3U accounts
+      tags: [M3U]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of accounts
+    post:
+      summary: Create M3U account
+      tags: [M3U]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/M3UAccount" }
+      responses:
+        "201":
+          description: Account created
+
+  /api/m3u/accounts/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      summary: Get M3U account
+      tags: [M3U]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Account details
+    put:
+      summary: Update M3U account
+      tags: [M3U]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Account updated
+    delete:
+      summary: Delete M3U account
+      tags: [M3U]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Account deleted
+
+  /api/m3u/accounts/{id}/refresh:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      summary: Refresh M3U account streams
+      tags: [M3U]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Refresh started
+
+  /api/channels:
+    get:
+      summary: List channels
+      tags: [Channels]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of channels
+    post:
+      summary: Create channel
+      tags: [Channels]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201":
+          description: Channel created
+
+  /api/channels/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      summary: Get channel
+      tags: [Channels]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Channel details
+    put:
+      summary: Update channel
+      tags: [Channels]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Channel updated
+    delete:
+      summary: Delete channel
+      tags: [Channels]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Channel deleted
+
+  /api/channels/{id}/streams:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      summary: Assign streams to channel
+      tags: [Channels]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                stream_ids:
+                  type: array
+                  items: { type: integer }
+      responses:
+        "200":
+          description: Streams assigned
+
+  /api/epg/sources:
+    get:
+      summary: List EPG sources
+      tags: [EPG]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of EPG sources
+    post:
+      summary: Create EPG source
+      tags: [EPG]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201":
+          description: EPG source created
+
+  /api/epg/data:
+    get:
+      summary: List EPG data
+      tags: [EPG]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: EPG data
+
+  /output/m3u:
+    get:
+      summary: Generated M3U playlist
+      tags: [Output]
+      responses:
+        "200":
+          description: M3U playlist
+          content:
+            audio/x-mpegurl: {}
+
+  /output/epg:
+    get:
+      summary: Generated XMLTV EPG
+      tags: [Output]
+      responses:
+        "200":
+          description: XMLTV EPG data
+          content:
+            application/xml: {}
+
+  /hdhr/discover.json:
+    get:
+      summary: HDHomeRun device discovery
+      tags: [HDHomeRun]
+      responses:
+        "200":
+          description: Discovery response
+
+  /hdhr/lineup.json:
+    get:
+      summary: HDHomeRun channel lineup
+      tags: [HDHomeRun]
+      responses:
+        "200":
+          description: Channel lineup
+
+  /proxy/stream/{channelID}:
+    parameters:
+      - name: channelID
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      summary: Proxy stream for channel
+      tags: [Proxy]
+      responses:
+        "200":
+          description: Stream data
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    M3UAccount:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        url: { type: string }
+        type: { type: string, enum: [m3u, xtream] }
+        username: { type: string }
+        password: { type: string }
+        max_streams: { type: integer }
+        is_enabled: { type: boolean }
+        stream_count: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Channel:
+      type: object
+      properties:
+        id: { type: integer }
+        channel_number: { type: integer }
+        name: { type: string }
+        logo: { type: string }
+        tvg_id: { type: string }
+        channel_group_id: { type: integer, nullable: true }
+        is_enabled: { type: boolean }
+
+    EPGSource:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        url: { type: string }
+        is_enabled: { type: boolean }
+        channel_count: { type: integer }
+        program_count: { type: integer }

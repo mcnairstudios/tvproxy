@@ -1,0 +1,69 @@
+package m3u
+
+import (
+	"bufio"
+	"io"
+	"strings"
+)
+
+type Entry struct {
+	Name    string
+	URL     string
+	Group   string
+	Logo    string
+	TvgID   string
+	TvgName string
+}
+
+// Parse reads an M3U file from the reader and extracts stream entries.
+// It handles #EXTM3U header and #EXTINF lines with attributes.
+func Parse(r io.Reader) ([]Entry, error) {
+	var entries []Entry
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024) // 10MB max line
+
+	var current *Entry
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || line == "#EXTM3U" {
+			continue
+		}
+		if strings.HasPrefix(line, "#EXTINF:") {
+			current = &Entry{}
+			parseExtInf(line, current)
+		} else if current != nil && !strings.HasPrefix(line, "#") {
+			current.URL = line
+			entries = append(entries, *current)
+			current = nil
+		}
+	}
+	return entries, scanner.Err()
+}
+
+func parseExtInf(line string, entry *Entry) {
+	// Format: #EXTINF:-1 tvg-id="id" tvg-name="name" tvg-logo="logo" group-title="group",Channel Name
+	// Extract attributes
+	entry.TvgID = extractAttr(line, "tvg-id")
+	entry.TvgName = extractAttr(line, "tvg-name")
+	entry.Logo = extractAttr(line, "tvg-logo")
+	entry.Group = extractAttr(line, "group-title")
+
+	// Extract channel name (after last comma)
+	if idx := strings.LastIndex(line, ","); idx >= 0 {
+		entry.Name = strings.TrimSpace(line[idx+1:])
+	}
+}
+
+func extractAttr(line, attr string) string {
+	key := attr + `="`
+	start := strings.Index(line, key)
+	if start < 0 {
+		return ""
+	}
+	start += len(key)
+	end := strings.Index(line[start:], `"`)
+	if end < 0 {
+		return ""
+	}
+	return line[start : start+end]
+}
