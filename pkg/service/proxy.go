@@ -289,23 +289,61 @@ func (s *ProxyService) startHTTPPassthrough(ctx context.Context, channelID int64
 	return resp.Body, nil
 }
 
+// shellSplit splits a command string into arguments, respecting double and single quotes.
+func shellSplit(s string) []string {
+	var args []string
+	var current strings.Builder
+	inDouble := false
+	inSingle := false
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '"' && !inSingle:
+			inDouble = !inDouble
+		case c == '\'' && !inDouble:
+			inSingle = !inSingle
+		case c == ' ' && !inDouble && !inSingle:
+			if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteByte(c)
+		}
+	}
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args
+}
+
 // startFFmpeg spawns an ffmpeg process to transcode the upstream stream.
 func (s *ProxyService) startFFmpeg(ctx context.Context, channelID int64, stream *models.Stream, profile *models.StreamProfile, userAgent string) (io.ReadCloser, error) {
 	// Build the ffmpeg argument list from the stored args string.
 	// The args contain {input} as a placeholder for the stream URL.
 	argsStr := strings.Replace(profile.Args, "{input}", stream.URL, 1)
-	args := strings.Fields(argsStr)
+	args := shellSplit(argsStr)
 
-	// Inject user agent before -i if one is configured (same approach as Threadfin)
+	// Inject user agent before -i if one is configured and not already present
 	if userAgent != "" {
-		for i, arg := range args {
-			if arg == "-i" {
-				newArgs := make([]string, 0, len(args)+2)
-				newArgs = append(newArgs, args[:i]...)
-				newArgs = append(newArgs, "-user_agent", userAgent)
-				newArgs = append(newArgs, args[i:]...)
-				args = newArgs
+		hasUserAgent := false
+		for _, arg := range args {
+			if arg == "-user_agent" {
+				hasUserAgent = true
 				break
+			}
+		}
+		if !hasUserAgent {
+			for i, arg := range args {
+				if arg == "-i" {
+					newArgs := make([]string, 0, len(args)+2)
+					newArgs = append(newArgs, args[:i]...)
+					newArgs = append(newArgs, "-user_agent", userAgent)
+					newArgs = append(newArgs, args[i:]...)
+					args = newArgs
+					break
+				}
 			}
 		}
 	}
