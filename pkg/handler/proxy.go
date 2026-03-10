@@ -30,10 +30,14 @@ func (h *ProxyHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	headers := make(map[string]string)
+	for k, v := range r.Header {
+		headers[k] = v[0]
+	}
 	h.log.Info().
 		Int64("channel_id", channelID).
-		Str("user_agent", r.UserAgent()).
 		Str("remote", r.RemoteAddr).
+		Fields(headers).
 		Msg("stream request")
 
 	if err := h.proxyService.ProxyStream(r.Context(), w, r, channelID); err != nil {
