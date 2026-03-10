@@ -30,6 +30,12 @@ func (h *ProxyHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.log.Info().
+		Int64("channel_id", channelID).
+		Str("user_agent", r.UserAgent()).
+		Str("remote", r.RemoteAddr).
+		Msg("stream request")
+
 	if err := h.proxyService.ProxyStream(r.Context(), w, r, channelID); err != nil {
 		h.log.Error().Err(err).Int64("channel_id", channelID).Msg("proxy stream failed")
 		respondError(w, http.StatusInternalServerError, "failed to proxy stream")
