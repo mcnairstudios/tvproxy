@@ -149,10 +149,12 @@ func (s *ProxyService) ProxyStream(ctx context.Context, w http.ResponseWriter, r
 		done:    make(chan struct{}),
 	}
 
-	// Set response headers
+	// Set response headers (matches Threadfin's proven Plex-compatible approach)
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", "0")
+	w.Header().Set("Connection", "close")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-cache, no-store")
-	w.Header().Set("Connection", "keep-alive")
 
 	// Check if there is already an active connection for this channel
 	s.mu.RLock()
