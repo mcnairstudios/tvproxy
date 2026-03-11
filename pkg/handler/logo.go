@@ -74,6 +74,44 @@ func (h *LogoHandler) Get(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, logo)
 }
 
+// Update updates a logo by ID.
+func (h *LogoHandler) Update(w http.ResponseWriter, r *http.Request) {
+	id, err := urlParamInt64(r, "id")
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid logo id")
+		return
+	}
+
+	logo, err := h.repo.GetByID(r.Context(), id)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "logo not found")
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Name != "" {
+		logo.Name = req.Name
+	}
+	if req.URL != "" {
+		logo.URL = req.URL
+	}
+
+	if err := h.repo.Update(r.Context(), logo); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update logo")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, logo)
+}
+
 // Delete deletes a logo by ID.
 func (h *LogoHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := urlParamInt64(r, "id")

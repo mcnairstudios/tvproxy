@@ -48,6 +48,7 @@ type ProxyService struct {
 	userAgentRepo      *repository.UserAgentRepository
 	channelProfileRepo *repository.ChannelProfileRepository
 	streamProfileRepo  *repository.StreamProfileRepository
+	clientService      *ClientService
 	log                zerolog.Logger
 
 	mu          sync.RWMutex
@@ -62,6 +63,7 @@ func NewProxyService(
 	userAgentRepo *repository.UserAgentRepository,
 	channelProfileRepo *repository.ChannelProfileRepository,
 	streamProfileRepo *repository.StreamProfileRepository,
+	clientService *ClientService,
 	log zerolog.Logger,
 ) *ProxyService {
 	return &ProxyService{
@@ -71,6 +73,7 @@ func NewProxyService(
 		userAgentRepo:      userAgentRepo,
 		channelProfileRepo: channelProfileRepo,
 		streamProfileRepo:  streamProfileRepo,
+		clientService:      clientService,
 		log:                log.With().Str("service", "proxy").Logger(),
 		connections:        make(map[int64]*channelConnection),
 	}
@@ -98,16 +101,31 @@ func (s *ProxyService) ProxyStream(ctx context.Context, w http.ResponseWriter, r
 	var mode string
 	var streamProfile *models.StreamProfile
 
+	skipConnectionSharing := false
 	if profileOverride != "" {
-		// Look up the override profile by name
+		// Priority 1: explicit query param
 		sp, err := s.streamProfileRepo.GetByName(ctx, profileOverride)
 		if err != nil {
 			return fmt.Errorf("profile %q not found: %w", profileOverride, err)
 		}
 		mode = sp.StreamMode
 		streamProfile = sp
+		skipConnectionSharing = true
 		s.log.Info().Int64("channel_id", channelID).Str("profile_override", profileOverride).Str("mode", mode).Msg("using profile override")
-	} else {
+	} else if s.clientService != nil {
+		// Priority 2: client header detection
+		matched, err := s.clientService.MatchClient(ctx, r)
+		if err != nil {
+			s.log.Warn().Err(err).Msg("client detection error")
+		}
+		if matched != nil {
+			mode = matched.StreamMode
+			streamProfile = matched
+			skipConnectionSharing = true
+		}
+	}
+	if mode == "" {
+		// Priority 3+4: channel profile chain + fallback
 		mode, streamProfile = ResolveStreamMode(ctx, channel, s.channelProfileRepo, s.streamProfileRepo, s.log)
 	}
 
@@ -146,8 +164,8 @@ func (s *ProxyService) ProxyStream(ctx context.Context, w http.ResponseWriter, r
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	// Profile overrides skip connection sharing (different format, can't mix)
-	if profileOverride == "" {
+	// Profile overrides and client-detected profiles skip connection sharing (different format, can't mix)
+	if !skipConnectionSharing {
 		// Check if there is already an active connection for this channel
 		s.mu.RLock()
 		conn, exists := s.connections[channelID]

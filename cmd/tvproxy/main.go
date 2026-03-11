@@ -62,6 +62,7 @@ func main() {
 	hdhrDeviceRepo := repository.NewHDHRDeviceRepository(db)
 	settingsRepo := repository.NewCoreSettingsRepository(db)
 	userAgentRepo := repository.NewUserAgentRepository(db)
+	clientRepo := repository.NewClientRepository(db)
 
 	// Create default admin user if no users exist
 	users, err := userRepo.List(ctx)
@@ -82,7 +83,8 @@ func main() {
 	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamRepo, log)
 	epgService := service.NewEPGService(epgSourceRepo, epgDataRepo, programDataRepo, userAgentRepo, log)
 	settingsService := service.NewSettingsService(settingsRepo)
-	proxyService := service.NewProxyService(channelRepo, streamRepo, m3uAccountRepo, userAgentRepo, channelProfileRepo, streamProfileRepo, log)
+	clientService := service.NewClientService(clientRepo, streamProfileRepo, log)
+	proxyService := service.NewProxyService(channelRepo, streamRepo, m3uAccountRepo, userAgentRepo, channelProfileRepo, streamProfileRepo, clientService, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo, streamRepo, channelProfileRepo, streamProfileRepo, cfg, log)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, streamRepo, channelProfileRepo, streamProfileRepo, epgDataRepo, programDataRepo, cfg, log)
 
@@ -94,7 +96,7 @@ func main() {
 	userHandler := handler.NewUserHandler(authService)
 	m3uAccountHandler := handler.NewM3UAccountHandler(m3uService)
 	streamHandler := handler.NewStreamHandler(streamRepo)
-	channelHandler := handler.NewChannelHandler(channelService)
+	channelHandler := handler.NewChannelHandler(channelService, logoRepo)
 	channelGroupHandler := handler.NewChannelGroupHandler(channelGroupRepo)
 	channelProfileHandler := handler.NewChannelProfileHandler(channelProfileRepo)
 	logoHandler := handler.NewLogoHandler(logoRepo)
@@ -106,6 +108,7 @@ func main() {
 	proxyHandler := handler.NewProxyHandler(proxyService, log)
 	settingsHandler := handler.NewSettingsHandler(settingsService)
 	userAgentHandler := handler.NewUserAgentHandler(userAgentRepo)
+	clientHandler := handler.NewClientHandler(clientRepo, streamProfileRepo)
 
 	// Router
 	r := chi.NewRouter()
@@ -206,6 +209,7 @@ func main() {
 			r.Get("/", logoHandler.List)
 			r.Post("/", logoHandler.Create)
 			r.Get("/{id}", logoHandler.Get)
+			r.Put("/{id}", logoHandler.Update)
 			r.Delete("/{id}", logoHandler.Delete)
 		})
 
@@ -246,6 +250,14 @@ func main() {
 			r.Get("/{id}", userAgentHandler.Get)
 			r.Put("/{id}", userAgentHandler.Update)
 			r.Delete("/{id}", userAgentHandler.Delete)
+		})
+
+		r.Route("/api/clients", func(r chi.Router) {
+			r.Get("/", clientHandler.List)
+			r.Post("/", clientHandler.Create)
+			r.Get("/{id}", clientHandler.Get)
+			r.Put("/{id}", clientHandler.Update)
+			r.Delete("/{id}", clientHandler.Delete)
 		})
 	})
 

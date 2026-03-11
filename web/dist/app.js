@@ -336,6 +336,7 @@
     { id: 'stream-profiles', label: 'Stream Profiles', icon: '\ud83d\udd27', tip: 'Configure transcoding profiles for stream processing' },
     { id: 'hdhr-devices', label: 'HDHR Devices', icon: '\ud83d\udce1', tip: 'Virtual HDHomeRun devices for Plex, Jellyfin, and Emby' },
     { id: 'user-agents', label: 'User Agents', icon: '\ud83c\udf10', tip: 'User-Agent strings sent when fetching upstream M3U and EPG data' },
+    { id: 'clients', label: 'Client Detection', icon: '\ud83d\udd0d', tip: 'Auto-detect players by HTTP headers and assign stream profiles' },
     { id: 'logos', label: 'Logos', icon: '\ud83d\uddbc', tip: 'Saved channel logos for quick reuse' },
     { section: 'Debug' },
     { id: 'streams', label: 'Streams', icon: '\u25b6', tip: 'Read-only view of all streams parsed from your M3U sources' },
@@ -892,6 +893,30 @@
               sel,
               field.help ? h('div', { className: 'help-text' }, field.help) : null,
             ));
+          } else if (field.type === 'async-multi-select') {
+            const container = h('div', { id: 'field-' + field.key, className: 'checkbox-group', style: 'display:flex;flex-direction:column;gap:6px;padding:4px 0;' });
+            const currentVals = isEdit && Array.isArray(item[field.key]) ? item[field.key].map(String) : [];
+            if (field.loadOptions) {
+              field.loadOptions().then(options => {
+                for (const opt of (options || [])) {
+                  const val = String(opt[field.valueKey || 'id']);
+                  const cb = h('input', { type: 'checkbox', value: val, id: 'field-' + field.key + '-' + val });
+                  if (currentVals.includes(val)) cb.checked = true;
+                  const lbl = h('label', { for: 'field-' + field.key + '-' + val, style: 'display:flex;align-items:center;gap:6px;cursor:pointer;' },
+                    cb, opt[field.displayKey || 'name']);
+                  container.appendChild(lbl);
+                }
+                if ((options || []).length === 0) {
+                  container.appendChild(h('div', { style: 'color:var(--text-secondary);font-size:0.85em;' }, 'No options available'));
+                }
+              }).catch(() => {});
+            }
+            inputs[field.key] = container;
+            formEl.appendChild(h('div', { className: 'form-group' },
+              h('label', null, field.label),
+              container,
+              field.help ? h('div', { className: 'help-text' }, field.help) : null,
+            ));
           } else {
             const inp = h('input', {
               type: field.type || 'text',
@@ -953,6 +978,10 @@
                 body[field.key] = el.value ? Number(el.value) : 0;
               } else if (field.type === 'async-select') {
                 body[field.key] = el.value ? (field.stringValue ? el.value : Number(el.value)) : null;
+              } else if (field.type === 'async-multi-select') {
+                const checked = [];
+                el.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => checked.push(Number(cb.value)));
+                body[field.key] = checked;
               } else {
                 body[field.key] = el.value;
               }
@@ -1404,21 +1433,6 @@
           });
         }
       },
-      preSave: async (inputs) => {
-        // If logo URL is set and looks like an icon URL (from EPG), save it to logos
-        const logoUrl = inputs.logo ? inputs.logo.value.trim() : '';
-        const channelName = inputs.name ? inputs.name.value.trim() : '';
-        if (logoUrl && logoUrl.startsWith('http')) {
-          try {
-            const logos = await logosCache.getAll();
-            const exists = logos.some(l => l.url === logoUrl);
-            if (!exists && channelName) {
-              await api.post('/api/logos', { name: channelName, url: logoUrl });
-              logosCache.invalidate();
-            }
-          } catch { /* ignore logo save errors */ }
-        }
-      },
       postSave: async (result, inputs, isEdit, original) => {
         const streamInput = inputs._stream;
         if (streamInput && streamInput._selectedStreamId) {
@@ -1593,10 +1607,16 @@
         { key: 'port', label: 'Port', type: 'number', help: 'Auto-assigned starting at 47601. Each device needs a unique port for Plex.' },
         {
           key: 'channel_profile_id', label: 'Channel Profile', type: 'async-select',
-          emptyLabel: '-- All Channels --',
+          emptyLabel: '-- Default --',
           loadOptions: () => api.get('/api/channel-profiles'),
           valueKey: 'id', displayKey: 'name',
-          help: 'Only expose channels with this profile. Leave empty for all channels.',
+          help: 'Stream profile used for channels on this device.',
+        },
+        {
+          key: 'channel_group_ids', label: 'Channel Groups', type: 'async-multi-select',
+          loadOptions: () => api.get('/api/channel-groups'),
+          valueKey: 'id', displayKey: 'name',
+          help: 'Only serve channels in these groups. Leave all unchecked for all channels.',
         },
         { key: 'is_enabled', label: 'Enabled', type: 'checkbox', default: true },
       ],
@@ -1607,8 +1627,12 @@
       singular: 'Logo',
       apiPath: '/api/logos',
       create: true,
-      update: false,
+      update: true,
       columns: [
+        { key: 'url', label: 'Logo', render: item => {
+          const url = item.url || '';
+          return url ? h('img', { src: url, alt: item.name || '', style: 'max-height:32px;max-width:64px;object-fit:contain;' }) : '';
+        }},
         { key: 'name', label: 'Name' },
         { key: 'url', label: 'URL', render: item => {
           const url = item.url || '';
@@ -1639,6 +1663,202 @@
         { key: 'user_agent', label: 'User Agent String', placeholder: 'VLC/3.0.18 LibVLC/3.0.18' },
       ],
     }),
+
+    clients: async function(container) {
+      container.innerHTML = '';
+      container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...'));
+
+      let clients = [];
+      let profiles = [];
+      try {
+        [clients, profiles] = await Promise.all([api.get('/api/clients'), api.get('/api/stream-profiles')]);
+        clients = Array.isArray(clients) ? clients : [];
+        profiles = Array.isArray(profiles) ? profiles : [];
+      } catch (err) {
+        container.innerHTML = '';
+        container.appendChild(h('p', { style: 'color: var(--danger)' }, 'Failed to load: ' + err.message));
+        return;
+      }
+
+      const profileMap = {};
+      profiles.forEach(p => { profileMap[p.id] = p.name; });
+
+      function rulesLabel(rules) {
+        if (!rules || rules.length === 0) return 'No rules';
+        return rules.map(r => {
+          if (r.match_type === 'exists') return r.header_name + ' exists';
+          return r.header_name + ' ' + r.match_type + ' "' + r.match_value + '"';
+        }).join(' AND ');
+      }
+
+      function renderList() {
+        container.innerHTML = '';
+        const rows = clients.map(c => {
+          return h('tr', null,
+            h('td', null, c.name),
+            h('td', null, String(c.priority)),
+            h('td', null, rulesLabel(c.match_rules)),
+            h('td', null, profileMap[c.stream_profile_id] || '(unknown)'),
+            h('td', null,
+              h('span', { className: 'badge ' + (c.is_enabled ? 'badge-success' : 'badge-danger') }, c.is_enabled ? 'Enabled' : 'Disabled')
+            ),
+            h('td', null,
+              h('button', { className: 'btn btn-sm', onClick: () => renderForm(c) }, 'Edit'),
+              ' ',
+              h('button', { className: 'btn btn-sm btn-danger', onClick: async () => {
+                if (!confirm('Delete client "' + c.name + '"?')) return;
+                try {
+                  await api.delete('/api/clients/' + c.id);
+                  clients = clients.filter(x => x.id !== c.id);
+                  toast.success('Client deleted');
+                  renderList();
+                } catch (err) { toast.error(err.message); }
+              }}, 'Delete'),
+            ),
+          );
+        });
+
+        const table = h('table', { className: 'data-table' },
+          h('thead', null, h('tr', null,
+            h('th', null, 'Name'), h('th', null, 'Priority'), h('th', null, 'Match Rules'),
+            h('th', null, 'Stream Profile'), h('th', null, 'Status'), h('th', null, 'Actions'),
+          )),
+          h('tbody', null, ...rows),
+        );
+
+        container.appendChild(h('div', { className: 'table-container' },
+          h('div', { className: 'table-header' },
+            h('h3', null, 'Client Detection'),
+            h('button', { className: 'btn btn-primary', onClick: () => renderForm(null) }, '+ New Client'),
+          ),
+          clients.length > 0 ? table : h('p', { style: 'padding: 16px; color: var(--text-muted)' }, 'No clients configured.'),
+        ));
+      }
+
+      function renderForm(existing) {
+        container.innerHTML = '';
+        const isEdit = !!existing;
+        const rules = existing ? [...existing.match_rules] : [{ header_name: '', match_type: 'contains', match_value: '' }];
+
+        const nameInp = h('input', { type: 'text', placeholder: 'Plex', value: existing ? existing.name : '' });
+        const priorityInp = h('input', { type: 'number', value: existing ? String(existing.priority) : '50' });
+        const enabledChk = h('input', { type: 'checkbox' });
+        enabledChk.checked = existing ? existing.is_enabled : true;
+
+        const profileSelect = h('select');
+        profiles.forEach(p => {
+          const opt = h('option', { value: String(p.id) }, p.name);
+          if (existing && existing.stream_profile_id === p.id) opt.selected = true;
+          profileSelect.appendChild(opt);
+        });
+
+        const rulesContainer = h('div');
+
+        function renderRuleRows() {
+          rulesContainer.innerHTML = '';
+          rules.forEach((rule, idx) => {
+            const headerInp = h('input', { type: 'text', placeholder: 'User-Agent', value: rule.header_name || '', style: 'flex:1;min-width:120px' });
+            headerInp.addEventListener('input', () => { rules[idx].header_name = headerInp.value; });
+
+            const typeSelect = h('select', { style: 'width:120px' });
+            ['contains', 'equals', 'prefix', 'exists'].forEach(mt => {
+              const opt = h('option', { value: mt }, mt);
+              if (rule.match_type === mt) opt.selected = true;
+              typeSelect.appendChild(opt);
+            });
+
+            const valueInp = h('input', { type: 'text', placeholder: 'Match value', value: rule.match_value || '', style: 'flex:1;min-width:120px' });
+            if (rule.match_type === 'exists') valueInp.style.display = 'none';
+            valueInp.addEventListener('input', () => { rules[idx].match_value = valueInp.value; });
+
+            typeSelect.addEventListener('change', () => {
+              rules[idx].match_type = typeSelect.value;
+              valueInp.style.display = typeSelect.value === 'exists' ? 'none' : '';
+            });
+
+            const removeBtn = h('button', { className: 'btn btn-sm btn-danger', onClick: () => {
+              rules.splice(idx, 1);
+              if (rules.length === 0) rules.push({ header_name: '', match_type: 'contains', match_value: '' });
+              renderRuleRows();
+            }}, '\u2715');
+
+            rulesContainer.appendChild(h('div', { style: 'display:flex;gap:8px;align-items:center;margin-bottom:8px' },
+              headerInp, typeSelect, valueInp, removeBtn,
+            ));
+          });
+        }
+        renderRuleRows();
+
+        const addRuleBtn = h('button', { className: 'btn btn-sm', onClick: () => {
+          rules.push({ header_name: '', match_type: 'contains', match_value: '' });
+          renderRuleRows();
+        }}, '+ Add Rule');
+
+        const saveBtn = h('button', { className: 'btn btn-primary', onClick: async () => {
+          saveBtn.disabled = true;
+          const matchRules = rules.map(r => ({
+            header_name: r.header_name,
+            match_type: r.match_type,
+            match_value: r.match_type === 'exists' ? '' : r.match_value,
+          }));
+
+          try {
+            if (isEdit) {
+              const updated = await api.put('/api/clients/' + existing.id, {
+                name: nameInp.value,
+                priority: parseInt(priorityInp.value, 10) || 0,
+                stream_profile_id: parseInt(profileSelect.value, 10),
+                is_enabled: enabledChk.checked,
+                match_rules: matchRules,
+              });
+              const idx = clients.findIndex(c => c.id === existing.id);
+              if (idx >= 0) clients[idx] = updated;
+              toast.success('Client updated');
+            } else {
+              const created = await api.post('/api/clients', {
+                name: nameInp.value,
+                priority: parseInt(priorityInp.value, 10) || 0,
+                is_enabled: enabledChk.checked,
+                match_rules: matchRules,
+              });
+              clients.push(created);
+              // Refresh profiles since a new one was auto-created
+              try { profiles = await api.get('/api/stream-profiles'); profiles = Array.isArray(profiles) ? profiles : []; profiles.forEach(p => { profileMap[p.id] = p.name; }); } catch(e) {}
+              toast.success('Client created');
+            }
+            renderList();
+          } catch (err) {
+            toast.error(err.message);
+            saveBtn.disabled = false;
+          }
+        }}, isEdit ? 'Save Changes' : 'Create Client');
+
+        const cancelBtn = h('button', { className: 'btn', onClick: renderList }, 'Cancel');
+
+        const formContent = h('div', { style: 'padding: 16px; max-width: 700px' },
+          h('div', { className: 'form-group' }, h('label', null, 'Client Name'), nameInp),
+          h('div', { className: 'form-group' }, h('label', null, 'Priority'), priorityInp,
+            h('small', { style: 'color: var(--text-muted); display: block' }, 'Lower number = higher priority. Clients are checked in order.')),
+          h('div', { className: 'form-group' }, h('label', null, 'Match Rules (all must match)'), rulesContainer, addRuleBtn),
+        );
+
+        if (isEdit) {
+          formContent.appendChild(h('div', { className: 'form-group' }, h('label', null, 'Stream Profile'), profileSelect,
+            h('small', { style: 'color: var(--text-muted); display: block' }, 'Auto-created on client creation. Edit the profile to change encoding settings.')));
+        }
+
+        formContent.appendChild(h('div', { className: 'form-group' },
+          h('label', { style: 'display:flex;align-items:center;gap:8px' }, enabledChk, 'Enabled')));
+        formContent.appendChild(h('div', { style: 'display: flex; gap: 8px; margin-top: 16px' }, saveBtn, cancelBtn));
+
+        container.appendChild(h('div', { className: 'table-container' },
+          h('div', { className: 'table-header' }, h('h3', null, isEdit ? 'Edit Client: ' + existing.name : 'New Client')),
+          formContent,
+        ));
+      }
+
+      renderList();
+    },
 
     users: buildCrudPage({
       title: 'Users',

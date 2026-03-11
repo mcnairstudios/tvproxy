@@ -46,6 +46,7 @@ type Channel struct {
 	ID               int64     `json:"id"`
 	ChannelNumber    int       `json:"channel_number"`
 	Name             string    `json:"name"`
+	LogoID           *int64    `json:"logo_id,omitempty"`
 	Logo             string    `json:"logo,omitempty"`
 	TvgID            string    `json:"tvg_id,omitempty"`
 	ChannelGroupID   *int64    `json:"channel_group_id,omitempty"`
@@ -146,6 +147,7 @@ type HDHRDevice struct {
 	TunerCount      int       `json:"tuner_count"`
 	Port            int       `json:"port"`
 	ChannelProfileID *int64   `json:"channel_profile_id,omitempty"`
+	ChannelGroupIDs []int64   `json:"channel_group_ids,omitempty"`
 	IsEnabled       bool      `json:"is_enabled"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
@@ -163,4 +165,23 @@ type UserAgent struct {
 	IsDefault bool      `json:"is_default"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type Client struct {
+	ID              int64             `json:"id"`
+	Name            string            `json:"name"`
+	Priority        int               `json:"priority"`
+	StreamProfileID int64             `json:"stream_profile_id"`
+	IsEnabled       bool              `json:"is_enabled"`
+	MatchRules      []ClientMatchRule `json:"match_rules"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
+}
+
+type ClientMatchRule struct {
+	ID         int64  `json:"id"`
+	ClientID   int64  `json:"client_id"`
+	HeaderName string `json:"header_name"`
+	MatchType  string `json:"match_type"`
+	MatchValue string `json:"match_value"`
 }

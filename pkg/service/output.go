@@ -264,6 +264,187 @@ func (s *OutputService) GenerateEPG(ctx context.Context) (string, error) {
 	return b.String(), nil
 }
 
+// GenerateM3UForGroups generates an M3U playlist filtered to channels in the given groups.
+// If groupIDs is empty, all enabled channels are included (same as GenerateM3U).
+func (s *OutputService) GenerateM3UForGroups(ctx context.Context, groupIDs []int64, baseURL string) (string, error) {
+	if len(groupIDs) == 0 {
+		return s.GenerateM3U(ctx)
+	}
+
+	groupSet := make(map[int64]bool, len(groupIDs))
+	for _, gid := range groupIDs {
+		groupSet[gid] = true
+	}
+
+	channels, err := s.channelRepo.List(ctx)
+	if err != nil {
+		return "", fmt.Errorf("listing channels: %w", err)
+	}
+
+	groups, err := s.channelGroupRepo.List(ctx)
+	if err != nil {
+		return "", fmt.Errorf("listing channel groups: %w", err)
+	}
+	groupNames := make(map[int64]string, len(groups))
+	for _, g := range groups {
+		groupNames[g.ID] = g.Name
+	}
+
+	var b strings.Builder
+	b.WriteString("#EXTM3U\n")
+
+	for _, ch := range channels {
+		if !ch.IsEnabled {
+			continue
+		}
+		if ch.ChannelGroupID == nil || !groupSet[*ch.ChannelGroupID] {
+			continue
+		}
+
+		b.WriteString("#EXTINF:-1")
+		b.WriteString(fmt.Sprintf(" tvg-id=\"%s\"", channelEPGID(ch)))
+		b.WriteString(fmt.Sprintf(" tvg-chno=\"%d\"", ch.ChannelNumber))
+		b.WriteString(fmt.Sprintf(" tvg-name=\"%s\"", ch.Name))
+
+		logo := ch.Logo
+		if logo == "" {
+			logo = placeholderLogo
+		}
+		b.WriteString(fmt.Sprintf(" tvg-logo=\"%s\"", logo))
+
+		if name, ok := groupNames[*ch.ChannelGroupID]; ok {
+			b.WriteString(fmt.Sprintf(" group-title=\"%s\"", name))
+		}
+
+		b.WriteString(fmt.Sprintf(",%s\n", ch.Name))
+
+		streamURL := fmt.Sprintf("%s/channel/%d", baseURL, ch.ID)
+		mode, _ := ResolveStreamMode(ctx, &ch, s.channelProfileRepo, s.streamProfileRepo, s.log)
+		if mode == "direct" {
+			if src := s.resolveSourceURL(ctx, ch.ID); src != "" {
+				streamURL = src
+			}
+		}
+		b.WriteString(streamURL + "\n")
+	}
+
+	return b.String(), nil
+}
+
+// GenerateEPGForGroups generates XMLTV EPG data filtered to channels in the given groups.
+// If groupIDs is empty, all data is included (same as GenerateEPG).
+func (s *OutputService) GenerateEPGForGroups(ctx context.Context, groupIDs []int64) (string, error) {
+	if len(groupIDs) == 0 {
+		return s.GenerateEPG(ctx)
+	}
+
+	groupSet := make(map[int64]bool, len(groupIDs))
+	for _, gid := range groupIDs {
+		groupSet[gid] = true
+	}
+
+	channels, err := s.channelRepo.List(ctx)
+	if err != nil {
+		return "", fmt.Errorf("listing channels: %w", err)
+	}
+
+	enabledTvgIDs := make(map[string]bool, len(channels))
+	var noEPGChannels []models.Channel
+	for _, ch := range channels {
+		if !ch.IsEnabled {
+			continue
+		}
+		if ch.ChannelGroupID == nil || !groupSet[*ch.ChannelGroupID] {
+			continue
+		}
+		if ch.TvgID != "" {
+			enabledTvgIDs[ch.TvgID] = true
+		} else {
+			noEPGChannels = append(noEPGChannels, ch)
+		}
+	}
+
+	epgDataList, err := s.epgDataRepo.List(ctx)
+	if err != nil {
+		return "", fmt.Errorf("listing epg data: %w", err)
+	}
+
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
+	b.WriteString(`<!DOCTYPE tv SYSTEM "xmltv.dtd">` + "\n")
+	b.WriteString(`<tv generator-info-name="tvproxy">` + "\n")
+
+	for _, epg := range epgDataList {
+		if !enabledTvgIDs[epg.ChannelID] {
+			continue
+		}
+		b.WriteString(fmt.Sprintf(`  <channel id="%s">`, xmlEscape(epg.ChannelID)))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf(`    <display-name>%s</display-name>`, xmlEscape(epg.Name)))
+		b.WriteString("\n")
+		if epg.Icon != "" {
+			b.WriteString(fmt.Sprintf(`    <icon src="%s" />`, xmlEscape(epg.Icon)))
+			b.WriteString("\n")
+		}
+		b.WriteString("  </channel>\n")
+	}
+
+	for _, ch := range noEPGChannels {
+		syntheticID := channelEPGID(ch)
+		b.WriteString(fmt.Sprintf(`  <channel id="%s">`, xmlEscape(syntheticID)))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf(`    <display-name>%s</display-name>`, xmlEscape(ch.Name)))
+		b.WriteString("\n")
+		logo := ch.Logo
+		if logo == "" {
+			logo = placeholderLogo
+		}
+		b.WriteString(fmt.Sprintf(`    <icon src="%s" />`, xmlEscape(logo)))
+		b.WriteString("\n")
+		b.WriteString("  </channel>\n")
+	}
+
+	for _, epg := range epgDataList {
+		if !enabledTvgIDs[epg.ChannelID] {
+			continue
+		}
+		programs, err := s.programDataRepo.ListByEPGDataID(ctx, epg.ID)
+		if err != nil {
+			s.log.Error().Err(err).Int64("epg_data_id", epg.ID).Msg("failed to list programs")
+			continue
+		}
+		for _, prog := range programs {
+			start := prog.Start.Format("20060102150405 -0700")
+			stop := prog.Stop.Format("20060102150405 -0700")
+			b.WriteString(fmt.Sprintf(`  <programme start="%s" stop="%s" channel="%s">`,
+				start, stop, xmlEscape(epg.ChannelID)))
+			b.WriteString("\n")
+			b.WriteString(fmt.Sprintf(`    <title>%s</title>`, xmlEscape(prog.Title)))
+			b.WriteString("\n")
+			if prog.Description != "" {
+				b.WriteString(fmt.Sprintf(`    <desc>%s</desc>`, xmlEscape(prog.Description)))
+				b.WriteString("\n")
+			}
+			if prog.Category != "" {
+				b.WriteString(fmt.Sprintf(`    <category>%s</category>`, xmlEscape(prog.Category)))
+				b.WriteString("\n")
+			}
+			if prog.EpisodeNum != "" {
+				b.WriteString(fmt.Sprintf(`    <episode-num system="onscreen">%s</episode-num>`, xmlEscape(prog.EpisodeNum)))
+				b.WriteString("\n")
+			}
+			if prog.Icon != "" {
+				b.WriteString(fmt.Sprintf(`    <icon src="%s" />`, xmlEscape(prog.Icon)))
+				b.WriteString("\n")
+			}
+			b.WriteString("  </programme>\n")
+		}
+	}
+
+	b.WriteString("</tv>\n")
+	return b.String(), nil
+}
+
 // xmlEscape escapes special characters for XML output.
 func xmlEscape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")

@@ -638,4 +638,275 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		name: "add_channel_group_to_hdhr_devices",
+		sql:  `ALTER TABLE hdhr_devices ADD COLUMN channel_group_id INTEGER`,
+	},
+	{
+		name: "create_hdhr_device_channel_groups",
+		sql: `CREATE TABLE hdhr_device_channel_groups (
+			hdhr_device_id INTEGER NOT NULL,
+			channel_group_id INTEGER NOT NULL,
+			PRIMARY KEY (hdhr_device_id, channel_group_id),
+			FOREIGN KEY (hdhr_device_id) REFERENCES hdhr_devices(id) ON DELETE CASCADE,
+			FOREIGN KEY (channel_group_id) REFERENCES channel_groups(id) ON DELETE CASCADE
+		)`,
+	},
+	{
+		name: "migrate_hdhr_device_channel_group_data",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			// Copy existing channel_group_id values into the junction table
+			rows, err := db.QueryContext(ctx, `SELECT id, channel_group_id FROM hdhr_devices WHERE channel_group_id IS NOT NULL`)
+			if err != nil {
+				return err
+			}
+			var pairs []struct {
+				deviceID int64
+				groupID  int64
+			}
+			for rows.Next() {
+				var deviceID, groupID int64
+				if err := rows.Scan(&deviceID, &groupID); err != nil {
+					rows.Close()
+					return err
+				}
+				pairs = append(pairs, struct {
+					deviceID int64
+					groupID  int64
+				}{deviceID, groupID})
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+
+			for _, p := range pairs {
+				if _, err := db.ExecContext(ctx,
+					`INSERT OR IGNORE INTO hdhr_device_channel_groups (hdhr_device_id, channel_group_id) VALUES (?, ?)`,
+					p.deviceID, p.groupID); err != nil {
+					return err
+				}
+			}
+
+			// Drop the old column (SQLite 3.35+)
+			if _, err := db.ExecContext(ctx, `ALTER TABLE hdhr_devices DROP COLUMN channel_group_id`); err != nil {
+				return err
+			}
+			return nil
+		},
+	},
+	{
+		name: "channels_logo_id_fk",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			// 1. Add logo_id FK column
+			if _, err := db.ExecContext(ctx,
+				`ALTER TABLE channels ADD COLUMN logo_id INTEGER REFERENCES logos(id) ON DELETE SET NULL`); err != nil {
+				return err
+			}
+
+			// 2. Migrate existing logo text → logo_id
+			rows, err := db.QueryContext(ctx, `SELECT id, name, logo FROM channels WHERE logo != ''`)
+			if err != nil {
+				return err
+			}
+			type chanLogo struct {
+				id   int64
+				name string
+				url  string
+			}
+			var items []chanLogo
+			for rows.Next() {
+				var cl chanLogo
+				if err := rows.Scan(&cl.id, &cl.name, &cl.url); err != nil {
+					rows.Close()
+					return err
+				}
+				items = append(items, cl)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+
+			// Deduplicate: map URL → logo ID
+			urlToLogoID := make(map[string]int64)
+			for _, cl := range items {
+				if logoID, ok := urlToLogoID[cl.url]; ok {
+					// Reuse existing logo
+					if _, err := db.ExecContext(ctx, `UPDATE channels SET logo_id = ? WHERE id = ?`, logoID, cl.id); err != nil {
+						return err
+					}
+					continue
+				}
+
+				// Check if logo with this URL already exists
+				var existingID int64
+				err := db.QueryRowContext(ctx, `SELECT id FROM logos WHERE url = ?`, cl.url).Scan(&existingID)
+				if err == nil {
+					urlToLogoID[cl.url] = existingID
+					if _, err := db.ExecContext(ctx, `UPDATE channels SET logo_id = ? WHERE id = ?`, existingID, cl.id); err != nil {
+						return err
+					}
+					continue
+				}
+
+				// Create new logo
+				res, err := db.ExecContext(ctx, `INSERT INTO logos (name, url, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)`, cl.name, cl.url)
+				if err != nil {
+					return err
+				}
+				newID, err := res.LastInsertId()
+				if err != nil {
+					return err
+				}
+				urlToLogoID[cl.url] = newID
+				if _, err := db.ExecContext(ctx, `UPDATE channels SET logo_id = ? WHERE id = ?`, newID, cl.id); err != nil {
+					return err
+				}
+			}
+
+			// 3. Drop the old logo text column
+			if _, err := db.ExecContext(ctx, `ALTER TABLE channels DROP COLUMN logo`); err != nil {
+				return err
+			}
+
+			// 4. Create index
+			if _, err := db.ExecContext(ctx, `CREATE INDEX idx_channels_logo_id ON channels(logo_id)`); err != nil {
+				return err
+			}
+
+			return nil
+		},
+	},
+	{
+		name: "create_clients_and_match_rules",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			// Create clients table
+			if _, err := db.ExecContext(ctx, `CREATE TABLE clients (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT NOT NULL,
+				priority INTEGER NOT NULL DEFAULT 0,
+				stream_profile_id INTEGER NOT NULL,
+				is_enabled INTEGER NOT NULL DEFAULT 1,
+				created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				FOREIGN KEY (stream_profile_id) REFERENCES stream_profiles(id)
+			)`); err != nil {
+				return err
+			}
+			if _, err := db.ExecContext(ctx, `CREATE INDEX idx_clients_priority ON clients(priority)`); err != nil {
+				return err
+			}
+
+			// Create client_match_rules table
+			if _, err := db.ExecContext(ctx, `CREATE TABLE client_match_rules (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				client_id INTEGER NOT NULL,
+				header_name TEXT NOT NULL,
+				match_type TEXT NOT NULL,
+				match_value TEXT NOT NULL DEFAULT '',
+				FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+			)`); err != nil {
+				return err
+			}
+			if _, err := db.ExecContext(ctx, `CREATE INDEX idx_client_match_rules_client_id ON client_match_rules(client_id)`); err != nil {
+				return err
+			}
+
+			// Seed default clients with auto-created stream profiles
+			type clientSeed struct {
+				name       string
+				priority   int
+				sourceType string
+				container  string
+				rules      []struct {
+					headerName string
+					matchType  string
+					matchValue string
+				}
+			}
+
+			seeds := []clientSeed{
+				{
+					name:       "Plex",
+					priority:   10,
+					sourceType: "m3u",
+					container:  "mpegts",
+					rules: []struct {
+						headerName string
+						matchType  string
+						matchValue string
+					}{
+						{"User-Agent", "contains", "Lavf/"},
+						{"Icy-Metadata", "exists", ""},
+					},
+				},
+				{
+					name:       "VLC",
+					priority:   20,
+					sourceType: "m3u",
+					container:  "matroska",
+					rules: []struct {
+						headerName string
+						matchType  string
+						matchValue string
+					}{
+						{"User-Agent", "contains", "VLC/"},
+					},
+				},
+				{
+					name:       "Browser",
+					priority:   100,
+					sourceType: "m3u",
+					container:  "mp4",
+					rules: []struct {
+						headerName string
+						matchType  string
+						matchValue string
+					}{
+						{"User-Agent", "contains", "Mozilla/"},
+					},
+				},
+			}
+
+			for _, s := range seeds {
+				// Create a stream profile for this client
+				args := ffmpeg.ComposeStreamProfileArgs(s.sourceType, "none", "copy", s.container)
+				res, err := db.ExecContext(ctx,
+					`INSERT INTO stream_profiles (name, stream_mode, source_type, hwaccel, video_codec, container, custom_args, command, args, is_default, is_system)
+					 VALUES (?, 'ffmpeg', ?, 'none', 'copy', ?, '', 'ffmpeg', ?, 0, 0)`,
+					s.name, s.sourceType, s.container, args)
+				if err != nil {
+					return err
+				}
+				profileID, err := res.LastInsertId()
+				if err != nil {
+					return err
+				}
+
+				// Create the client
+				res, err = db.ExecContext(ctx,
+					`INSERT INTO clients (name, priority, stream_profile_id, is_enabled) VALUES (?, ?, ?, 1)`,
+					s.name, s.priority, profileID)
+				if err != nil {
+					return err
+				}
+				clientID, err := res.LastInsertId()
+				if err != nil {
+					return err
+				}
+
+				// Create match rules
+				for _, r := range s.rules {
+					if _, err := db.ExecContext(ctx,
+						`INSERT INTO client_match_rules (client_id, header_name, match_type, match_value) VALUES (?, ?, ?, ?)`,
+						clientID, r.headerName, r.matchType, r.matchValue); err != nil {
+						return err
+					}
+				}
+			}
+
+			return nil
+		},
+	},
 }

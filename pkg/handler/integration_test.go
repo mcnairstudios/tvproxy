@@ -67,6 +67,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	hdhrDeviceRepo := repository.NewHDHRDeviceRepository(db)
 	settingsRepo := repository.NewCoreSettingsRepository(db)
 	userAgentRepo := repository.NewUserAgentRepository(db)
+	clientRepo := repository.NewClientRepository(db)
 
 	// Services
 	authService := service.NewAuthService(userRepo, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
@@ -74,7 +75,8 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamRepo, log)
 	epgService := service.NewEPGService(epgSourceRepo, epgDataRepo, programDataRepo, userAgentRepo, log)
 	settingsService := service.NewSettingsService(settingsRepo)
-	proxyService := service.NewProxyService(channelRepo, streamRepo, m3uAccountRepo, userAgentRepo, channelProfileRepo, streamProfileRepo, log)
+	clientService := service.NewClientService(clientRepo, streamProfileRepo, log)
+	proxyService := service.NewProxyService(channelRepo, streamRepo, m3uAccountRepo, userAgentRepo, channelProfileRepo, streamProfileRepo, clientService, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo, streamRepo, channelProfileRepo, streamProfileRepo, cfg, log)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, streamRepo, channelProfileRepo, streamProfileRepo, epgDataRepo, programDataRepo, cfg, log)
 
@@ -92,7 +94,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	userHandler := NewUserHandler(authService)
 	m3uAccountHandler := NewM3UAccountHandler(m3uService)
 	streamHandler := NewStreamHandler(streamRepo)
-	channelHandler := NewChannelHandler(channelService)
+	channelHandler := NewChannelHandler(channelService, logoRepo)
 	channelGroupHandler := NewChannelGroupHandler(channelGroupRepo)
 	channelProfileHandler := NewChannelProfileHandler(channelProfileRepo)
 	logoHandler := NewLogoHandler(logoRepo)
@@ -103,6 +105,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	outputHandler := NewOutputHandler(outputService)
 	settingsHandler := NewSettingsHandler(settingsService)
 	userAgentHandler := NewUserAgentHandler(userAgentRepo)
+	clientHandler := NewClientHandler(clientRepo, streamProfileRepo)
 
 	// Router (mirrors main.go)
 	r := chi.NewRouter()
@@ -181,6 +184,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 			r.Get("/", logoHandler.List)
 			r.Post("/", logoHandler.Create)
 			r.Get("/{id}", logoHandler.Get)
+			r.Put("/{id}", logoHandler.Update)
 			r.Delete("/{id}", logoHandler.Delete)
 		})
 
@@ -221,6 +225,14 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 			r.Get("/{id}", userAgentHandler.Get)
 			r.Put("/{id}", userAgentHandler.Update)
 			r.Delete("/{id}", userAgentHandler.Delete)
+		})
+
+		r.Route("/api/clients", func(r chi.Router) {
+			r.Get("/", clientHandler.List)
+			r.Post("/", clientHandler.Create)
+			r.Get("/{id}", clientHandler.Get)
+			r.Put("/{id}", clientHandler.Update)
+			r.Delete("/{id}", clientHandler.Delete)
 		})
 	})
 
@@ -639,12 +651,12 @@ func TestIntegration_StreamProfileCRUD(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		var profiles []map[string]interface{}
 		decodeResponse(t, rec, &profiles)
-		// 7 seeded by migrations (Direct, Proxy, Browser, SAT>IP Copy, M3U Copy, M3U→MP4, M3U→Matroska) + 3 created above = 10
-		assert.Len(t, profiles, 10)
+		// 7 seeded system profiles + 3 client-detection profiles (Plex, VLC, Browser) + 3 created above = 13
+		assert.Len(t, profiles, 13)
 	})
 
 	t.Run("get", func(t *testing.T) {
-		rec := doRequest(t, env, "GET", "/api/stream-profiles/8", nil, env.adminToken)
+		rec := doRequest(t, env, "GET", "/api/stream-profiles/11", nil, env.adminToken)
 		assert.Equal(t, http.StatusOK, rec.Code)
 		var profile map[string]interface{}
 		decodeResponse(t, rec, &profile)
@@ -653,7 +665,7 @@ func TestIntegration_StreamProfileCRUD(t *testing.T) {
 	})
 
 	t.Run("update", func(t *testing.T) {
-		rec := doRequest(t, env, "PUT", "/api/stream-profiles/8", map[string]interface{}{
+		rec := doRequest(t, env, "PUT", "/api/stream-profiles/11", map[string]interface{}{
 			"name": "SAT>IP NVENC AV1", "source_type": "satip", "hwaccel": "nvenc", "video_codec": "av1", "is_default": false,
 		}, env.adminToken)
 		assert.Equal(t, http.StatusOK, rec.Code)
@@ -666,7 +678,7 @@ func TestIntegration_StreamProfileCRUD(t *testing.T) {
 	})
 
 	t.Run("delete non-system profile", func(t *testing.T) {
-		rec := doRequest(t, env, "DELETE", "/api/stream-profiles/9", nil, env.adminToken)
+		rec := doRequest(t, env, "DELETE", "/api/stream-profiles/12", nil, env.adminToken)
 		assert.Equal(t, http.StatusNoContent, rec.Code)
 	})
 
@@ -776,6 +788,74 @@ func TestIntegration_LogoCRUD(t *testing.T) {
 		rec := doRequest(t, env, "DELETE", "/api/logos/1", nil, env.adminToken)
 		assert.Equal(t, http.StatusNoContent, rec.Code)
 	})
+}
+
+// =============================================================================
+// Logo → Channel FK Propagation
+// =============================================================================
+
+func TestIntegration_LogoChannelPropagation(t *testing.T) {
+	env := setupFullEnv(t)
+
+	// 1. Create a logo
+	rec := doRequest(t, env, "POST", "/api/logos/", map[string]interface{}{
+		"name": "BBC Logo", "url": "https://example.com/bbc.png",
+	}, env.adminToken)
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var logo map[string]interface{}
+	decodeResponse(t, rec, &logo)
+	logoID := logo["id"].(float64)
+
+	// 2. Create channel with logo_id
+	rec = doRequest(t, env, "POST", "/api/channels/", map[string]interface{}{
+		"name": "BBC One", "logo_id": logoID, "is_enabled": true,
+	}, env.adminToken)
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var ch map[string]interface{}
+	decodeResponse(t, rec, &ch)
+	assert.Equal(t, logoID, ch["logo_id"])
+	assert.Equal(t, "https://example.com/bbc.png", ch["logo"])
+
+	channelID := fmt.Sprintf("%.0f", ch["id"].(float64))
+
+	// 3. Update the logo URL
+	rec = doRequest(t, env, "PUT", "/api/logos/1", map[string]interface{}{
+		"name": "BBC Logo", "url": "https://example.com/bbc-hd.png",
+	}, env.adminToken)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// 4. Verify channel GET reflects the new logo URL
+	rec = doRequest(t, env, "GET", "/api/channels/"+channelID, nil, env.adminToken)
+	require.Equal(t, http.StatusOK, rec.Code)
+	decodeResponse(t, rec, &ch)
+	assert.Equal(t, "https://example.com/bbc-hd.png", ch["logo"])
+
+	// 5. Create channel with logo URL string (backward compat) — auto-creates Logo
+	rec = doRequest(t, env, "POST", "/api/channels/", map[string]interface{}{
+		"name": "ITV", "logo": "https://example.com/itv.png", "is_enabled": true,
+	}, env.adminToken)
+	require.Equal(t, http.StatusCreated, rec.Code)
+	decodeResponse(t, rec, &ch)
+	assert.NotNil(t, ch["logo_id"])
+	assert.Equal(t, "https://example.com/itv.png", ch["logo"])
+
+	// 6. Verify the Logo was auto-created
+	rec = doRequest(t, env, "GET", "/api/logos/", nil, env.adminToken)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var logos []map[string]interface{}
+	decodeResponse(t, rec, &logos)
+	assert.Len(t, logos, 2) // BBC Logo + auto-created ITV logo
+
+	// 7. Delete logo — channel logo_id should be nulled
+	rec = doRequest(t, env, "DELETE", "/api/logos/1", nil, env.adminToken)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	rec = doRequest(t, env, "GET", "/api/channels/"+channelID, nil, env.adminToken)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var chAfterDelete map[string]interface{}
+	decodeResponse(t, rec, &chAfterDelete)
+	assert.Nil(t, chAfterDelete["logo_id"])
+	assert.Nil(t, chAfterDelete["logo"])
 }
 
 // =============================================================================
@@ -1126,6 +1206,43 @@ func TestIntegration_HDHRDeviceCRUD(t *testing.T) {
 		assert.Equal(t, float64(47601), device["port"]) // auto-assigned
 	})
 
+	t.Run("create with channel groups", func(t *testing.T) {
+		// Create two channel groups
+		rec := doRequest(t, env, "POST", "/api/channel-groups/", map[string]interface{}{
+			"name": "Sports", "is_enabled": true,
+		}, env.adminToken)
+		require.Equal(t, http.StatusCreated, rec.Code)
+		var g1 map[string]interface{}
+		decodeResponse(t, rec, &g1)
+
+		rec = doRequest(t, env, "POST", "/api/channel-groups/", map[string]interface{}{
+			"name": "News", "is_enabled": true,
+		}, env.adminToken)
+		require.Equal(t, http.StatusCreated, rec.Code)
+		var g2 map[string]interface{}
+		decodeResponse(t, rec, &g2)
+
+		rec = doRequest(t, env, "POST", "/api/hdhr/devices/", map[string]interface{}{
+			"name": "Multi-Group HDHR", "device_id": "MULTI123", "device_auth": "auth",
+			"tuner_count": 2, "is_enabled": true,
+			"channel_group_ids": []float64{g1["id"].(float64), g2["id"].(float64)},
+		}, env.adminToken)
+		assert.Equal(t, http.StatusCreated, rec.Code)
+		var device map[string]interface{}
+		decodeResponse(t, rec, &device)
+		assert.NotNil(t, device["channel_group_ids"])
+		groupIDs := device["channel_group_ids"].([]interface{})
+		assert.Len(t, groupIDs, 2)
+
+		// Verify via GET
+		id := fmt.Sprintf("%.0f", device["id"].(float64))
+		rec = doRequest(t, env, "GET", "/api/hdhr/devices/"+id, nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		decodeResponse(t, rec, &device)
+		groupIDs = device["channel_group_ids"].([]interface{})
+		assert.Len(t, groupIDs, 2)
+	})
+
 	t.Run("create missing fields", func(t *testing.T) {
 		rec := doRequest(t, env, "POST", "/api/hdhr/devices/", map[string]interface{}{
 			"name": "Missing DeviceID",
@@ -1140,12 +1257,13 @@ func TestIntegration_HDHRDeviceCRUD(t *testing.T) {
 
 	t.Run("update", func(t *testing.T) {
 		rec := doRequest(t, env, "PUT", "/api/hdhr/devices/1", map[string]interface{}{
-			"name":             "Updated HDHR",
-			"device_id":        "12345678",
-			"firmware_version": "20240101",
-			"tuner_count":      4,
-			"port":             47605,
-			"is_enabled":       true,
+			"name":              "Updated HDHR",
+			"device_id":         "12345678",
+			"firmware_version":  "20240101",
+			"tuner_count":       4,
+			"port":              47605,
+			"is_enabled":        true,
+			"channel_group_ids": []float64{},
 		}, env.adminToken)
 		assert.Equal(t, http.StatusOK, rec.Code)
 		var device map[string]interface{}
@@ -1160,7 +1278,7 @@ func TestIntegration_HDHRDeviceCRUD(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		var devices []map[string]interface{}
 		decodeResponse(t, rec, &devices)
-		assert.Len(t, devices, 1)
+		assert.Len(t, devices, 2) // original + multi-group device
 	})
 
 	t.Run("delete", func(t *testing.T) {
@@ -1194,6 +1312,7 @@ func TestIntegration_HDHRDiscovery(t *testing.T) {
 		rec := doRequest(t, env, "POST", "/api/hdhr/devices/", map[string]interface{}{
 			"name": "Test HDHR", "device_id": "ABCD1234", "device_auth": "auth",
 			"firmware_version": "20240101", "tuner_count": 2, "port": 47601, "is_enabled": true,
+			"channel_group_ids": []float64{},
 		}, env.adminToken)
 		require.Equal(t, http.StatusCreated, rec.Code)
 
@@ -1490,10 +1609,11 @@ func TestIntegration_FullUserWorkflow(t *testing.T) {
 	}, operatorToken)
 	require.Equal(t, http.StatusCreated, rec.Code)
 
-	// Step 11: Create an HDHR device
+	// Step 11: Create an HDHR device with channel groups
 	rec = doRequest(t, env, "POST", "/api/hdhr/devices/", map[string]interface{}{
 		"name": "TVProxy Tuner", "device_id": "ABCDEF12", "device_auth": "auth123",
 		"firmware_version": "20240101", "tuner_count": 4, "port": 47601, "is_enabled": true,
+		"channel_group_ids": []float64{1, 2},
 	}, operatorToken)
 	require.Equal(t, http.StatusCreated, rec.Code)
 
@@ -1721,5 +1841,146 @@ func TestIntegration_EdgeCases(t *testing.T) {
 			"name": "Ghost",
 		}, env.adminToken)
 		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("update non-existent client", func(t *testing.T) {
+		rec := doRequest(t, env, "PUT", "/api/clients/999", map[string]interface{}{
+			"name": "Ghost",
+		}, env.adminToken)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+}
+
+// =============================================================================
+// Client CRUD
+// =============================================================================
+
+func TestIntegration_ClientCRUD(t *testing.T) {
+	env := setupFullEnv(t)
+
+	t.Run("list seeded clients", func(t *testing.T) {
+		rec := doRequest(t, env, "GET", "/api/clients/", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var clients []map[string]interface{}
+		decodeResponse(t, rec, &clients)
+		// 3 seeded: Plex, VLC, Browser
+		assert.Len(t, clients, 3)
+		assert.Equal(t, "Plex", clients[0]["name"])
+		assert.Equal(t, "VLC", clients[1]["name"])
+		assert.Equal(t, "Browser", clients[2]["name"])
+	})
+
+	t.Run("get seeded client with rules", func(t *testing.T) {
+		rec := doRequest(t, env, "GET", "/api/clients/1", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var client map[string]interface{}
+		decodeResponse(t, rec, &client)
+		assert.Equal(t, "Plex", client["name"])
+		assert.Equal(t, float64(10), client["priority"])
+		assert.Equal(t, true, client["is_enabled"])
+		rules := client["match_rules"].([]interface{})
+		assert.Len(t, rules, 2)
+	})
+
+	t.Run("create with auto profile", func(t *testing.T) {
+		rec := doRequest(t, env, "POST", "/api/clients/", map[string]interface{}{
+			"name": "Oculus Quest", "priority": 15, "is_enabled": true,
+			"match_rules": []map[string]interface{}{
+				{"header_name": "User-Agent", "match_type": "contains", "match_value": "OculusBrowser/"},
+			},
+		}, env.adminToken)
+		assert.Equal(t, http.StatusCreated, rec.Code)
+		var client map[string]interface{}
+		decodeResponse(t, rec, &client)
+		assert.Equal(t, "Oculus Quest", client["name"])
+		assert.Equal(t, float64(15), client["priority"])
+		assert.NotZero(t, client["stream_profile_id"])
+		rules := client["match_rules"].([]interface{})
+		assert.Len(t, rules, 1)
+	})
+
+	t.Run("create missing name", func(t *testing.T) {
+		rec := doRequest(t, env, "POST", "/api/clients/", map[string]interface{}{
+			"priority": 50,
+			"match_rules": []map[string]interface{}{
+				{"header_name": "User-Agent", "match_type": "contains", "match_value": "test"},
+			},
+		}, env.adminToken)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("create missing rules", func(t *testing.T) {
+		rec := doRequest(t, env, "POST", "/api/clients/", map[string]interface{}{
+			"name": "Bad Client", "priority": 50,
+		}, env.adminToken)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("create with invalid match_type", func(t *testing.T) {
+		rec := doRequest(t, env, "POST", "/api/clients/", map[string]interface{}{
+			"name": "Bad Match", "priority": 50,
+			"match_rules": []map[string]interface{}{
+				{"header_name": "User-Agent", "match_type": "regex", "match_value": ".*"},
+			},
+		}, env.adminToken)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("create with missing match_value for non-exists", func(t *testing.T) {
+		rec := doRequest(t, env, "POST", "/api/clients/", map[string]interface{}{
+			"name": "Missing Value", "priority": 50,
+			"match_rules": []map[string]interface{}{
+				{"header_name": "User-Agent", "match_type": "contains"},
+			},
+		}, env.adminToken)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("update client", func(t *testing.T) {
+		newPriority := 25
+		rec := doRequest(t, env, "PUT", "/api/clients/4", map[string]interface{}{
+			"name": "Oculus Quest 2", "priority": newPriority,
+			"match_rules": []map[string]interface{}{
+				{"header_name": "User-Agent", "match_type": "contains", "match_value": "OculusBrowser/"},
+				{"header_name": "Accept", "match_type": "exists"},
+			},
+		}, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var client map[string]interface{}
+		decodeResponse(t, rec, &client)
+		assert.Equal(t, "Oculus Quest 2", client["name"])
+		assert.Equal(t, float64(25), client["priority"])
+		rules := client["match_rules"].([]interface{})
+		assert.Len(t, rules, 2)
+	})
+
+	t.Run("delete client cleans up profile", func(t *testing.T) {
+		// Get the profile ID before deleting
+		rec := doRequest(t, env, "GET", "/api/clients/4", nil, env.adminToken)
+		require.Equal(t, http.StatusOK, rec.Code)
+		var client map[string]interface{}
+		decodeResponse(t, rec, &client)
+		profileID := fmt.Sprintf("%.0f", client["stream_profile_id"].(float64))
+
+		// Delete the client
+		rec = doRequest(t, env, "DELETE", "/api/clients/4", nil, env.adminToken)
+		assert.Equal(t, http.StatusNoContent, rec.Code)
+
+		// Verify client is gone
+		rec = doRequest(t, env, "GET", "/api/clients/4", nil, env.adminToken)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+
+		// Verify orphaned profile was cleaned up
+		rec = doRequest(t, env, "GET", "/api/stream-profiles/"+profileID, nil, env.adminToken)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("list after create and delete", func(t *testing.T) {
+		rec := doRequest(t, env, "GET", "/api/clients/", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var clients []map[string]interface{}
+		decodeResponse(t, rec, &clients)
+		// 3 seeded remain (Oculus Quest was deleted)
+		assert.Len(t, clients, 3)
 	})
 }

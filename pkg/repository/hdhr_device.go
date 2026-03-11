@@ -59,6 +59,11 @@ func (r *HDHRDeviceRepository) GetByID(ctx context.Context, id int64) (*models.H
 	if profileID.Valid {
 		device.ChannelProfileID = &profileID.Int64
 	}
+	groupIDs, err := r.GetChannelGroups(ctx, device.ID)
+	if err != nil {
+		return nil, fmt.Errorf("getting channel groups for device: %w", err)
+	}
+	device.ChannelGroupIDs = groupIDs
 	return device, nil
 }
 
@@ -82,6 +87,11 @@ func (r *HDHRDeviceRepository) GetByDeviceID(ctx context.Context, deviceID strin
 	if profileID.Valid {
 		device.ChannelProfileID = &profileID.Int64
 	}
+	groupIDs, err := r.GetChannelGroups(ctx, device.ID)
+	if err != nil {
+		return nil, fmt.Errorf("getting channel groups for device: %w", err)
+	}
+	device.ChannelGroupIDs = groupIDs
 	return device, nil
 }
 
@@ -114,6 +124,16 @@ func (r *HDHRDeviceRepository) List(ctx context.Context) ([]models.HDHRDevice, e
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating hdhr devices: %w", err)
 	}
+
+	// Hydrate channel group IDs for all devices
+	for i := range devices {
+		groupIDs, err := r.GetChannelGroups(ctx, devices[i].ID)
+		if err != nil {
+			return nil, fmt.Errorf("getting channel groups for device %d: %w", devices[i].ID, err)
+		}
+		devices[i].ChannelGroupIDs = groupIDs
+	}
+
 	return devices, nil
 }
 
@@ -149,4 +169,44 @@ func (r *HDHRDeviceRepository) NextAvailablePort(ctx context.Context) (int, erro
 		return 0, fmt.Errorf("getting next available port: %w", err)
 	}
 	return port, nil
+}
+
+// SetChannelGroups replaces all channel group associations for a device.
+func (r *HDHRDeviceRepository) SetChannelGroups(ctx context.Context, deviceID int64, groupIDs []int64) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM hdhr_device_channel_groups WHERE hdhr_device_id = ?`, deviceID); err != nil {
+		return fmt.Errorf("clearing channel groups for device: %w", err)
+	}
+	for _, gid := range groupIDs {
+		if _, err := r.db.ExecContext(ctx,
+			`INSERT INTO hdhr_device_channel_groups (hdhr_device_id, channel_group_id) VALUES (?, ?)`,
+			deviceID, gid); err != nil {
+			return fmt.Errorf("inserting channel group for device: %w", err)
+		}
+	}
+	return nil
+}
+
+// GetChannelGroups returns the channel group IDs associated with a device.
+func (r *HDHRDeviceRepository) GetChannelGroups(ctx context.Context, deviceID int64) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT channel_group_id FROM hdhr_device_channel_groups WHERE hdhr_device_id = ? ORDER BY channel_group_id`,
+		deviceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("getting channel groups for device: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning channel group id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating channel group ids: %w", err)
+	}
+	return ids, nil
 }

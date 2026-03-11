@@ -21,9 +21,9 @@ func NewChannelRepository(db *database.DB) *ChannelRepository {
 func (r *ChannelRepository) Create(ctx context.Context, channel *models.Channel) error {
 	now := time.Now()
 	result, err := r.db.ExecContext(ctx,
-		`INSERT INTO channels (channel_number, name, logo, tvg_id, channel_group_id, channel_profile_id, is_enabled, created_at, updated_at)
+		`INSERT INTO channels (channel_number, name, logo_id, tvg_id, channel_group_id, channel_profile_id, is_enabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		channel.ChannelNumber, channel.Name, channel.Logo, channel.TvgID,
+		channel.ChannelNumber, channel.Name, channel.LogoID, channel.TvgID,
 		channel.ChannelGroupID, channel.ChannelProfileID, channel.IsEnabled, now, now,
 	)
 	if err != nil {
@@ -41,13 +41,14 @@ func (r *ChannelRepository) Create(ctx context.Context, channel *models.Channel)
 
 func (r *ChannelRepository) GetByID(ctx context.Context, id int64) (*models.Channel, error) {
 	channel := &models.Channel{}
+	var logoID sql.NullInt64
 	var groupID sql.NullInt64
 	var profileID sql.NullInt64
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, channel_number, name, logo, tvg_id, channel_group_id, channel_profile_id, is_enabled, created_at, updated_at
-		FROM channels WHERE id = ?`, id,
+		`SELECT c.id, c.channel_number, c.name, c.logo_id, COALESCE(l.url, ''), c.tvg_id, c.channel_group_id, c.channel_profile_id, c.is_enabled, c.created_at, c.updated_at
+		FROM channels c LEFT JOIN logos l ON c.logo_id = l.id WHERE c.id = ?`, id,
 	).Scan(
-		&channel.ID, &channel.ChannelNumber, &channel.Name, &channel.Logo,
+		&channel.ID, &channel.ChannelNumber, &channel.Name, &logoID, &channel.Logo,
 		&channel.TvgID, &groupID, &profileID,
 		&channel.IsEnabled, &channel.CreatedAt, &channel.UpdatedAt,
 	)
@@ -56,6 +57,9 @@ func (r *ChannelRepository) GetByID(ctx context.Context, id int64) (*models.Chan
 			return nil, fmt.Errorf("channel not found: %w", err)
 		}
 		return nil, fmt.Errorf("getting channel by id: %w", err)
+	}
+	if logoID.Valid {
+		channel.LogoID = &logoID.Int64
 	}
 	if groupID.Valid {
 		channel.ChannelGroupID = &groupID.Int64
@@ -68,13 +72,14 @@ func (r *ChannelRepository) GetByID(ctx context.Context, id int64) (*models.Chan
 
 func (r *ChannelRepository) GetByNumber(ctx context.Context, number int) (*models.Channel, error) {
 	channel := &models.Channel{}
+	var logoID sql.NullInt64
 	var groupID sql.NullInt64
 	var profileID sql.NullInt64
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, channel_number, name, logo, tvg_id, channel_group_id, channel_profile_id, is_enabled, created_at, updated_at
-		FROM channels WHERE channel_number = ?`, number,
+		`SELECT c.id, c.channel_number, c.name, c.logo_id, COALESCE(l.url, ''), c.tvg_id, c.channel_group_id, c.channel_profile_id, c.is_enabled, c.created_at, c.updated_at
+		FROM channels c LEFT JOIN logos l ON c.logo_id = l.id WHERE c.channel_number = ?`, number,
 	).Scan(
-		&channel.ID, &channel.ChannelNumber, &channel.Name, &channel.Logo,
+		&channel.ID, &channel.ChannelNumber, &channel.Name, &logoID, &channel.Logo,
 		&channel.TvgID, &groupID, &profileID,
 		&channel.IsEnabled, &channel.CreatedAt, &channel.UpdatedAt,
 	)
@@ -83,6 +88,9 @@ func (r *ChannelRepository) GetByNumber(ctx context.Context, number int) (*model
 			return nil, fmt.Errorf("channel not found: %w", err)
 		}
 		return nil, fmt.Errorf("getting channel by number: %w", err)
+	}
+	if logoID.Valid {
+		channel.LogoID = &logoID.Int64
 	}
 	if groupID.Valid {
 		channel.ChannelGroupID = &groupID.Int64
@@ -95,8 +103,8 @@ func (r *ChannelRepository) GetByNumber(ctx context.Context, number int) (*model
 
 func (r *ChannelRepository) List(ctx context.Context) ([]models.Channel, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, channel_number, name, logo, tvg_id, channel_group_id, channel_profile_id, is_enabled, created_at, updated_at
-		FROM channels ORDER BY channel_number`,
+		`SELECT c.id, c.channel_number, c.name, c.logo_id, COALESCE(l.url, ''), c.tvg_id, c.channel_group_id, c.channel_profile_id, c.is_enabled, c.created_at, c.updated_at
+		FROM channels c LEFT JOIN logos l ON c.logo_id = l.id ORDER BY c.channel_number`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing channels: %w", err)
@@ -106,14 +114,18 @@ func (r *ChannelRepository) List(ctx context.Context) ([]models.Channel, error) 
 	var channels []models.Channel
 	for rows.Next() {
 		var c models.Channel
+		var logoID sql.NullInt64
 		var groupID sql.NullInt64
 		var profileID sql.NullInt64
 		if err := rows.Scan(
-			&c.ID, &c.ChannelNumber, &c.Name, &c.Logo, &c.TvgID,
+			&c.ID, &c.ChannelNumber, &c.Name, &logoID, &c.Logo, &c.TvgID,
 			&groupID, &profileID,
 			&c.IsEnabled, &c.CreatedAt, &c.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning channel: %w", err)
+		}
+		if logoID.Valid {
+			c.LogoID = &logoID.Int64
 		}
 		if groupID.Valid {
 			c.ChannelGroupID = &groupID.Int64
@@ -132,9 +144,9 @@ func (r *ChannelRepository) List(ctx context.Context) ([]models.Channel, error) 
 func (r *ChannelRepository) Update(ctx context.Context, channel *models.Channel) error {
 	now := time.Now()
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE channels SET channel_number = ?, name = ?, logo = ?, tvg_id = ?, channel_group_id = ?, channel_profile_id = ?, is_enabled = ?, updated_at = ?
+		`UPDATE channels SET channel_number = ?, name = ?, logo_id = ?, tvg_id = ?, channel_group_id = ?, channel_profile_id = ?, is_enabled = ?, updated_at = ?
 		WHERE id = ?`,
-		channel.ChannelNumber, channel.Name, channel.Logo, channel.TvgID,
+		channel.ChannelNumber, channel.Name, channel.LogoID, channel.TvgID,
 		channel.ChannelGroupID, channel.ChannelProfileID, channel.IsEnabled, now, channel.ID,
 	)
 	if err != nil {

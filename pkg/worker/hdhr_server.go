@@ -220,13 +220,33 @@ func (w *HDHRServerWorker) buildRouter(device models.HDHRDevice, baseURL string)
 		xml.NewEncoder(rw).Encode(deviceXML)
 	})
 
-	// Shared channel proxy and output routes
+	// Shared channel proxy route
 	proxyHandler := handler.NewProxyHandler(w.proxyService, w.log)
-	outputHandler := handler.NewOutputHandler(w.outputService)
-
 	r.Get("/channel/{channelID}", proxyHandler.Stream)
-	r.Get("/output/m3u", outputHandler.M3U)
-	r.Get("/output/epg", outputHandler.EPG)
+
+	// Device-specific filtered M3U/EPG output
+	r.Get("/output/m3u", func(rw http.ResponseWriter, req *http.Request) {
+		content, err := w.outputService.GenerateM3UForGroups(req.Context(), device.ChannelGroupIDs, baseURL)
+		if err != nil {
+			http.Error(rw, "failed to generate m3u", http.StatusInternalServerError)
+			return
+		}
+		rw.Header().Set("Content-Type", "audio/x-mpegurl")
+		rw.Header().Set("Content-Disposition", "attachment; filename=\"playlist.m3u\"")
+		rw.WriteHeader(http.StatusOK)
+		rw.Write([]byte(content))
+	})
+	r.Get("/output/epg", func(rw http.ResponseWriter, req *http.Request) {
+		content, err := w.outputService.GenerateEPGForGroups(req.Context(), device.ChannelGroupIDs)
+		if err != nil {
+			http.Error(rw, "failed to generate epg", http.StatusInternalServerError)
+			return
+		}
+		rw.Header().Set("Content-Type", "application/xml")
+		rw.Header().Set("Content-Disposition", "attachment; filename=\"epg.xml\"")
+		rw.WriteHeader(http.StatusOK)
+		rw.Write([]byte(content))
+	})
 
 	return r
 }

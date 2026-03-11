@@ -13,17 +13,23 @@ import (
 func TestChannelCRUD(t *testing.T) {
 	db := setupTestDB(t)
 	repo := NewChannelRepository(db)
+	logoRepo := NewLogoRepository(db)
 	ctx := context.Background()
+
+	// Create a logo first
+	logo := &models.Logo{Name: "Test Logo", URL: "http://example.com/logo.png"}
+	err := logoRepo.Create(ctx, logo)
+	require.NoError(t, err)
 
 	// Create
 	channel := &models.Channel{
 		ChannelNumber: 1,
 		Name:          "Test Channel",
-		Logo:          "http://example.com/logo.png",
+		LogoID:        &logo.ID,
 		TvgID:         "test.channel",
 		IsEnabled:     true,
 	}
-	err := repo.Create(ctx, channel)
+	err = repo.Create(ctx, channel)
 	require.NoError(t, err)
 	assert.NotZero(t, channel.ID)
 	assert.False(t, channel.CreatedAt.IsZero())
@@ -35,6 +41,8 @@ func TestChannelCRUD(t *testing.T) {
 	assert.Equal(t, channel.ID, fetched.ID)
 	assert.Equal(t, 1, fetched.ChannelNumber)
 	assert.Equal(t, "Test Channel", fetched.Name)
+	require.NotNil(t, fetched.LogoID)
+	assert.Equal(t, logo.ID, *fetched.LogoID)
 	assert.Equal(t, "http://example.com/logo.png", fetched.Logo)
 	assert.Equal(t, "test.channel", fetched.TvgID)
 	assert.True(t, fetched.IsEnabled)
@@ -46,9 +54,13 @@ func TestChannelCRUD(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, channel.ID, fetchedByNum.ID)
 
-	// Update
+	// Update logo URL
+	logo2 := &models.Logo{Name: "New Logo", URL: "http://example.com/newlogo.png"}
+	err = logoRepo.Create(ctx, logo2)
+	require.NoError(t, err)
+
 	channel.Name = "Updated Channel"
-	channel.Logo = "http://example.com/newlogo.png"
+	channel.LogoID = &logo2.ID
 	channel.TvgID = "updated.channel"
 	channel.IsEnabled = false
 	err = repo.Update(ctx, channel)

@@ -271,9 +271,48 @@ func (s *HDHRService) GetDiscoverDataForDevice(ctx context.Context, device *mode
 	}, nil
 }
 
-// GetLineupForDevice returns lineup.json using the given device's baseURL.
+// GetLineupForDevice returns lineup.json for a specific device,
+// filtering channels by ChannelGroupID if set.
 func (s *HDHRService) GetLineupForDevice(ctx context.Context, device *models.HDHRDevice, baseURL string) ([]LineupEntry, error) {
-	return s.GetLineup(ctx, baseURL)
+	channels, err := s.channelRepo.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing channels: %w", err)
+	}
+
+	lineup := make([]LineupEntry, 0, len(channels))
+	for _, ch := range channels {
+		if !ch.IsEnabled {
+			continue
+		}
+
+		// Filter by channel groups if device has any set
+		if len(device.ChannelGroupIDs) > 0 {
+			groupSet := make(map[int64]bool, len(device.ChannelGroupIDs))
+			for _, gid := range device.ChannelGroupIDs {
+				groupSet[gid] = true
+			}
+			if ch.ChannelGroupID == nil || !groupSet[*ch.ChannelGroupID] {
+				continue
+			}
+		}
+
+		streamURL := fmt.Sprintf("%s/channel/%d", baseURL, ch.ID)
+
+		mode, _ := ResolveStreamMode(ctx, &ch, s.channelProfileRepo, s.streamProfileRepo, s.log)
+		if mode == "direct" {
+			if src := s.resolveSourceURL(ctx, ch.ID); src != "" {
+				streamURL = src
+			}
+		}
+
+		lineup = append(lineup, LineupEntry{
+			GuideNumber: strconv.Itoa(ch.ChannelNumber),
+			GuideName:   ch.Name,
+			URL:         streamURL,
+		})
+	}
+
+	return lineup, nil
 }
 
 // GetDeviceXMLForDevice returns device.xml for a specific device.

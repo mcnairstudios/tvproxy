@@ -16,6 +16,7 @@ type HDHRHandler struct {
 	hdhrService    *service.HDHRService
 	hdhrDeviceRepo interface {
 		NextAvailablePort(ctx context.Context) (int, error)
+		SetChannelGroups(ctx context.Context, deviceID int64, groupIDs []int64) error
 	}
 	proxyService *service.ProxyService
 	cfg          *config.Config
@@ -24,6 +25,7 @@ type HDHRHandler struct {
 // NewHDHRHandler creates a new HDHRHandler.
 func NewHDHRHandler(hdhrService *service.HDHRService, hdhrDeviceRepo interface {
 	NextAvailablePort(ctx context.Context) (int, error)
+	SetChannelGroups(ctx context.Context, deviceID int64, groupIDs []int64) error
 }, proxyService *service.ProxyService, cfg *config.Config) *HDHRHandler {
 	return &HDHRHandler{
 		hdhrService:    hdhrService,
@@ -114,14 +116,15 @@ func (h *HDHRHandler) ListDevices(w http.ResponseWriter, r *http.Request) {
 // CreateDevice creates a new HDHR device.
 func (h *HDHRHandler) CreateDevice(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name             string `json:"name"`
-		DeviceID         string `json:"device_id"`
-		DeviceAuth       string `json:"device_auth"`
-		FirmwareVersion  string `json:"firmware_version"`
-		TunerCount       int    `json:"tuner_count"`
-		Port             int    `json:"port"`
-		ChannelProfileID *int64 `json:"channel_profile_id"`
-		IsEnabled        bool   `json:"is_enabled"`
+		Name             string  `json:"name"`
+		DeviceID         string  `json:"device_id"`
+		DeviceAuth       string  `json:"device_auth"`
+		FirmwareVersion  string  `json:"firmware_version"`
+		TunerCount       int     `json:"tuner_count"`
+		Port             int     `json:"port"`
+		ChannelProfileID *int64  `json:"channel_profile_id"`
+		ChannelGroupIDs  []int64 `json:"channel_group_ids"`
+		IsEnabled        bool    `json:"is_enabled"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -160,6 +163,14 @@ func (h *HDHRHandler) CreateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.ChannelGroupIDs) > 0 {
+		if err := h.hdhrDeviceRepo.SetChannelGroups(r.Context(), device.ID, req.ChannelGroupIDs); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to set channel groups")
+			return
+		}
+		device.ChannelGroupIDs = req.ChannelGroupIDs
+	}
+
 	respondJSON(w, http.StatusCreated, device)
 }
 
@@ -195,14 +206,15 @@ func (h *HDHRHandler) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name             string `json:"name"`
-		DeviceID         string `json:"device_id"`
-		DeviceAuth       string `json:"device_auth"`
-		FirmwareVersion  string `json:"firmware_version"`
-		TunerCount       int    `json:"tuner_count"`
-		Port             int    `json:"port"`
-		ChannelProfileID *int64 `json:"channel_profile_id"`
-		IsEnabled        bool   `json:"is_enabled"`
+		Name             string  `json:"name"`
+		DeviceID         string  `json:"device_id"`
+		DeviceAuth       string  `json:"device_auth"`
+		FirmwareVersion  string  `json:"firmware_version"`
+		TunerCount       int     `json:"tuner_count"`
+		Port             int     `json:"port"`
+		ChannelProfileID *int64  `json:"channel_profile_id"`
+		ChannelGroupIDs  []int64 `json:"channel_group_ids"`
+		IsEnabled        bool    `json:"is_enabled"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -228,6 +240,12 @@ func (h *HDHRHandler) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to update hdhr device")
 		return
 	}
+
+	if err := h.hdhrDeviceRepo.SetChannelGroups(r.Context(), device.ID, req.ChannelGroupIDs); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to set channel groups")
+		return
+	}
+	device.ChannelGroupIDs = req.ChannelGroupIDs
 
 	respondJSON(w, http.StatusOK, device)
 }

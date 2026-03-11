@@ -73,7 +73,36 @@ func (r *LogoRepository) List(ctx context.Context) ([]models.Logo, error) {
 	return logos, nil
 }
 
+func (r *LogoRepository) Update(ctx context.Context, logo *models.Logo) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE logos SET name = ?, url = ? WHERE id = ?`,
+		logo.Name, logo.URL, logo.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("updating logo: %w", err)
+	}
+	return nil
+}
+
+func (r *LogoRepository) GetByURL(ctx context.Context, url string) (*models.Logo, error) {
+	logo := &models.Logo{}
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, name, url, created_at FROM logos WHERE url = ?`, url,
+	).Scan(&logo.ID, &logo.Name, &logo.URL, &logo.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting logo by url: %w", err)
+	}
+	return logo, nil
+}
+
 func (r *LogoRepository) Delete(ctx context.Context, id int64) error {
+	// Clear channel references first (SQLite ALTER TABLE FK constraints aren't enforced)
+	if _, err := r.db.ExecContext(ctx, `UPDATE channels SET logo_id = NULL WHERE logo_id = ?`, id); err != nil {
+		return fmt.Errorf("clearing channel logo references: %w", err)
+	}
 	_, err := r.db.ExecContext(ctx, `DELETE FROM logos WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting logo: %w", err)

@@ -82,7 +82,7 @@ func (w *SSDPWorker) syncAdvertisers(ctx context.Context) {
 	for id, adv := range w.advertisers {
 		dev, ok := desired[id]
 		if !ok || dev.Port != adv.port {
-			w.log.Info().Int64("device_id", id).Msg("stopping SSDP advertiser")
+			w.log.Debug().Int64("device_id", id).Msg("stopping SSDP advertiser")
 			adv.ad.Bye()
 			adv.ad.Close()
 			adv.cancel()
@@ -111,7 +111,7 @@ func (w *SSDPWorker) startAdvertiser(ctx context.Context, device *models.HDHRDev
 	location := fmt.Sprintf("http://%s:%d/device.xml", host, device.Port)
 	usn := fmt.Sprintf("uuid:%s::upnp:rootdevice", device.DeviceID)
 
-	w.log.Info().
+	w.log.Debug().
 		Str("device", device.Name).
 		Str("device_id", device.DeviceID).
 		Str("location", location).
@@ -156,11 +156,11 @@ func (w *SSDPWorker) extractHost() string {
 
 func (w *SSDPWorker) stopAll() {
 	for id, adv := range w.advertisers {
-		w.log.Info().Int64("device_id", id).Msg("stopping SSDP advertiser")
+		w.log.Debug().Int64("device_id", id).Msg("stopping SSDP advertiser")
 		adv.ad.Bye()
 		adv.ad.Close()
 		adv.cancel()
 		delete(w.advertisers, id)
 	}
-	w.log.Info().Msg("all SSDP advertisers stopped")
+	w.log.Debug().Msg("all SSDP advertisers stopped")
 }
