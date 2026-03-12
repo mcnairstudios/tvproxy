@@ -134,19 +134,32 @@
 
   // ─── Data Cache Utility ───────────────────────────────────────────────
   class DataCache {
-    constructor({ loader, searchKeys }) {
+    constructor({ loader, searchKeys, label }) {
       this._loader = loader;
       this._searchKeys = searchKeys;
       this._data = null;
       this._index = null;
+      this._promise = null;
+      this.label = label || 'Data';
+      this.state = 'idle'; // idle | loading | ready
+      this.count = 0;
     }
 
     async getAll() {
-      if (!this._data) {
+      if (this._data) return this._data;
+      if (this._promise) return this._promise;
+      this.state = 'loading';
+      DataCache._notify();
+      this._promise = (async () => {
         try { this._data = await this._loader(); } catch { this._data = []; }
         this._buildIndex();
-      }
-      return this._data;
+        this.state = 'ready';
+        this.count = this._data.length;
+        this._promise = null;
+        DataCache._notify();
+        return this._data;
+      })();
+      return this._promise;
     }
 
     _buildIndex() {
@@ -182,23 +195,42 @@
     invalidate() {
       this._data = null;
       this._index = null;
+      this._promise = null;
+      this.state = 'idle';
+      this.count = 0;
+      DataCache._notify();
     }
   }
+  DataCache._listeners = [];
+  DataCache.onChange = function(fn) { DataCache._listeners.push(fn); };
+  DataCache._notify = function() { DataCache._listeners.forEach(function(fn) { fn(); }); };
 
   // ─── Data Caches ──────────────────────────────────────────────────────
   const epgCache = new DataCache({
+    label: 'EPG',
     loader: () => api.get('/api/epg/data'),
     searchKeys: ['name', 'channel_id'],
   });
 
   const logosCache = new DataCache({
+    label: 'Logos',
     loader: () => api.get('/api/logos'),
     searchKeys: ['name', 'url'],
   });
 
   const streamsCache = new DataCache({
-    loader: () => api.get('/api/streams'),
-    searchKeys: ['name', 'group'],
+    label: 'Streams',
+    loader: async () => {
+      const [streams, accounts] = await Promise.all([
+        api.get('/api/streams'),
+        api.get('/api/m3u/accounts').catch(() => []),
+      ]);
+      const nameMap = {};
+      accounts.forEach(a => { nameMap[a.id] = a.name; });
+      streams.forEach(s => { s._display_name = (nameMap[s.m3u_account_id] || 'Unknown') + '/' + s.name; });
+      return streams;
+    },
+    searchKeys: ['_display_name', 'group'],
   });
 
   // ─── Router ───────────────────────────────────────────────────────────
@@ -288,6 +320,8 @@
         try {
           await auth.login(usernameInput.value, passwordInput.value);
           render();
+          rebuildStreamNav();
+          streamsCache.getAll(); // pre-warm stream data while user views dashboard
         } catch (err) {
           errorEl.textContent = err.message;
           errorEl.classList.add('visible');
@@ -322,7 +356,7 @@
   }
 
   // ─── Navigation ───────────────────────────────────────────────────────
-  const navItems = [
+  let navItems = [
     { section: 'Overview' },
     { id: 'dashboard', label: 'Dashboard', icon: '\u2302', tip: 'Overview of your TVProxy system status' },
     { section: 'Sources' },
@@ -331,15 +365,14 @@
     { section: 'Channels' },
     { id: 'channels', label: 'Channels', icon: '\ud83d\udcfa', tip: 'Define your custom channels and assign streams and EPG data' },
     { id: 'channel-groups', label: 'Channel Groups', icon: '\ud83d\udcc2', tip: 'Organize channels into groups like Sports, Entertainment, News' },
+    { id: 'epg-guide', label: 'EPG Guide', icon: '\ud83d\udcf0', tip: 'TV programme guide grid for your channels' },
     { id: 'channel-profiles', label: 'Channel Profiles', icon: '\u2699', tip: 'Control which channels are exposed to each HDHR device' },
     { section: 'Configuration' },
     { id: 'stream-profiles', label: 'Stream Profiles', icon: '\ud83d\udd27', tip: 'Configure transcoding profiles for stream processing' },
     { id: 'hdhr-devices', label: 'HDHR Devices', icon: '\ud83d\udce1', tip: 'Virtual HDHomeRun devices for Plex, Jellyfin, and Emby' },
-    { id: 'user-agents', label: 'User Agents', icon: '\ud83c\udf10', tip: 'User-Agent strings sent when fetching upstream M3U and EPG data' },
     { id: 'clients', label: 'Client Detection', icon: '\ud83d\udd0d', tip: 'Auto-detect players by HTTP headers and assign stream profiles' },
     { id: 'logos', label: 'Logos', icon: '\ud83d\uddbc', tip: 'Saved channel logos for quick reuse' },
-    { section: 'Debug' },
-    { id: 'streams', label: 'Streams', icon: '\u25b6', tip: 'Read-only view of all streams parsed from your M3U sources' },
+    { section: 'Streams' },
     { section: 'System' },
     { id: 'users', label: 'Users', icon: '\ud83d\udc65', tip: 'Manage admin and user accounts' },
     { id: 'settings', label: 'Settings', icon: '\u2699', tip: 'Core application settings' },
@@ -366,6 +399,503 @@
     tooltipEl.style.opacity = '0';
   }
 
+  // ─── EPG Guide Page ──────────────────────────────────────────────────
+  function buildEpgGuidePage() {
+    const HOUR_WIDTH = 240; // px per hour
+    const PX_PER_MIN = HOUR_WIDTH / 60;
+    const CHANNEL_COL = 180;
+    let currentHours = 6;
+    let windowOffset = 0; // in hours from initial start
+
+    return async function(container) {
+      container.innerHTML = '';
+      container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading guide...'));
+
+      let channels, groups, guideData;
+      try {
+        [channels, groups, guideData] = await Promise.all([
+          api.get('/api/channels'),
+          api.get('/api/channel-groups'),
+          api.get('/api/epg/guide?hours=' + currentHours),
+        ]);
+      } catch (err) {
+        container.innerHTML = '';
+        container.appendChild(h('p', { style: 'color: var(--danger)' }, 'Failed to load: ' + err.message));
+        return;
+      }
+
+      // Only show enabled channels with tvg_id
+      channels = channels.filter(function(c) { return c.is_enabled; });
+      channels.sort(function(a, b) { return a.channel_number - b.channel_number; });
+
+      // Build group lookup
+      var groupMap = {};
+      groups.forEach(function(g) { groupMap[g.id] = g; });
+
+      // Group channels by channel_group_id, sorted by group sort_order
+      var grouped = {};
+      var ungrouped = [];
+      channels.forEach(function(c) {
+        if (c.channel_group_id && groupMap[c.channel_group_id]) {
+          var gid = c.channel_group_id;
+          if (!grouped[gid]) grouped[gid] = [];
+          grouped[gid].push(c);
+        } else {
+          ungrouped.push(c);
+        }
+      });
+
+      var sortedGroupIds = Object.keys(grouped).sort(function(a, b) {
+        return (groupMap[a].sort_order || 0) - (groupMap[b].sort_order || 0);
+      });
+
+      // Parse guide window timestamps
+      var windowStart = new Date(guideData.start).getTime();
+      var windowStop = new Date(guideData.stop).getTime();
+      var windowMinutes = (windowStop - windowStart) / 60000;
+      var totalWidth = windowMinutes * PX_PER_MIN;
+      var programs = guideData.programs || {};
+      var now = Date.now();
+
+      function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+      function formatTime(d) {
+        var dt = new Date(d);
+        var hh = dt.getHours();
+        var mm = dt.getMinutes();
+        return (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm;
+      }
+
+      function formatDate(ts) {
+        var d = new Date(ts);
+        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return months[d.getMonth()] + ' ' + d.getDate() + ', ' + formatTime(ts);
+      }
+
+      // Build hour marks HTML
+      var hourMarksHtml = '';
+      for (var m = 0; m < windowMinutes; m += 60) {
+        hourMarksHtml += '<div class="epg-hour-mark" style="width:' + HOUR_WIDTH + 'px">' + formatTime(windowStart + m * 60000) + '</div>';
+      }
+
+      // Build channel row HTML
+      function buildChannelRow(ch) {
+        var chPrograms = ch.tvg_id ? (programs[ch.tvg_id] || []) : [];
+        var programsHtml = '';
+
+        for (var i = 0; i < chPrograms.length; i++) {
+          var p = chPrograms[i];
+          var pStart = new Date(p.start).getTime();
+          var pStop = new Date(p.stop).getTime();
+          var startMin = Math.max(0, (pStart - windowStart) / 60000);
+          var endMin = Math.min(windowMinutes, (pStop - windowStart) / 60000);
+          var leftPx = startMin * PX_PER_MIN;
+          var widthPx = (endMin - startMin) * PX_PER_MIN - 2; // 2px gap
+          if (widthPx < 2) continue;
+
+          var isLive = now >= pStart && now < pStop;
+          var isPast = now >= pStop;
+          var cls = 'epg-program' + (isLive ? ' live' : '') + (isPast ? ' past' : '');
+          var timeStr = formatTime(pStart) + ' - ' + formatTime(pStop);
+          var tooltip = esc(p.title) + ' (' + timeStr + ')';
+          if (p.description) tooltip += '&#10;' + esc(p.description.substring(0, 200));
+
+          programsHtml += '<div class="' + cls + '" style="left:' + leftPx + 'px;width:' + widthPx + 'px" title="' + tooltip + '">' +
+            '<div class="epg-program-title">' + esc(p.title) + '</div>' +
+            '<div class="epg-program-time">' + timeStr + '</div>' +
+            '</div>';
+        }
+
+        // Empty slot if no programs
+        if (chPrograms.length === 0 && ch.tvg_id) {
+          programsHtml = '<div class="epg-program" style="left:0;width:' + (totalWidth - 2) + 'px;opacity:0.3"><div class="epg-program-title">No EPG data</div></div>';
+        } else if (!ch.tvg_id) {
+          programsHtml = '<div class="epg-program" style="left:0;width:' + (totalWidth - 2) + 'px;opacity:0.3"><div class="epg-program-title">No EPG assigned</div></div>';
+        }
+
+        var logoHtml = ch.logo
+          ? '<img class="epg-channel-logo" src="' + esc(ch.logo) + '" loading="lazy" alt="">'
+          : '<div class="epg-channel-logo"></div>';
+
+        return '<div class="epg-row">' +
+          '<div class="epg-channel" data-chid="' + esc(String(ch.id)) + '" data-tvgid="' + esc(ch.tvg_id || '') + '" data-chname="' + esc(ch.name) + '">' +
+            '<span class="epg-channel-num">' + ch.channel_number + '</span>' +
+            logoHtml +
+            '<span class="epg-channel-name">' + esc(ch.name) + '</span>' +
+          '</div>' +
+          '<div class="epg-programs" style="width:' + totalWidth + 'px">' + programsHtml + '</div>' +
+        '</div>';
+      }
+
+      // Build all rows grouped
+      var rowsHtml = '';
+      for (var gi = 0; gi < sortedGroupIds.length; gi++) {
+        var gid = sortedGroupIds[gi];
+        var grp = groupMap[gid];
+        rowsHtml += '<div class="epg-group-row">' + esc(grp.name) + '</div>';
+        var grpChannels = grouped[gid];
+        for (var ci = 0; ci < grpChannels.length; ci++) {
+          rowsHtml += buildChannelRow(grpChannels[ci]);
+        }
+      }
+      if (ungrouped.length > 0) {
+        if (sortedGroupIds.length > 0) {
+          rowsHtml += '<div class="epg-group-row">Ungrouped</div>';
+        }
+        for (var ui = 0; ui < ungrouped.length; ui++) {
+          rowsHtml += buildChannelRow(ungrouped[ui]);
+        }
+      }
+
+      // Now line position
+      var nowMin = (now - windowStart) / 60000;
+      var nowPx = nowMin * PX_PER_MIN;
+      var nowLineHtml = (nowMin >= 0 && nowMin <= windowMinutes)
+        ? '<div class="epg-now-line" style="left:' + (CHANNEL_COL + nowPx) + 'px"></div>'
+        : '';
+
+      // Build toolbar
+      var timeLabelEl = h('span', { className: 'epg-time-label' }, formatDate(windowStart) + ' \u2014 ' + formatDate(windowStop));
+
+      var prevBtn = h('button', { className: 'btn btn-secondary btn-sm', onClick: navigate.bind(null, -3) }, '\u2190 Earlier');
+      var nowBtn = h('button', { className: 'btn btn-primary btn-sm', onClick: navigate.bind(null, 0) }, 'Now');
+      var nextBtn = h('button', { className: 'btn btn-secondary btn-sm', onClick: navigate.bind(null, 3) }, 'Later \u2192');
+
+      function navigate(offsetDelta) {
+        if (offsetDelta === 0) {
+          windowOffset = 0;
+        } else {
+          windowOffset += offsetDelta;
+        }
+        // Reload with new time window by adjusting hours parameter
+        loadGuide();
+      }
+
+      async function loadGuide() {
+        container.innerHTML = '';
+        container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading guide...'));
+        try {
+          var startParam = '';
+          if (windowOffset !== 0) {
+            var offsetMs = windowOffset * 3600000;
+            var baseStart = new Date(Date.now() + offsetMs);
+            baseStart = new Date(baseStart.getTime() - (baseStart.getTime() % (30 * 60000)));
+            startParam = '&start=' + baseStart.toISOString();
+          }
+          guideData = await api.get('/api/epg/guide?hours=' + currentHours + startParam);
+          windowStart = new Date(guideData.start).getTime();
+          windowStop = new Date(guideData.stop).getTime();
+          windowMinutes = (windowStop - windowStart) / 60000;
+          totalWidth = windowMinutes * PX_PER_MIN;
+          programs = guideData.programs || {};
+          now = Date.now();
+          renderFull();
+        } catch (err) {
+          container.innerHTML = '';
+          container.appendChild(h('p', { style: 'color: var(--danger)' }, 'Failed to load: ' + err.message));
+        }
+      }
+
+      function renderFull() {
+        // Rebuild dynamic parts
+        timeLabelEl.textContent = formatDate(windowStart) + ' \u2014 ' + formatDate(windowStop);
+
+        hourMarksHtml = '';
+        for (var m = 0; m < windowMinutes; m += 60) {
+          hourMarksHtml += '<div class="epg-hour-mark" style="width:' + HOUR_WIDTH + 'px">' + formatTime(windowStart + m * 60000) + '</div>';
+        }
+
+        rowsHtml = '';
+        for (var gi = 0; gi < sortedGroupIds.length; gi++) {
+          var gid = sortedGroupIds[gi];
+          var grp = groupMap[gid];
+          rowsHtml += '<div class="epg-group-row">' + esc(grp.name) + '</div>';
+          var grpChannels = grouped[gid];
+          for (var ci = 0; ci < grpChannels.length; ci++) {
+            rowsHtml += buildChannelRow(grpChannels[ci]);
+          }
+        }
+        if (ungrouped.length > 0) {
+          if (sortedGroupIds.length > 0) {
+            rowsHtml += '<div class="epg-group-row">Ungrouped</div>';
+          }
+          for (var ui = 0; ui < ungrouped.length; ui++) {
+            rowsHtml += buildChannelRow(ungrouped[ui]);
+          }
+        }
+
+        nowMin = (now - windowStart) / 60000;
+        nowPx = nowMin * PX_PER_MIN;
+        nowLineHtml = (nowMin >= 0 && nowMin <= windowMinutes)
+          ? '<div class="epg-now-line" style="left:' + (CHANNEL_COL + nowPx) + 'px"></div>'
+          : '';
+
+        buildDom();
+      }
+
+      function buildDom() {
+        container.innerHTML = '';
+
+        var toolbar = h('div', { className: 'epg-toolbar' },
+          h('div', { className: 'epg-nav' }, prevBtn, nowBtn, nextBtn),
+          timeLabelEl,
+          h('span', { style: 'font-size:13px;color:var(--text-muted)' }, channels.length + ' channels'),
+        );
+
+        var scrollEl = document.createElement('div');
+        scrollEl.className = 'epg-scroll';
+
+        var innerHtml = '<div class="epg-header-row">' +
+          '<div class="epg-corner">Channel</div>' +
+          '<div class="epg-timeline">' + hourMarksHtml + '</div>' +
+          '</div>' +
+          '<div style="position:relative">' +
+          nowLineHtml +
+          rowsHtml +
+          '</div>';
+
+        scrollEl.innerHTML = innerHtml;
+
+        // Event delegation for channel and program clicks (play)
+        scrollEl.addEventListener('click', function(e) {
+          var ch = e.target.closest('.epg-channel');
+          if (ch) {
+            openVideoPlayer(ch.dataset.chname, '/channel/' + ch.dataset.chid + '?profile=Browser', ch.dataset.tvgid || undefined);
+            return;
+          }
+          var prog = e.target.closest('.epg-program');
+          if (prog) {
+            var row = prog.closest('.epg-row');
+            if (!row) return;
+            ch = row.querySelector('.epg-channel');
+            if (!ch) return;
+            openVideoPlayer(ch.dataset.chname, '/channel/' + ch.dataset.chid + '?profile=Browser', ch.dataset.tvgid || undefined);
+          }
+        });
+
+        container.appendChild(toolbar);
+        container.appendChild(scrollEl);
+
+        // Auto-scroll so the now-line is centered in the visible viewport
+        // nowPx is relative to timeline start; subtract half the viewport, add back the sticky channel column
+        if (nowMin >= 0 && nowMin <= windowMinutes) {
+          var scrollTarget = nowPx - scrollEl.clientWidth / 2 + CHANNEL_COL;
+          if (scrollTarget > 0) scrollEl.scrollLeft = scrollTarget;
+        }
+      }
+
+      if (channels.length === 0) {
+        container.innerHTML = '';
+        container.appendChild(h('div', { className: 'epg-empty' }, 'No channels configured. Add channels first.'));
+        return;
+      }
+
+      renderFull();
+    };
+  }
+
+  // ─── Stream Groups Page ──────────────────────────────────────────────
+  const streamGroupsCache = Object.create(null); // accountId -> { groups, sortedGroups, groupDisplay, groupSearch }
+
+  function buildStreamGroupsPage(accountId) {
+    return async function(container) {
+      container.innerHTML = '';
+      container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...'));
+
+      let groups, sortedGroups, groupDisplay, groupSearch;
+
+      if (streamGroupsCache[accountId]) {
+        // Use cached grouped data
+        var c = streamGroupsCache[accountId];
+        groups = c.groups;
+        sortedGroups = c.sortedGroups;
+        groupDisplay = c.groupDisplay;
+        groupSearch = c.groupSearch;
+      } else {
+        let allStreams;
+        try {
+          var cached = await streamsCache.getAll();
+          allStreams = cached.filter(function(s) { return s.m3u_account_id === accountId; });
+        } catch (err) {
+          container.innerHTML = '';
+          container.appendChild(h('p', { style: 'color: var(--danger)' }, 'Failed to load: ' + err.message));
+          return;
+        }
+
+        // Group streams by group field using plain object (faster than Map for string keys)
+        groups = Object.create(null);
+        for (let i = 0; i < allStreams.length; i++) {
+          const g = allStreams[i].group || '';
+          if (!groups[g]) groups[g] = [];
+          groups[g].push(allStreams[i]);
+        }
+
+        // Sort group names: non-empty alphabetically, empty last
+        sortedGroups = Object.keys(groups).sort((a, b) => {
+          if (!a) return 1;
+          if (!b) return -1;
+          return a.localeCompare(b);
+        });
+
+        // Pre-build lowercased display names for search
+        groupDisplay = new Array(sortedGroups.length);
+        groupSearch = new Array(sortedGroups.length);
+        for (let i = 0; i < sortedGroups.length; i++) {
+          const g = sortedGroups[i];
+          groupDisplay[i] = g || '(No Group)';
+          groupSearch[i] = groupDisplay[i].toLowerCase();
+        }
+
+        streamGroupsCache[accountId] = { groups: groups, sortedGroups: sortedGroups, groupDisplay: groupDisplay, groupSearch: groupSearch };
+      }
+
+      let searchTerm = '';
+      let searchTimer = null;
+      const rendered = Object.create(null); // tracks which groups have had their table built
+
+      // Escape HTML to prevent XSS from stream names/groups
+      function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+      // Persistent DOM
+      const summaryEl = h('h3', null, '');
+      const groupsContainer = h('div', null);
+
+      const searchInput = h('input', {
+        type: 'text',
+        placeholder: 'Filter groups...',
+        style: 'padding: 6px 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13px; width: 220px; outline: none;',
+      });
+      searchInput.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+          searchTerm = searchInput.value.toLowerCase();
+          renderGroups();
+        }, 300);
+      });
+
+      // Event delegation: handle toggle (lazy-render tables) and play button clicks
+      groupsContainer.addEventListener('toggle', (e) => {
+        const details = e.target;
+        if (!details.open || details.tagName !== 'DETAILS') return;
+        const gIdx = details.dataset.gidx;
+        if (rendered[gIdx]) return;
+        rendered[gIdx] = true;
+        const streams = groups[sortedGroups[gIdx]];
+        const rows = [];
+        for (let j = 0; j < streams.length; j++) {
+          const s = streams[j];
+          const logo = s.logo_url
+            ? '<img class="stream-group-logo" src="' + esc(s.logo_url) + '" loading="lazy" alt="">'
+            : '';
+          rows.push('<tr><td style="width:40px;padding-left:40px">' + logo + '</td><td>' + esc(s.name) + '</td><td style="width:60px;text-align:right"><button class="btn btn-secondary btn-sm" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '">Play</button></td></tr>');
+        }
+        const tableEl = document.createElement('table');
+        tableEl.className = 'stream-group-table';
+        tableEl.innerHTML = '<tbody>' + rows.join('') + '</tbody>';
+        details.appendChild(tableEl);
+      }, true);
+
+      groupsContainer.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-sid]');
+        if (!btn) return;
+        openVideoPlayer(btn.dataset.sname, '/stream/' + btn.dataset.sid + '?profile=Browser', btn.dataset.tvgid || undefined);
+      });
+
+      function renderGroups() {
+        // Track which groups were open so we can restore
+        const openSet = new Set();
+        groupsContainer.querySelectorAll('details[open]').forEach(el => {
+          openSet.add(el.dataset.gidx);
+        });
+
+        // Filter visible groups
+        let totalVisible = 0;
+        const html = [];
+
+        for (let i = 0; i < sortedGroups.length; i++) {
+          if (searchTerm && groupSearch[i].indexOf(searchTerm) === -1) continue;
+          const count = groups[sortedGroups[i]].length;
+          totalVisible += count;
+          const open = openSet.has(String(i)) ? ' open' : '';
+          html.push('<details class="stream-group" data-gidx="' + i + '"' + open + '><summary>' + esc(groupDisplay[i]) + '<span class="stream-group-count">' + count + '</span></summary></details>');
+        }
+
+        summaryEl.textContent = totalVisible.toLocaleString() + ' streams in ' + html.length + ' group' + (html.length !== 1 ? 's' : '');
+
+        if (html.length === 0) {
+          groupsContainer.innerHTML = '<div style="padding:40px 16px;text-align:center;color:var(--text-muted)">' +
+            (searchTerm ? 'No groups match "' + esc(searchInput.value) + '"' : 'No streams found') + '</div>';
+          return;
+        }
+
+        // Re-rendered groups lose their lazy-rendered tables, so clear rendered tracking for non-open groups
+        // (open groups that were re-rendered via innerHTML need their tables rebuilt on next toggle)
+        for (const key in rendered) {
+          if (!openSet.has(key)) delete rendered[key];
+        }
+
+        groupsContainer.innerHTML = html.join('');
+
+        // For groups that were open, re-trigger lazy render
+        groupsContainer.querySelectorAll('details[open]').forEach(el => {
+          const gIdx = el.dataset.gidx;
+          if (!rendered[gIdx]) {
+            rendered[gIdx] = true;
+            const streams = groups[sortedGroups[gIdx]];
+            const rows = [];
+            for (let j = 0; j < streams.length; j++) {
+              const s = streams[j];
+              const logo = s.logo_url
+                ? '<img class="stream-group-logo" src="' + esc(s.logo_url) + '" loading="lazy" alt="">'
+                : '';
+              rows.push('<tr><td style="width:40px;padding-left:40px">' + logo + '</td><td>' + esc(s.name) + '</td><td style="width:60px;text-align:right"><button class="btn btn-secondary btn-sm" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '">Play</button></td></tr>');
+            }
+            const tableEl = document.createElement('table');
+            tableEl.className = 'stream-group-table';
+            tableEl.innerHTML = '<tbody>' + rows.join('') + '</tbody>';
+            el.appendChild(tableEl);
+          }
+        });
+      }
+
+      // Build shell
+      container.innerHTML = '';
+      container.appendChild(h('div', { className: 'table-container' },
+        h('div', { className: 'stream-groups-header' },
+          summaryEl,
+          h('div', { className: 'btn-group', style: 'align-items: center;' }, searchInput),
+        ),
+        groupsContainer,
+      ));
+
+      renderGroups();
+    };
+  }
+
+  async function rebuildStreamNav() {
+    const accounts = await api.get('/api/m3u/accounts').catch(() => []);
+    // Remove existing dynamic stream nav items
+    navItems = navItems.filter(n => !n.id || !n.id.startsWith('streams-'));
+    // Remove old dynamic page entries
+    Object.keys(pages).forEach(k => { if (k.startsWith('streams-')) delete pages[k]; });
+    // Find the Streams section header and insert account items after it
+    const idx = navItems.findIndex(n => n.section === 'Streams');
+    if (idx === -1) return;
+    const accountNavItems = accounts.map(a => ({
+      id: 'streams-' + a.id,
+      label: a.name,
+      icon: '\u25b6',
+      tip: 'Streams from ' + a.name,
+    }));
+    navItems.splice(idx + 1, 0, ...accountNavItems);
+    // Register a page for each account
+    accounts.forEach(a => {
+      pages['streams-' + a.id] = buildStreamGroupsPage(a.id);
+    });
+    // Re-render sidebar if already on screen
+    if (auth.isLoggedIn()) render();
+  }
+
   function renderSidebar() {
     const items = navItems.map(item => {
       if (item.section) {
@@ -385,6 +915,26 @@
       return el;
     });
 
+    // Data status indicator (lives in sidebar footer, updates reactively)
+    const caches = [streamsCache, epgCache, logosCache];
+    const statusEl = h('div', { className: 'data-status' });
+
+    function updateStatus() {
+      var loading = caches.filter(function(c) { return c.state === 'loading'; });
+      var ready = caches.filter(function(c) { return c.state === 'ready'; });
+      if (loading.length > 0) {
+        statusEl.innerHTML = '<div class="data-status-bar"><div class="data-status-bar-fill loading"></div></div>' +
+          '<span class="data-status-text">Fetching ' + loading.map(function(c) { return c.label; }).join(', ') + '...</span>';
+      } else if (ready.length > 0) {
+        statusEl.innerHTML = '<div class="data-status-bar"><div class="data-status-bar-fill ready"></div></div>' +
+          '<span class="data-status-text">Up to date</span>';
+      } else {
+        statusEl.innerHTML = '';
+      }
+    }
+    DataCache.onChange(updateStatus);
+    updateStatus();
+
     return h('nav', { className: 'sidebar' },
       h('div', { className: 'sidebar-header' },
         h('h2', null, 'TVProxy'),
@@ -392,6 +942,7 @@
       ),
       h('div', { className: 'sidebar-nav' }, ...items),
       h('div', { className: 'sidebar-footer' },
+        statusEl,
         h('div', { className: 'user-info' },
           h('span', { className: 'user-name' }, state.user ? state.user.username : ''),
           h('button', { className: 'logout-btn', onClick: () => auth.logout() }, 'Logout'),
@@ -421,7 +972,7 @@
 
       const cards = [
         { label: 'M3U Accounts', value: accounts.length, icon: '\u2630', page: 'm3u-accounts' },
-        { label: 'Streams', value: streamCount, icon: '\u25b6', page: 'streams' },
+        { label: 'Streams', value: streamCount, icon: '\u25b6', page: accounts.length ? 'streams-' + accounts[0].id : 'dashboard' },
         { label: 'Channels', value: channels.length, icon: '\ud83d\udcfa', page: 'channels' },
         { label: 'Channel Groups', value: groups.length, icon: '\ud83d\udcc2', page: 'channel-groups' },
         { label: 'EPG Sources', value: epgSources.length, icon: '\ud83d\udcc5', page: 'epg-sources' },
@@ -480,7 +1031,43 @@
         );
       }
 
+      // Data cache status section
+      const cachesInfo = [
+        { cache: streamsCache, icon: '\u25b6' },
+        { cache: epgCache, icon: '\ud83d\udcc5' },
+        { cache: logosCache, icon: '\ud83d\uddbc' },
+      ];
+      const cacheRows = cachesInfo.map(function(ci) {
+        var c = ci.cache;
+        var stateText = c.state === 'loading' ? 'Fetching...' : c.state === 'ready' ? c.count.toLocaleString() + ' items' : 'Not loaded';
+        var barClass = 'data-status-bar-fill' + (c.state === 'loading' ? ' loading' : c.state === 'ready' ? ' ready' : '');
+        return h('div', { className: 'cache-status-row' },
+          h('span', { className: 'cache-status-label' }, ci.icon + ' ' + c.label),
+          h('div', { className: 'data-status-bar cache-bar' }, h('div', { className: barClass })),
+          h('span', { className: 'cache-status-value' }, stateText),
+        );
+      });
+      const cacheSection = h('div', { className: 'table-container', style: 'margin-top: 24px' },
+        h('div', { className: 'table-header' }, h('h3', null, 'Data Cache')),
+        h('div', { style: 'padding: 12px 16px; display: flex; flex-direction: column; gap: 10px' }, ...cacheRows),
+      );
+
+      // Live-update the cache section
+      function updateDashCache() {
+        cachesInfo.forEach(function(ci, i) {
+          var c = ci.cache;
+          var row = cacheRows[i];
+          if (!row) return;
+          var valEl = row.querySelector('.cache-status-value');
+          var barEl = row.querySelector('.data-status-bar-fill');
+          if (valEl) valEl.textContent = c.state === 'loading' ? 'Fetching...' : c.state === 'ready' ? c.count.toLocaleString() + ' items' : 'Not loaded';
+          if (barEl) barEl.className = 'data-status-bar-fill' + (c.state === 'loading' ? ' loading' : c.state === 'ready' ? ' ready' : '');
+        });
+      }
+      DataCache.onChange(updateDashCache);
+
       container.appendChild(grid);
+      container.appendChild(cacheSection);
       container.appendChild(deviceUrlsSection);
     } catch (err) {
       container.innerHTML = '';
@@ -1027,7 +1614,7 @@
   };
   function codecName(s) { if (!s) return '?'; return CODEC_NAMES[s.split('.')[0].toLowerCase()] || s; }
 
-  function openVideoPlayer(title, url) {
+  function openVideoPlayer(title, url, tvgId) {
     let mpegtsPlayer = null;
     let retryCount = 0;
     const MAX_RETRIES = 3;
@@ -1142,6 +1729,16 @@
         'Audio: ' + codecName(mi.audioCodec);
     }
 
+    // ── EPG Now Playing ──
+    function fetchNowPlaying() {
+      if (!tvgId) return;
+      api.get('/api/epg/now?channel_id=' + encodeURIComponent(tvgId)).then(program => {
+        if (program && program.title) {
+          statusEl.textContent += ' \u2014 ' + program.title;
+        }
+      }).catch(() => {}); // silently ignore — EPG data may not exist
+    }
+
     // ── Playback ──
     // Detect if the URL uses a profile that outputs fMP4/MP4 (native playback)
     const isBrowserProfile = url.includes('profile=Browser');
@@ -1161,6 +1758,7 @@
           statusEl.style.color = '#4caf50';
           statusEl.textContent = 'Playing (fMP4)';
           retryCount = 0;
+          fetchNowPlaying();
         };
         video.play().catch(() => handleRetry());
       } else if (typeof mpegts !== 'undefined' && mpegts.isSupported()) {
@@ -1196,6 +1794,7 @@
           if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
           statusEl.style.color = '#4caf50';
           statusEl.textContent = 'Playing';
+          fetchNowPlaying();
         });
 
         statsInterval = setInterval(updateStats, 2000);
@@ -1273,6 +1872,8 @@
             try {
               await api.post('/api/m3u/accounts/' + item.id + '/refresh');
               streamsCache.invalidate();
+              for (var k in streamGroupsCache) delete streamGroupsCache[k];
+              rebuildStreamNav();
               toast.success('Refresh started for ' + item.name);
               setTimeout(reload, 2000);
             } catch (err) {
@@ -1281,33 +1882,6 @@
           },
         },
       ],
-    }),
-
-    streams: buildCrudPage({
-      title: 'Streams',
-      singular: 'Stream',
-      apiPath: '/api/streams',
-      perPage: 100,
-      create: false,
-      update: false,
-      delete: false,
-      columns: [
-        { key: 'name', label: 'Name' },
-        { key: 'group', label: 'Group', render: item => item.group || '-' },
-        { key: 'm3u_account_id', label: 'M3U Account', render: item => item._account_name || ('Account #' + item.m3u_account_id) },
-      ],
-      searchKeys: ['name', 'group'],
-      fields: [],
-      rowActions: (item) => [
-        { label: 'Play', handler: () => openVideoPlayer(item.name, '/stream/' + item.id) },
-      ],
-      onDataLoaded: async (items) => {
-        const accounts = await api.get('/api/m3u/accounts').catch(() => null);
-        if (!accounts || !accounts.length) return;
-        const nameMap = {};
-        accounts.forEach(a => { nameMap[a.id] = a.name; });
-        items.forEach(item => { item._account_name = nameMap[item.m3u_account_id] || ''; });
-      },
     }),
 
     channels: buildCrudPage({
@@ -1370,8 +1944,8 @@
           placeholder: 'Search streams...',
           help: 'Search and select a stream source for this channel.',
           cache: streamsCache,
-          valueKey: 'name',
-          displayKey: 'name',
+          valueKey: '_display_name',
+          displayKey: '_display_name',
           secondaryKey: 'group',
           exclude: true,
           onSelect: (stream, inputs) => {
@@ -1381,15 +1955,21 @@
         { key: 'is_enabled', label: 'Enabled', type: 'checkbox', default: true },
       ],
       rowActions: (item) => [
-        { label: 'Play', handler: () => openVideoPlayer(item.name, '/channel/' + item.id + '?profile=Browser') },
+        { label: 'Play', handler: () => openVideoPlayer(item.name, '/channel/' + item.id + '?profile=Browser', item.tvg_id || undefined) },
       ],
       postFormSetup: (inputs, isEdit, item) => {
         // Load existing stream assignment when editing
         if (isEdit && inputs._stream && item.id) {
-          api.get('/api/channels/' + item.id + '/streams').then(streams => {
+          Promise.all([
+            api.get('/api/channels/' + item.id + '/streams'),
+            api.get('/api/m3u/accounts').catch(() => []),
+          ]).then(([streams, accounts]) => {
             if (streams && streams.length > 0) {
-              inputs._stream.value = streams[0].name;
-              inputs._stream._selectedStreamId = streams[0].id;
+              const nameMap = {};
+              accounts.forEach(a => { nameMap[a.id] = a.name; });
+              const s = streams[0];
+              inputs._stream.value = (nameMap[s.m3u_account_id] || 'Unknown') + '/' + s.name;
+              inputs._stream._selectedStreamId = s.id;
             }
           }).catch(() => {});
         }
@@ -1447,6 +2027,8 @@
         }
       },
     }),
+
+    'epg-guide': buildEpgGuidePage(),
 
     'channel-groups': buildCrudPage({
       title: 'Channel Groups',
@@ -1643,25 +2225,6 @@
       fields: [
         { key: 'name', label: 'Logo Name', placeholder: 'BBC Logo' },
         { key: 'url', label: 'Image URL', placeholder: 'https://...' },
-      ],
-    }),
-
-    'user-agents': buildCrudPage({
-      title: 'User Agents',
-      singular: 'User Agent',
-      apiPath: '/api/user-agents',
-      create: true,
-      update: true,
-      columns: [
-        { key: 'name', label: 'Name' },
-        { key: 'user_agent', label: 'User Agent String', render: item => {
-          const ua = item.user_agent || '';
-          return ua.length > 60 ? ua.substring(0, 60) + '...' : ua;
-        }},
-      ],
-      fields: [
-        { key: 'name', label: 'Name', placeholder: 'VLC Player' },
-        { key: 'user_agent', label: 'User Agent String', placeholder: 'VLC/3.0.18 LibVLC/3.0.18' },
       ],
     }),
 
@@ -1972,6 +2535,10 @@
       await auth.fetchUser();
     }
     render();
+    if (auth.isLoggedIn()) {
+      rebuildStreamNav(); // fire-and-forget; re-renders when done
+      streamsCache.getAll(); // pre-warm stream data while user views dashboard
+    }
   }
 
   init();

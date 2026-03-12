@@ -61,7 +61,6 @@ func main() {
 	programDataRepo := repository.NewProgramDataRepository(db)
 	hdhrDeviceRepo := repository.NewHDHRDeviceRepository(db)
 	settingsRepo := repository.NewCoreSettingsRepository(db)
-	userAgentRepo := repository.NewUserAgentRepository(db)
 	clientRepo := repository.NewClientRepository(db)
 
 	// Create default admin user if no users exist
@@ -79,12 +78,12 @@ func main() {
 
 	// Services
 	authService := service.NewAuthService(userRepo, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
-	m3uService := service.NewM3UService(m3uAccountRepo, streamRepo, userAgentRepo, log)
+	m3uService := service.NewM3UService(m3uAccountRepo, streamRepo, cfg, log)
 	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamRepo, log)
-	epgService := service.NewEPGService(epgSourceRepo, epgDataRepo, programDataRepo, userAgentRepo, log)
+	epgService := service.NewEPGService(epgSourceRepo, epgDataRepo, programDataRepo, cfg, log)
 	settingsService := service.NewSettingsService(settingsRepo)
 	clientService := service.NewClientService(clientRepo, streamProfileRepo, log)
-	proxyService := service.NewProxyService(channelRepo, streamRepo, m3uAccountRepo, userAgentRepo, channelProfileRepo, streamProfileRepo, clientService, log)
+	proxyService := service.NewProxyService(channelRepo, streamRepo, m3uAccountRepo, channelProfileRepo, streamProfileRepo, clientService, cfg, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo, streamRepo, channelProfileRepo, streamProfileRepo, cfg, log)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, streamRepo, channelProfileRepo, streamProfileRepo, epgDataRepo, programDataRepo, cfg, log)
 
@@ -107,7 +106,6 @@ func main() {
 	outputHandler := handler.NewOutputHandler(outputService)
 	proxyHandler := handler.NewProxyHandler(proxyService, log)
 	settingsHandler := handler.NewSettingsHandler(settingsService)
-	userAgentHandler := handler.NewUserAgentHandler(userAgentRepo)
 	clientHandler := handler.NewClientHandler(clientService)
 
 	// Router
@@ -229,6 +227,8 @@ func main() {
 			r.Delete("/sources/{id}", epgSourceHandler.Delete)
 			r.Post("/sources/{id}/refresh", epgSourceHandler.Refresh)
 			r.Get("/data", epgDataHandler.List)
+			r.Get("/now", epgDataHandler.NowPlaying)
+			r.Get("/guide", epgDataHandler.Guide)
 		})
 
 		r.Route("/api/hdhr/devices", func(r chi.Router) {
@@ -242,14 +242,6 @@ func main() {
 		r.Route("/api/settings", func(r chi.Router) {
 			r.Get("/", settingsHandler.List)
 			r.Put("/", settingsHandler.Update)
-		})
-
-		r.Route("/api/user-agents", func(r chi.Router) {
-			r.Get("/", userAgentHandler.List)
-			r.Post("/", userAgentHandler.Create)
-			r.Get("/{id}", userAgentHandler.Get)
-			r.Put("/{id}", userAgentHandler.Update)
-			r.Delete("/{id}", userAgentHandler.Delete)
 		})
 
 		r.Route("/api/clients", func(r chi.Router) {

@@ -10,6 +10,16 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 )
 
+// GuideProgram represents a program with its EPG channel_id for guide display.
+type GuideProgram struct {
+	ChannelID   string    `json:"channel_id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description,omitempty"`
+	Start       time.Time `json:"start"`
+	Stop        time.Time `json:"stop"`
+	Category    string    `json:"category,omitempty"`
+}
+
 type ProgramDataRepository struct {
 	db *database.DB
 }
@@ -114,6 +124,52 @@ func (r *ProgramDataRepository) ListByTimeRange(ctx context.Context, start, stop
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating program data: %w", err)
+	}
+	return programs, nil
+}
+
+func (r *ProgramDataRepository) GetNowByChannelID(ctx context.Context, channelID string, now time.Time) (*models.ProgramData, error) {
+	var p models.ProgramData
+	err := r.db.QueryRowContext(ctx,
+		`SELECT p.id, p.epg_data_id, p.title, p.description, p.start, p.stop, p.category, p.episode_num, p.icon
+		FROM program_data p
+		JOIN epg_data e ON e.id = p.epg_data_id
+		WHERE e.channel_id = ? AND p.start <= ? AND p.stop > ?
+		ORDER BY p.start DESC LIMIT 1`,
+		channelID, now, now,
+	).Scan(&p.ID, &p.EPGDataID, &p.Title, &p.Description, &p.Start, &p.Stop, &p.Category, &p.EpisodeNum, &p.Icon)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// ListForGuide returns programs within a time window with their EPG channel_id.
+// Used by the EPG guide grid to display programs across channels.
+func (r *ProgramDataRepository) ListForGuide(ctx context.Context, start, stop time.Time) ([]GuideProgram, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT e.channel_id, p.title, p.description, p.start, p.stop, p.category
+		FROM program_data p
+		JOIN epg_data e ON e.id = p.epg_data_id
+		WHERE p.start < ? AND p.stop > ?
+		ORDER BY e.channel_id, p.start`,
+		stop, start,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing guide programs: %w", err)
+	}
+	defer rows.Close()
+
+	var programs []GuideProgram
+	for rows.Next() {
+		var g GuideProgram
+		if err := rows.Scan(&g.ChannelID, &g.Title, &g.Description, &g.Start, &g.Stop, &g.Category); err != nil {
+			return nil, fmt.Errorf("scanning guide program: %w", err)
+		}
+		programs = append(programs, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating guide programs: %w", err)
 	}
 	return programs, nil
 }

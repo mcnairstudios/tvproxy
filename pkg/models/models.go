@@ -159,15 +159,6 @@ type CoreSetting struct {
 	Value string `json:"value"`
 }
 
-type UserAgent struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	UserAgent string    `json:"user_agent"`
-	IsDefault bool      `json:"is_default"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
 type Client struct {
 	ID              int64             `json:"id"`
 	Name            string            `json:"name"`

@@ -10,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/m3u"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
@@ -19,7 +20,7 @@ import (
 type M3UService struct {
 	m3uAccountRepo *repository.M3UAccountRepository
 	streamRepo     *repository.StreamRepository
-	userAgentRepo  *repository.UserAgentRepository
+	config         *config.Config
 	log            zerolog.Logger
 }
 
@@ -27,13 +28,13 @@ type M3UService struct {
 func NewM3UService(
 	m3uAccountRepo *repository.M3UAccountRepository,
 	streamRepo *repository.StreamRepository,
-	userAgentRepo *repository.UserAgentRepository,
+	cfg *config.Config,
 	log zerolog.Logger,
 ) *M3UService {
 	return &M3UService{
 		m3uAccountRepo: m3uAccountRepo,
 		streamRepo:     streamRepo,
-		userAgentRepo:  userAgentRepo,
+		config:         cfg,
 		log:            log.With().Str("service", "m3u").Logger(),
 	}
 }
@@ -237,11 +238,7 @@ func (s *M3UService) fetchURL(ctx context.Context, url string) (io.ReadCloser, e
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	// Use default user agent if available
-	ua, err := s.userAgentRepo.GetDefault(ctx)
-	if err == nil && ua != nil {
-		req.Header.Set("User-Agent", ua.UserAgent)
-	}
+	req.Header.Set("User-Agent", s.config.UserAgent)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

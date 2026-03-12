@@ -934,4 +934,8 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		name: "drop_user_agents_table",
+		sql:  `DROP TABLE IF EXISTS user_agents`,
+	},
 }

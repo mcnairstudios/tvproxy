@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"database/sql"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
@@ -82,4 +84,73 @@ func (h *EPGDataHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, results)
+}
+
+// NowPlaying returns the current program for a given EPG channel_id.
+// GET /api/epg/now?channel_id=bbc1.uk
+func (h *EPGDataHandler) NowPlaying(w http.ResponseWriter, r *http.Request) {
+	channelID := r.URL.Query().Get("channel_id")
+	if channelID == "" {
+		respondError(w, http.StatusBadRequest, "channel_id is required")
+		return
+	}
+
+	program, err := h.programDataRepo.GetNowByChannelID(r.Context(), channelID, time.Now())
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondJSON(w, http.StatusOK, nil)
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to get current program")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, program)
+}
+
+// guideResponse is the JSON response for the EPG guide grid.
+type guideResponse struct {
+	Start    time.Time                          `json:"start"`
+	Stop     time.Time                          `json:"stop"`
+	Programs map[string][]repository.GuideProgram `json:"programs"`
+}
+
+// Guide returns programs for all EPG channels within a time window.
+// GET /api/epg/guide?hours=6&start=2026-03-11T14:00:00Z
+func (h *EPGDataHandler) Guide(w http.ResponseWriter, r *http.Request) {
+	hours := 6
+	if hs := r.URL.Query().Get("hours"); hs != "" {
+		if parsed, err := strconv.Atoi(hs); err == nil && parsed > 0 && parsed <= 48 {
+			hours = parsed
+		}
+	}
+
+	var start time.Time
+	if startStr := r.URL.Query().Get("start"); startStr != "" {
+		if parsed, err := time.Parse(time.RFC3339, startStr); err == nil {
+			start = parsed.Truncate(30 * time.Minute)
+		}
+	}
+	if start.IsZero() {
+		start = time.Now().Truncate(30 * time.Minute)
+	}
+	stop := start.Add(time.Duration(hours) * time.Hour)
+
+	programs, err := h.programDataRepo.ListForGuide(r.Context(), start, stop)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to list guide programs")
+		return
+	}
+
+	// Group programs by channel_id
+	grouped := make(map[string][]repository.GuideProgram)
+	for _, p := range programs {
+		grouped[p.ChannelID] = append(grouped[p.ChannelID], p)
+	}
+
+	respondJSON(w, http.StatusOK, guideResponse{
+		Start:    start,
+		Stop:     stop,
+		Programs: grouped,
+	})
 }

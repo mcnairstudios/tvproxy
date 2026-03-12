@@ -84,7 +84,7 @@ func TestTablesExist(t *testing.T) {
 		"users", "m3u_accounts", "streams", "channel_groups",
 		"channel_profiles", "channels", "channel_streams", "logos",
 		"stream_profiles", "epg_sources", "epg_data", "program_data",
-		"hdhr_devices", "core_settings", "user_agents",
+		"hdhr_devices", "core_settings",
 	}
 
 	for _, table := range tables {

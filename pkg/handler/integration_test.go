@@ -66,17 +66,16 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	programDataRepo := repository.NewProgramDataRepository(db)
 	hdhrDeviceRepo := repository.NewHDHRDeviceRepository(db)
 	settingsRepo := repository.NewCoreSettingsRepository(db)
-	userAgentRepo := repository.NewUserAgentRepository(db)
 	clientRepo := repository.NewClientRepository(db)
 
 	// Services
 	authService := service.NewAuthService(userRepo, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
-	m3uService := service.NewM3UService(m3uAccountRepo, streamRepo, userAgentRepo, log)
+	m3uService := service.NewM3UService(m3uAccountRepo, streamRepo, cfg, log)
 	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamRepo, log)
-	epgService := service.NewEPGService(epgSourceRepo, epgDataRepo, programDataRepo, userAgentRepo, log)
+	epgService := service.NewEPGService(epgSourceRepo, epgDataRepo, programDataRepo, cfg, log)
 	settingsService := service.NewSettingsService(settingsRepo)
 	clientService := service.NewClientService(clientRepo, streamProfileRepo, log)
-	proxyService := service.NewProxyService(channelRepo, streamRepo, m3uAccountRepo, userAgentRepo, channelProfileRepo, streamProfileRepo, clientService, log)
+	proxyService := service.NewProxyService(channelRepo, streamRepo, m3uAccountRepo, channelProfileRepo, streamProfileRepo, clientService, cfg, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo, streamRepo, channelProfileRepo, streamProfileRepo, cfg, log)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, streamRepo, channelProfileRepo, streamProfileRepo, epgDataRepo, programDataRepo, cfg, log)
 
@@ -104,7 +103,6 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	hdhrHandler := NewHDHRHandler(hdhrService, hdhrDeviceRepo, proxyService, cfg)
 	outputHandler := NewOutputHandler(outputService)
 	settingsHandler := NewSettingsHandler(settingsService)
-	userAgentHandler := NewUserAgentHandler(userAgentRepo)
 	clientHandler := NewClientHandler(clientService)
 
 	// Router (mirrors main.go)
@@ -204,6 +202,8 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 			r.Delete("/sources/{id}", epgSourceHandler.Delete)
 			r.Post("/sources/{id}/refresh", epgSourceHandler.Refresh)
 			r.Get("/data", epgDataHandler.List)
+			r.Get("/now", epgDataHandler.NowPlaying)
+			r.Get("/guide", epgDataHandler.Guide)
 		})
 
 		r.Route("/api/hdhr/devices", func(r chi.Router) {
@@ -217,14 +217,6 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 		r.Route("/api/settings", func(r chi.Router) {
 			r.Get("/", settingsHandler.List)
 			r.Put("/", settingsHandler.Update)
-		})
-
-		r.Route("/api/user-agents", func(r chi.Router) {
-			r.Get("/", userAgentHandler.List)
-			r.Post("/", userAgentHandler.Create)
-			r.Get("/{id}", userAgentHandler.Get)
-			r.Put("/{id}", userAgentHandler.Update)
-			r.Delete("/{id}", userAgentHandler.Delete)
 		})
 
 		r.Route("/api/clients", func(r chi.Router) {
@@ -921,68 +913,6 @@ func TestIntegration_LogoChannelPropagation(t *testing.T) {
 }
 
 // =============================================================================
-// User Agent CRUD
-// =============================================================================
-
-func TestIntegration_UserAgentCRUD(t *testing.T) {
-	env := setupFullEnv(t)
-
-	t.Run("create", func(t *testing.T) {
-		rec := doRequest(t, env, "POST", "/api/user-agents/", map[string]interface{}{
-			"name": "VLC", "user_agent": "VLC/3.0.18 LibVLC/3.0.18", "is_default": true,
-		}, env.adminToken)
-		assert.Equal(t, http.StatusCreated, rec.Code)
-		var ua map[string]interface{}
-		decodeResponse(t, rec, &ua)
-		assert.Equal(t, "VLC", ua["name"])
-		assert.Equal(t, true, ua["is_default"])
-	})
-
-	t.Run("create second", func(t *testing.T) {
-		rec := doRequest(t, env, "POST", "/api/user-agents/", map[string]interface{}{
-			"name": "FFmpeg", "user_agent": "Lavf/60.3.100", "is_default": false,
-		}, env.adminToken)
-		assert.Equal(t, http.StatusCreated, rec.Code)
-	})
-
-	t.Run("list includes seeded default", func(t *testing.T) {
-		rec := doRequest(t, env, "GET", "/api/user-agents/", nil, env.adminToken)
-		assert.Equal(t, http.StatusOK, rec.Code)
-		var agents []map[string]interface{}
-		decodeResponse(t, rec, &agents)
-		// 1 seeded by migration (VLC default) + 2 created above = 3
-		assert.Len(t, agents, 3)
-	})
-
-	t.Run("get", func(t *testing.T) {
-		rec := doRequest(t, env, "GET", "/api/user-agents/2", nil, env.adminToken)
-		assert.Equal(t, http.StatusOK, rec.Code)
-	})
-
-	t.Run("update", func(t *testing.T) {
-		rec := doRequest(t, env, "PUT", "/api/user-agents/2", map[string]interface{}{
-			"name": "VLC Updated", "user_agent": "VLC/3.0.20 LibVLC/3.0.20", "is_default": true,
-		}, env.adminToken)
-		assert.Equal(t, http.StatusOK, rec.Code)
-		var ua map[string]interface{}
-		decodeResponse(t, rec, &ua)
-		assert.Equal(t, "VLC Updated", ua["name"])
-	})
-
-	t.Run("create missing fields", func(t *testing.T) {
-		rec := doRequest(t, env, "POST", "/api/user-agents/", map[string]interface{}{
-			"name": "Missing UA",
-		}, env.adminToken)
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
-	})
-
-	t.Run("delete", func(t *testing.T) {
-		rec := doRequest(t, env, "DELETE", "/api/user-agents/3", nil, env.adminToken)
-		assert.Equal(t, http.StatusNoContent, rec.Code)
-	})
-}
-
-// =============================================================================
 // Settings CRUD
 // =============================================================================
 
@@ -1622,13 +1552,7 @@ func TestIntegration_FullUserWorkflow(t *testing.T) {
 	// Step 4: Operator logs in
 	operatorToken, _ := loginHelper(t, env, "operator", "oppass")
 
-	// Step 5: Operator creates a user agent for fetching
-	rec = doRequest(t, env, "POST", "/api/user-agents/", map[string]interface{}{
-		"name": "VLC", "user_agent": "VLC/3.0", "is_default": true,
-	}, operatorToken)
-	require.Equal(t, http.StatusCreated, rec.Code)
-
-	// Step 6: Create an M3U account
+	// Step 5: Create an M3U account
 	rec = doRequest(t, env, "POST", "/api/m3u/accounts/", map[string]interface{}{
 		"name": "Primary IPTV", "url": "http://iptv.example.com/get.php?type=m3u_plus",
 		"type": "m3u", "max_streams": 2, "is_enabled": true,
@@ -1866,13 +1790,6 @@ func TestIntegration_EdgeCases(t *testing.T) {
 	t.Run("update non-existent stream profile", func(t *testing.T) {
 		rec := doRequest(t, env, "PUT", "/api/stream-profiles/999", map[string]interface{}{
 			"name": "Ghost",
-		}, env.adminToken)
-		assert.Equal(t, http.StatusNotFound, rec.Code)
-	})
-
-	t.Run("update non-existent user agent", func(t *testing.T) {
-		rec := doRequest(t, env, "PUT", "/api/user-agents/999", map[string]interface{}{
-			"name": "Ghost", "user_agent": "x",
 		}, env.adminToken)
 		assert.Equal(t, http.StatusNotFound, rec.Code)
 	})

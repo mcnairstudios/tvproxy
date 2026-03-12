@@ -41,6 +41,7 @@ func (h *ProxyHandler) Stream(w http.ResponseWriter, r *http.Request) {
 }
 
 // RawStream proxies a raw stream by stream ID (for preview/debug).
+// Supports ?profile=NAME to transcode via ffmpeg (e.g. ?profile=Browser).
 func (h *ProxyHandler) RawStream(w http.ResponseWriter, r *http.Request) {
 	streamID, err := urlParamInt64(r, "streamID")
 	if err != nil {
@@ -48,7 +49,9 @@ func (h *ProxyHandler) RawStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.proxyService.ProxyRawStream(r.Context(), w, r, streamID); err != nil {
+	profileOverride := r.URL.Query().Get("profile")
+
+	if err := h.proxyService.ProxyRawStream(r.Context(), w, r, streamID, profileOverride); err != nil {
 		h.log.Error().Err(err).Int64("stream_id", streamID).Msg("raw stream proxy failed")
 		respondError(w, http.StatusInternalServerError, "failed to proxy stream")
 		return

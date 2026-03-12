@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/xmltv"
@@ -19,7 +20,7 @@ type EPGService struct {
 	epgSourceRepo   *repository.EPGSourceRepository
 	epgDataRepo     *repository.EPGDataRepository
 	programDataRepo *repository.ProgramDataRepository
-	userAgentRepo   *repository.UserAgentRepository
+	config          *config.Config
 	log             zerolog.Logger
 }
 
@@ -28,14 +29,14 @@ func NewEPGService(
 	epgSourceRepo *repository.EPGSourceRepository,
 	epgDataRepo *repository.EPGDataRepository,
 	programDataRepo *repository.ProgramDataRepository,
-	userAgentRepo *repository.UserAgentRepository,
+	cfg *config.Config,
 	log zerolog.Logger,
 ) *EPGService {
 	return &EPGService{
 		epgSourceRepo:   epgSourceRepo,
 		epgDataRepo:     epgDataRepo,
 		programDataRepo: programDataRepo,
-		userAgentRepo:   userAgentRepo,
+		config:          cfg,
 		log:             log.With().Str("service", "epg").Logger(),
 	}
 }
@@ -243,10 +244,7 @@ func (s *EPGService) fetchURL(ctx context.Context, url string) (io.ReadCloser, e
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	ua, err := s.userAgentRepo.GetDefault(ctx)
-	if err == nil && ua != nil {
-		req.Header.Set("User-Agent", ua.UserAgent)
-	}
+	req.Header.Set("User-Agent", s.config.UserAgent)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

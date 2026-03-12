@@ -12,6 +12,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
 )
@@ -45,10 +46,10 @@ type ProxyService struct {
 	channelRepo        *repository.ChannelRepository
 	streamRepo         *repository.StreamRepository
 	m3uAccountRepo     *repository.M3UAccountRepository
-	userAgentRepo      *repository.UserAgentRepository
 	channelProfileRepo *repository.ChannelProfileRepository
 	streamProfileRepo  *repository.StreamProfileRepository
 	clientService      *ClientService
+	config             *config.Config
 	log                zerolog.Logger
 
 	mu          sync.RWMutex
@@ -60,20 +61,20 @@ func NewProxyService(
 	channelRepo *repository.ChannelRepository,
 	streamRepo *repository.StreamRepository,
 	m3uAccountRepo *repository.M3UAccountRepository,
-	userAgentRepo *repository.UserAgentRepository,
 	channelProfileRepo *repository.ChannelProfileRepository,
 	streamProfileRepo *repository.StreamProfileRepository,
 	clientService *ClientService,
+	cfg *config.Config,
 	log zerolog.Logger,
 ) *ProxyService {
 	return &ProxyService{
 		channelRepo:        channelRepo,
 		streamRepo:         streamRepo,
 		m3uAccountRepo:     m3uAccountRepo,
-		userAgentRepo:      userAgentRepo,
 		channelProfileRepo: channelProfileRepo,
 		streamProfileRepo:  streamProfileRepo,
 		clientService:      clientService,
+		config:             cfg,
 		log:                log.With().Str("service", "proxy").Logger(),
 		connections:        make(map[int64]*channelConnection),
 	}
@@ -211,13 +212,6 @@ func (s *ProxyService) startUpstream(ctx context.Context, r *http.Request, chann
 		return fmt.Errorf("no streams assigned to channel %d", channelID)
 	}
 
-	// Get user agent for upstream requests
-	var userAgent string
-	ua, err := s.userAgentRepo.GetDefault(ctx)
-	if err == nil && ua != nil {
-		userAgent = ua.UserAgent
-	}
-
 	// Try each stream in priority order (failover)
 	for _, cs := range channelStreams {
 		stream, err := s.streamRepo.GetByID(ctx, cs.StreamID)
@@ -258,10 +252,10 @@ func (s *ProxyService) startUpstream(ctx context.Context, r *http.Request, chann
 					Args:    "-hide_banner -loglevel warning -i {input} -c copy -f mpegts pipe:1",
 				}
 			}
-			reader, startErr = s.startFFmpeg(upstreamCtx, channelID, stream, ffmpegProfile, userAgent)
+			reader, startErr = s.startFFmpeg(upstreamCtx, channelID, stream, ffmpegProfile)
 		default:
 			// "proxy" and "direct" both use HTTP passthrough at the proxy endpoint
-			reader, startErr = s.startHTTPPassthrough(upstreamCtx, channelID, stream, userAgent)
+			reader, startErr = s.startHTTPPassthrough(upstreamCtx, channelID, stream)
 		}
 
 		if startErr != nil {
@@ -288,7 +282,7 @@ func (s *ProxyService) startUpstream(ctx context.Context, r *http.Request, chann
 }
 
 // startHTTPPassthrough opens a direct HTTP connection to the upstream (no transcoding).
-func (s *ProxyService) startHTTPPassthrough(ctx context.Context, channelID int64, stream *models.Stream, userAgent string) (io.ReadCloser, error) {
+func (s *ProxyService) startHTTPPassthrough(ctx context.Context, channelID int64, stream *models.Stream) (io.ReadCloser, error) {
 	s.log.Info().
 		Int64("channel_id", channelID).
 		Int64("stream_id", stream.ID).
@@ -301,9 +295,7 @@ func (s *ProxyService) startHTTPPassthrough(ctx context.Context, channelID int64
 		return nil, fmt.Errorf("creating upstream request: %w", err)
 	}
 
-	if userAgent != "" {
-		upstreamReq.Header.Set("User-Agent", userAgent)
-	}
+	upstreamReq.Header.Set("User-Agent", s.config.UserAgent)
 
 	resp, err := http.DefaultClient.Do(upstreamReq)
 	if err != nil {
@@ -348,14 +340,14 @@ func shellSplit(s string) []string {
 }
 
 // startFFmpeg spawns an ffmpeg process to transcode the upstream stream.
-func (s *ProxyService) startFFmpeg(ctx context.Context, channelID int64, stream *models.Stream, profile *models.StreamProfile, userAgent string) (io.ReadCloser, error) {
+func (s *ProxyService) startFFmpeg(ctx context.Context, channelID int64, stream *models.Stream, profile *models.StreamProfile) (io.ReadCloser, error) {
 	// Build the ffmpeg argument list from the stored args string.
 	// The args contain {input} as a placeholder for the stream URL.
 	argsStr := strings.Replace(profile.Args, "{input}", stream.URL, 1)
 	args := shellSplit(argsStr)
 
-	// Inject user agent before -i if one is configured and not already present
-	if userAgent != "" {
+	// Inject user agent before -i if not already present
+	{
 		hasUserAgent := false
 		for _, arg := range args {
 			if arg == "-user_agent" {
@@ -368,7 +360,7 @@ func (s *ProxyService) startFFmpeg(ctx context.Context, channelID int64, stream 
 				if arg == "-i" {
 					newArgs := make([]string, 0, len(args)+2)
 					newArgs = append(newArgs, args[:i]...)
-					newArgs = append(newArgs, "-user_agent", userAgent)
+					newArgs = append(newArgs, "-user_agent", s.config.UserAgent)
 					newArgs = append(newArgs, args[i:]...)
 					args = newArgs
 					break
@@ -537,9 +529,10 @@ func (s *ProxyService) cleanupConnection(channelID int64) {
 	s.mu.Unlock()
 }
 
-// ProxyRawStream proxies a raw stream by stream ID (for preview/debug).
-// This bypasses the channel → profile resolution chain and always does HTTP passthrough.
-func (s *ProxyService) ProxyRawStream(ctx context.Context, w http.ResponseWriter, r *http.Request, streamID int64) error {
+// ProxyRawStream proxies a raw stream by stream ID.
+// When profileOverride is set (e.g. "Browser"), the stream is transcoded via ffmpeg
+// using the named profile. Otherwise, raw HTTP passthrough is used.
+func (s *ProxyService) ProxyRawStream(ctx context.Context, w http.ResponseWriter, r *http.Request, streamID int64, profileOverride string) error {
 	stream, err := s.streamRepo.GetByID(ctx, streamID)
 	if err != nil {
 		return fmt.Errorf("stream not found: %w", err)
@@ -549,28 +542,95 @@ func (s *ProxyService) ProxyRawStream(ctx context.Context, w http.ResponseWriter
 		return fmt.Errorf("stream %d is inactive", streamID)
 	}
 
+	// Resolve profile if override is specified
+	var streamProfile *models.StreamProfile
+	if profileOverride != "" {
+		sp, err := s.streamProfileRepo.GetByName(ctx, profileOverride)
+		if err != nil {
+			return fmt.Errorf("profile %q not found: %w", profileOverride, err)
+		}
+		streamProfile = sp
+	}
+
+	// If we have a profile with args, use ffmpeg transcoding
+	if streamProfile != nil && streamProfile.Args != "" {
+		return s.proxyRawStreamFFmpeg(ctx, w, r, stream, streamProfile)
+	}
+
+	// Otherwise, raw HTTP passthrough
+	return s.proxyRawStreamPassthrough(ctx, w, r, stream)
+}
+
+// proxyRawStreamFFmpeg transcodes a raw stream through ffmpeg.
+func (s *ProxyService) proxyRawStreamFFmpeg(ctx context.Context, w http.ResponseWriter, r *http.Request, stream *models.Stream, profile *models.StreamProfile) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return fmt.Errorf("streaming not supported")
 	}
 
-	// Get user agent for upstream requests
-	var userAgent string
-	ua, err := s.userAgentRepo.GetDefault(ctx)
-	if err == nil && ua != nil {
-		userAgent = ua.UserAgent
+	contentType := "video/mp2t"
+	switch profile.Container {
+	case "mp4":
+		contentType = "video/mp4"
+	case "matroska":
+		contentType = "video/x-matroska"
+	case "webm":
+		contentType = "video/webm"
 	}
 
-	// Connect upstream BEFORE writing response headers so the handler
-	// can return a proper HTTP error if the upstream is unreachable.
+	// Use a background context so ffmpeg isn't killed before we start reading
+	ffmpegCtx, cancel := context.WithCancel(context.Background())
+
+	reader, err := s.startFFmpeg(ffmpegCtx, 0, stream, profile)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("starting ffmpeg: %w", err)
+	}
+
+	s.log.Info().Int64("stream_id", stream.ID).Str("url", stream.URL).Str("profile", profile.Name).Msg("raw stream ffmpeg proxy started")
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Connection", "close")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "no-cache, no-store")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	buf := make([]byte, tsBufferSize)
+	for {
+		n, readErr := reader.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				cancel()
+				reader.Close()
+				return nil // client disconnected
+			}
+			flusher.Flush()
+		}
+		if readErr != nil {
+			if readErr != io.EOF {
+				s.log.Error().Err(readErr).Int64("stream_id", stream.ID).Msg("raw stream ffmpeg read error")
+			}
+			cancel()
+			reader.Close()
+			return nil
+		}
+	}
+}
+
+// proxyRawStreamPassthrough does direct HTTP passthrough of a raw stream.
+func (s *ProxyService) proxyRawStreamPassthrough(ctx context.Context, w http.ResponseWriter, r *http.Request, stream *models.Stream) error {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return fmt.Errorf("streaming not supported")
+	}
+
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, stream.URL, nil)
 	if err != nil {
 		return fmt.Errorf("creating upstream request: %w", err)
 	}
 
-	if userAgent != "" {
-		upstreamReq.Header.Set("User-Agent", userAgent)
-	}
+	upstreamReq.Header.Set("User-Agent", s.config.UserAgent)
 
 	resp, err := http.DefaultClient.Do(upstreamReq)
 	if err != nil {
@@ -582,9 +642,8 @@ func (s *ProxyService) ProxyRawStream(ctx context.Context, w http.ResponseWriter
 		return fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 
-	s.log.Info().Int64("stream_id", streamID).Str("url", stream.URL).Msg("raw stream proxy started")
+	s.log.Info().Int64("stream_id", stream.ID).Str("url", stream.URL).Msg("raw stream passthrough started")
 
-	// Upstream confirmed — now write response headers
 	w.Header().Set("Content-Type", "video/mp2t")
 	w.Header().Set("Connection", "close")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -603,7 +662,7 @@ func (s *ProxyService) ProxyRawStream(ctx context.Context, w http.ResponseWriter
 		}
 		if readErr != nil {
 			if readErr != io.EOF {
-				s.log.Error().Err(readErr).Int64("stream_id", streamID).Msg("raw stream read error")
+				s.log.Error().Err(readErr).Int64("stream_id", stream.ID).Msg("raw stream read error")
 			}
 			return nil
 		}

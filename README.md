@@ -11,10 +11,11 @@ IPTV stream management and proxy server written in Go. Consolidates IPTV sources
 - **Stream Profiles** - Configurable transcoding profiles using ffmpeg (hardware-accelerated QSV/VA-API/NVENC/VideoToolbox supported), direct passthrough, or browser-friendly output
 - **Channel Profiles** - Assign stream profiles to groups of channels for consistent transcoding behavior
 - **EPG Support** - Import XMLTV EPG sources, auto-match programs to channels
+- **Client Detection** - Automatic player detection (Plex, VLC, Browser, user-defined) via HTTP header matching with per-client stream profiles
 - **Stream Proxy** - Fan-out proxy with per-channel connection sharing and automatic failover
 - **HDHomeRun Emulation** - Emulates multiple HDHomeRun devices, each on its own port, for native Plex/Emby/Jellyfin DVR integration. Includes SSDP and UDP discovery.
 - **Output Generation** - Serves M3U playlists and XMLTV EPG for any IPTV player
-- **Web Interface** - Built-in web UI for managing all aspects of the system
+- **Web Interface** - Built-in web UI with EPG guide grid, collapsible stream groups, in-browser playback, and data cache status indicators
 - **Authentication** - JWT-based auth with optional API key support
 - **Single Binary** - Everything including the web UI is embedded in a single Go binary
 - **SQLite Database** - No external database dependencies required
@@ -42,6 +43,7 @@ All configuration is via environment variables:
 | `TVPROXY_JWT_SECRET` | `change-me-in-production` | JWT signing secret |
 | `TVPROXY_API_KEY` | _(empty)_ | Optional API key for X-API-Key header auth |
 | `TVPROXY_BASE_URL` | _(required)_ | Base URL without port (e.g. `http://192.168.1.100`). Server port and per-device HDHR ports are appended automatically. |
+| `TVPROXY_USER_AGENT` | `TVProxy` | User-Agent header sent on upstream requests |
 | `TVPROXY_LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
 | `TVPROXY_LOG_JSON` | `false` | JSON log output |
 | `TVPROXY_M3U_REFRESH_INTERVAL` | `24h` | M3U auto-refresh interval |
@@ -123,15 +125,17 @@ docker compose up -d
 - `GET/POST /api/logos` - List/create logos
 - `GET/DELETE /api/logos/{id}` - Get/delete logo
 
-### User Agents
-- `GET/POST /api/user-agents` - List/create user agents
-- `GET/PUT/DELETE /api/user-agents/{id}` - Manage user agent
+### Clients
+- `GET/POST /api/clients` - List/create clients
+- `GET/PUT/DELETE /api/clients/{id}` - Manage client
 
 ### EPG
 - `GET/POST /api/epg/sources` - List/create EPG sources
 - `GET/PUT/DELETE /api/epg/sources/{id}` - Manage source
 - `POST /api/epg/sources/{id}/refresh` - Refresh EPG source
-- `GET /api/epg/data` - List EPG data
+- `GET /api/epg/data` - List EPG data (add `?programs=true` for full program listings)
+- `GET /api/epg/now?channel_id=` - Current program for a channel
+- `GET /api/epg/guide?hours=6&start=ISO` - EPG guide grid data
 
 ### HDHomeRun Devices
 - `GET/POST /api/hdhr/devices` - List/create devices
