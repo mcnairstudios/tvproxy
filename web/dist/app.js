@@ -234,6 +234,18 @@
     searchKeys: ['_display_name', 'group'],
   });
 
+  const channelsCache = new DataCache({
+    label: 'Channels',
+    loader: () => api.get('/api/channels'),
+    searchKeys: ['name', 'tvg_id'],
+  });
+
+  const channelGroupsCache = new DataCache({
+    label: 'Groups',
+    loader: () => api.get('/api/channel-groups'),
+    searchKeys: ['name'],
+  });
+
   // ─── Router ───────────────────────────────────────────────────────────
   function navigate(page) {
     state.currentPage = page;
@@ -324,7 +336,11 @@
           await auth.login(usernameInput.value, passwordInput.value);
           render();
           rebuildStreamNav();
-          streamsCache.getAll(); // pre-warm stream data while user views dashboard
+          streamsCache.getAll();
+          epgCache.getAll();
+          logosCache.getAll();
+          channelsCache.getAll();
+          channelGroupsCache.getAll();
         } catch (err) {
           errorEl.textContent = err.message;
           errorEl.classList.add('visible');
@@ -417,8 +433,8 @@
       let channels, groups, guideData;
       try {
         [channels, groups, guideData] = await Promise.all([
-          api.get('/api/channels'),
-          api.get('/api/channel-groups'),
+          channelsCache.getAll(),
+          channelGroupsCache.getAll(),
           api.get('/api/epg/guide?hours=' + currentHours),
         ]);
       } catch (err) {
@@ -969,8 +985,8 @@
     try {
       const [accounts, channels, groups, epgSources, devices] = await Promise.all([
         api.get('/api/m3u/accounts').catch(() => []),
-        api.get('/api/channels').catch(() => []),
-        api.get('/api/channel-groups').catch(() => []),
+        channelsCache.getAll().catch(() => []),
+        channelGroupsCache.getAll().catch(() => []),
         api.get('/api/epg/sources').catch(() => []),
         api.get('/api/hdhr/devices').catch(() => []),
       ]);
@@ -1470,6 +1486,124 @@
               wrapper,
               field.help ? h('div', { className: 'help-text' }, field.help) : null,
             ));
+          } else if (field.type === 'logo-picker') {
+            const wrapper = h('div', { className: 'autocomplete-wrapper' });
+            wrapper._selectedLogoId = null;
+            wrapper.value = '';
+
+            function renderDisplay(logo) {
+              wrapper.innerHTML = '';
+              if (!logo) {
+                renderSearch();
+                return;
+              }
+              wrapper._selectedLogoId = logo.id;
+              wrapper.value = String(logo.id);
+              const display = h('div', { className: 'logo-picker-display' });
+              if (logo.url) {
+                display.appendChild(h('img', { src: logo.url, style: 'width:32px;height:32px;object-fit:contain;border-radius:2px;background:var(--bg-input);' }));
+              }
+              const nameLink = h('a', { href: '#', style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }, logo.name || 'Untitled');
+              nameLink.addEventListener('click', (e) => { e.preventDefault(); navigate('logos'); });
+              display.appendChild(nameLink);
+              const changeLink = h('a', { href: '#', style: 'font-size:13px;flex-shrink:0;' }, 'Change');
+              changeLink.addEventListener('click', (e) => { e.preventDefault(); renderSearch(); });
+              display.appendChild(changeLink);
+              const removeBtn = h('span', { style: 'cursor:pointer;color:var(--text-muted);font-size:16px;flex-shrink:0;', title: 'Remove logo' }, '\u00d7');
+              removeBtn.addEventListener('click', () => {
+                wrapper._selectedLogoId = null;
+                wrapper.value = '';
+                renderSearch();
+              });
+              display.appendChild(removeBtn);
+              wrapper.appendChild(display);
+            }
+
+            function renderSearch() {
+              wrapper.innerHTML = '';
+              const inp = h('input', { type: 'text', id: 'field-' + field.key, placeholder: 'Search logos...' });
+              const dropdown = h('div', { className: 'autocomplete-dropdown' });
+              dropdown.style.display = 'none';
+              let selectedIdx = -1;
+
+              function renderDropdown(query) {
+                dropdown.innerHTML = '';
+                const q = (query || '').toLowerCase();
+                if (q.length < 1) { dropdown.style.display = 'none'; return; }
+                const matches = field.cache.search(q, 50);
+                if (matches.length === 0) { dropdown.style.display = 'none'; return; }
+                selectedIdx = -1;
+                for (let i = 0; i < matches.length; i++) {
+                  const opt = matches[i];
+                  const row = h('div', { className: 'autocomplete-item' });
+                  if (opt.url) {
+                    row.appendChild(h('img', { src: opt.url, className: 'autocomplete-icon' }));
+                  }
+                  const text = h('div', { className: 'autocomplete-text' });
+                  text.appendChild(h('div', { className: 'autocomplete-name' }, opt.name || ''));
+                  row.appendChild(text);
+                  row.addEventListener('click', () => { renderDisplay(opt); });
+                  dropdown.appendChild(row);
+                }
+                dropdown.style.display = 'block';
+              }
+
+              inp.addEventListener('focus', async () => {
+                await field.cache.getAll();
+                renderDropdown(inp.value);
+              });
+              inp.addEventListener('input', () => { renderDropdown(inp.value); });
+              inp.addEventListener('keydown', (e) => {
+                const items = dropdown.querySelectorAll('.autocomplete-item');
+                if (!items.length) return;
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  selectedIdx = Math.min(selectedIdx + 1, items.length - 1);
+                  items.forEach((el, i) => el.classList.toggle('selected', i === selectedIdx));
+                  items[selectedIdx].scrollIntoView({ block: 'nearest' });
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  selectedIdx = Math.max(selectedIdx - 1, 0);
+                  items.forEach((el, i) => el.classList.toggle('selected', i === selectedIdx));
+                  items[selectedIdx].scrollIntoView({ block: 'nearest' });
+                } else if (e.key === 'Enter' && selectedIdx >= 0) {
+                  e.preventDefault();
+                  items[selectedIdx].click();
+                } else if (e.key === 'Escape') {
+                  dropdown.style.display = 'none';
+                }
+              });
+
+              setTimeout(() => {
+                document.addEventListener('click', function lpClose(e) {
+                  if (!wrapper.contains(e.target)) {
+                    dropdown.style.display = 'none';
+                  }
+                });
+              }, 0);
+
+              wrapper.appendChild(inp);
+              wrapper.appendChild(dropdown);
+            }
+
+            wrapper._setLogo = function(logo) { renderDisplay(logo); };
+
+            if (isEdit && item.logo_id) {
+              field.cache.getAll().then(logos => {
+                const found = logos.find(l => l.id === item.logo_id);
+                if (found) renderDisplay(found);
+                else renderSearch();
+              });
+            } else {
+              renderSearch();
+            }
+
+            inputs[field.key] = wrapper;
+            formEl.appendChild(h('div', { className: 'form-group' },
+              h('label', null, field.label),
+              wrapper,
+              field.help ? h('div', { className: 'help-text' }, field.help) : null,
+            ));
           } else if (field.type === 'async-select') {
             const sel = h('select', { id: 'field-' + field.key });
             sel.appendChild(h('option', { value: '' }, field.emptyLabel || '-- None --'));
@@ -1581,6 +1715,8 @@
                 const checked = [];
                 el.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => checked.push(Number(cb.value)));
                 body[field.key] = checked;
+              } else if (field.type === 'logo-picker') {
+                body[field.key] = el._selectedLogoId || null;
               } else {
                 body[field.key] = el.value;
               }
@@ -1594,6 +1730,7 @@
               toast.success(config.singular + ' created');
             }
             if (config.postSave) await config.postSave(result, inputs, isEdit, item);
+            if (config.onChange) config.onChange();
             await reloadData();
           },
           isEdit ? 'Save Changes' : 'Create',
@@ -1607,6 +1744,7 @@
         try {
           await api.del(config.apiPath + '/' + item.id);
           toast.success(config.singular + ' deleted');
+          if (config.onChange) config.onChange();
           await reloadData();
         } catch (err) {
           toast.error(err.message);
@@ -1632,6 +1770,10 @@
     const MAX_RETRIES = 3;
     let retryTimeout = null;
     let statsInterval = null;
+    let progInterval = null;
+    let nowProgram = null;
+    let currentContainer = '';
+    let currentCodec = '';
 
     function destroyPlayer() {
       if (mpegtsPlayer) {
@@ -1646,6 +1788,7 @@
     function cleanup() {
       if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
       if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
+      if (progInterval) { clearInterval(progInterval); progInterval = null; }
       destroyPlayer();
       video.oncanplay = null;
       video.onerror = null;
@@ -1693,6 +1836,14 @@
     header.appendChild(titleEl);
     header.appendChild(btnGroup);
     modal.appendChild(header);
+
+    // Programme progress bar
+    const progBar = document.createElement('div');
+    progBar.style.cssText = 'height:2px;background:var(--border);border-radius:1px;overflow:hidden;display:none;';
+    const progFill = document.createElement('div');
+    progFill.style.cssText = 'height:100%;background:var(--accent);width:0%;transition:width 1s linear;';
+    progBar.appendChild(progFill);
+    modal.appendChild(progBar);
 
     // Video container (relative for stats overlay)
     const videoWrap = document.createElement('div');
@@ -1744,13 +1895,55 @@
     }
 
     // ── EPG Now Playing ──
+    function formatTime(d) {
+      return new Date(d).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    }
+
+    function buildStatusSuffix() {
+      if (!nowProgram) return '';
+      let suffix = ' \u2014 ' + nowProgram.title;
+      if (nowProgram.start && nowProgram.stop) {
+        suffix += ' (' + formatTime(nowProgram.start) + ' - ' + formatTime(nowProgram.stop) + ')';
+      }
+      return suffix;
+    }
+
+    function updateStatusText() {
+      let codecInfo = '';
+      if (currentCodec) {
+        codecInfo = currentContainer ? '(' + currentCodec + '/' + currentContainer + ')' : '(' + currentCodec + ')';
+      } else if (currentContainer) {
+        codecInfo = '(' + currentContainer + ')';
+      }
+      statusEl.textContent = 'Playing' + (codecInfo ? ' ' + codecInfo : '') + buildStatusSuffix();
+    }
+
+    function updateProgress() {
+      if (!nowProgram || !nowProgram.start || !nowProgram.stop) return;
+      const start = new Date(nowProgram.start).getTime();
+      const stop = new Date(nowProgram.stop).getTime();
+      const now = Date.now();
+      const pct = Math.max(0, Math.min(100, ((now - start) / (stop - start)) * 100));
+      progFill.style.width = pct + '%';
+      progBar.style.display = 'block';
+      if (pct >= 100 && progInterval) {
+        clearInterval(progInterval);
+        progInterval = null;
+        fetchNowPlaying();
+      }
+    }
+
     function fetchNowPlaying() {
       if (!tvgId) return;
       api.get('/api/epg/now?channel_id=' + encodeURIComponent(tvgId)).then(program => {
         if (program && program.title) {
-          statusEl.textContent += ' \u2014 ' + program.title;
+          nowProgram = program;
+          updateStatusText();
+          updateProgress();
+          if (progInterval) clearInterval(progInterval);
+          progInterval = setInterval(updateProgress, 10000);
         }
-      }).catch(() => {}); // silently ignore — EPG data may not exist
+      }).catch(() => {});
     }
 
     // ── Playback ──
@@ -1761,6 +1954,12 @@
       destroyPlayer();
       if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
       if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
+      if (progInterval) { clearInterval(progInterval); progInterval = null; }
+      currentContainer = '';
+      currentCodec = '';
+      nowProgram = null;
+      progBar.style.display = 'none';
+      progFill.style.width = '0%';
       video.removeAttribute('src');
 
       if (isBrowserProfile) {
@@ -1770,8 +1969,9 @@
         video.src = url;
         video.oncanplay = () => {
           statusEl.style.color = '#4caf50';
-          statusEl.textContent = 'Playing (fMP4)';
+          currentContainer = 'fMP4';
           retryCount = 0;
+          updateStatusText();
           fetchNowPlaying();
         };
         video.play().catch(() => handleRetry());
@@ -1807,7 +2007,10 @@
           retryCount = 0;
           if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
           statusEl.style.color = '#4caf50';
-          statusEl.textContent = 'Playing';
+          const mi = mpegtsPlayer.mediaInfo || {};
+          currentCodec = codecName(mi.videoCodec);
+          currentContainer = 'MPEG-TS';
+          updateStatusText();
           fetchNowPlaying();
         });
 
@@ -1846,6 +2049,21 @@
     };
 
     startPlayback();
+  }
+
+  async function findOrCreateLogoByUrl(url, name, inputs) {
+    const logos = await logosCache.getAll();
+    const found = logos.find(l => l.url === url);
+    if (found) {
+      inputs.logo_id._setLogo(found);
+      return;
+    }
+    try {
+      const newLogo = await api.post('/api/logos', { name: name || 'Logo', url: url });
+      logosCache.invalidate();
+      inputs.logo_id._setLogo(newLogo);
+    } catch {
+    }
   }
 
   // ─── Page Definitions ─────────────────────────────────────────────────
@@ -1904,6 +2122,7 @@
       apiPath: '/api/channels',
       create: true,
       update: true,
+      onChange: () => channelsCache.invalidate(),
       columns: [
         { key: 'channel_number', label: '#' },
         { key: 'name', label: 'Name' },
@@ -1926,23 +2145,19 @@
           valueKey: 'channel_id',
           displayKey: 'name',
           onSelect: (epg, inputs) => {
-            if (epg.icon && inputs.logo && !inputs.logo.value) {
-              inputs.logo.value = epg.icon;
+            if (epg.icon && inputs.logo_id && !inputs.logo_id._selectedLogoId) {
+              findOrCreateLogoByUrl(epg.icon, epg.name, inputs);
             }
           },
         },
         {
-          key: 'logo', label: 'Logo', type: 'autocomplete',
-          placeholder: 'Search logos or paste URL...',
-          help: 'Search saved logos by name, or paste a URL directly.',
+          key: 'logo_id', label: 'Logo', type: 'logo-picker',
           cache: logosCache,
-          valueKey: 'url',
-          displayKey: 'name',
         },
         {
           key: 'channel_group_id', label: 'Channel Group', type: 'async-select',
           emptyLabel: '-- No Group --',
-          loadOptions: () => api.get('/api/channel-groups'),
+          loadOptions: () => channelGroupsCache.getAll(),
           valueKey: 'id', displayKey: 'name',
           help: 'Organize channels into groups (e.g., Sports, Entertainment)',
         },
@@ -2019,8 +2234,8 @@
 
             if (bestMatch && bestScore >= 70) {
               inputs.tvg_id.value = bestMatch.channel_id;
-              if (bestMatch.icon && inputs.logo && !inputs.logo.value) {
-                inputs.logo.value = bestMatch.icon;
+              if (bestMatch.icon && inputs.logo_id && !inputs.logo_id._selectedLogoId) {
+                findOrCreateLogoByUrl(bestMatch.icon, bestMatch.name, inputs);
               }
               toast.info('Auto-matched EPG: ' + bestMatch.name + ' (' + bestMatch.channel_id + ')');
             }
@@ -2050,6 +2265,7 @@
       apiPath: '/api/channel-groups',
       create: true,
       update: true,
+      onChange: () => channelGroupsCache.invalidate(),
       columns: [
         { key: 'name', label: 'Name' },
         { key: 'sort_order', label: 'Sort Order' },
@@ -2211,7 +2427,7 @@
         },
         {
           key: 'channel_group_ids', label: 'Channel Groups', type: 'async-multi-select',
-          loadOptions: () => api.get('/api/channel-groups'),
+          loadOptions: () => channelGroupsCache.getAll(),
           valueKey: 'id', displayKey: 'name',
           help: 'Only serve channels in these groups. Leave all unchecked for all channels.',
         },
@@ -2550,8 +2766,12 @@
     }
     render();
     if (auth.isLoggedIn()) {
-      rebuildStreamNav(); // fire-and-forget; re-renders when done
-      streamsCache.getAll(); // pre-warm stream data while user views dashboard
+      rebuildStreamNav();
+      streamsCache.getAll();
+      epgCache.getAll();
+      logosCache.getAll();
+      channelsCache.getAll();
+      channelGroupsCache.getAll();
     }
   }
 
