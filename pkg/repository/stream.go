@@ -20,6 +20,10 @@ func NewStreamRepository(db *database.DB) *StreamRepository {
 	return &StreamRepository{db: db}
 }
 
+func (r *StreamRepository) Checkpoint(ctx context.Context) {
+	r.db.Checkpoint(ctx)
+}
+
 func (r *StreamRepository) Create(ctx context.Context, stream *models.Stream) error {
 	now := time.Now()
 	stream.ID = uuid.New().String()

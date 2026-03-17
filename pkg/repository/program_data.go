@@ -29,6 +29,10 @@ func NewProgramDataRepository(db *database.DB) *ProgramDataRepository {
 	return &ProgramDataRepository{db: db}
 }
 
+func (r *ProgramDataRepository) Checkpoint(ctx context.Context) {
+	r.db.Checkpoint(ctx)
+}
+
 func (r *ProgramDataRepository) Create(ctx context.Context, program *models.ProgramData) error {
 	program.ID = uuid.New().String()
 	_, err := r.db.ExecContext(ctx,

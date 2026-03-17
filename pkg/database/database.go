@@ -21,12 +21,19 @@ func New(ctx context.Context, dbPath string, log zerolog.Logger) (*DB, error) {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 
-	sqlDB.SetMaxOpenConns(4)
-	sqlDB.SetMaxIdleConns(2)
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
 
 	if err := sqlDB.PingContext(ctx); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("pinging database: %w", err)
+	}
+
+	// Disable auto-checkpoint — we run PASSIVE checkpoints manually
+	// so they never block reads or writes.
+	if _, err := sqlDB.ExecContext(ctx, "PRAGMA wal_autocheckpoint = 0"); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("setting wal autocheckpoint: %w", err)
 	}
 
 	db := &DB{DB: sqlDB, log: log}
@@ -51,6 +58,12 @@ func (db *DB) InTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (db *DB) Checkpoint(ctx context.Context) {
+	if _, err := db.ExecContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)"); err != nil {
+		db.log.Warn().Err(err).Msg("wal checkpoint failed")
+	}
 }
 
 func (db *DB) migrate(ctx context.Context) error {

@@ -327,6 +327,7 @@ func main() {
 	wm.Add("hdhr_discover", worker.NewHDHRDiscoverWorker(hdhrDeviceRepo, cfg.BaseURL, log))
 	wm.Add("hdhr_servers", worker.NewHDHRServerWorker(hdhrDeviceRepo, hdhrService, proxyService, outputService, cfg, log))
 	wm.Add("vod_cleanup", worker.NewVODCleanupWorker(vodService, 60*time.Second, log))
+	wm.Add("wal_checkpoint", worker.NewWALCheckpointWorker(db, 5*time.Minute, log))
 
 	wm.Start(ctx)
 

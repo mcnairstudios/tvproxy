@@ -145,6 +145,7 @@ func (s *M3UService) RefreshAccount(ctx context.Context, accountID string) error
 		return fmt.Errorf("deleting stale streams: %w", err)
 	}
 
+	s.streamRepo.Checkpoint(ctx)
 	s.log.Info().Int("count", len(streams)).Msg("upserted streams")
 
 	// Update account refresh time and stream count

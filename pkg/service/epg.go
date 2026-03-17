@@ -179,7 +179,6 @@ func (s *EPGService) RefreshSource(ctx context.Context, sourceID string) error {
 		})
 	}
 
-	// Insert programs in batches of 5000 to avoid holding a giant transaction
 	const batchSize = 5000
 	programCount := 0
 	for i := 0; i < len(programs); i += batchSize {
@@ -195,7 +194,8 @@ func (s *EPGService) RefreshSource(ctx context.Context, sourceID string) error {
 		s.log.Debug().Int("inserted", programCount).Int("total", len(programs)).Msg("program data bulk insert progress")
 	}
 
-	// Update source metadata
+	s.programDataRepo.Checkpoint(ctx)
+
 	now := time.Now()
 	source.LastRefreshed = &now
 	source.ChannelCount = len(tv.Channels)
