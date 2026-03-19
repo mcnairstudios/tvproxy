@@ -359,11 +359,11 @@ func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream
 func (s *ProxyService) waitFFmpeg(ctx context.Context, channelID string, cmd *exec.Cmd) {
 	waitErr := cmd.Wait()
 	if waitErr == nil {
-		s.log.Info().Str("channel_id", channelID).Msg("ffmpeg process finished")
+		s.log.Info().Str("channel_id", channelID).Msg("proxy ffmpeg finished (stream ended)")
 		return
 	}
 	if ctx.Err() != nil && cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == -1 {
-		s.log.Info().Str("channel_id", channelID).Msg("ffmpeg process stopped")
+		s.log.Info().Str("channel_id", channelID).Msg("proxy ffmpeg stopped (client disconnected)")
 		return
 	}
 	exitCode := -1

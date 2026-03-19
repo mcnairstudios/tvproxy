@@ -106,7 +106,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	hdhrHandler := NewHDHRHandler(hdhrService, hdhrDeviceRepo, proxyService, cfg)
 	outputHandler := NewOutputHandler(outputService)
 	vodHandler := NewVODHandler(vodService, log)
-	settingsHandler := NewSettingsHandler(settingsService)
+	settingsHandler := NewSettingsHandler(settingsService, db, authService)
 	clientHandler := NewClientHandler(clientService)
 
 	// Router (mirrors main.go)
@@ -254,6 +254,8 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 			r.Use(authMW.RequireAdmin)
 			r.Get("/", settingsHandler.List)
 			r.Put("/", settingsHandler.Update)
+			r.Post("/soft-reset", settingsHandler.SoftReset)
+			r.Post("/hard-reset", settingsHandler.HardReset)
 		})
 
 		r.Route("/api/clients", func(r chi.Router) {
@@ -2413,4 +2415,96 @@ func TestIntegration_InviteFlow(t *testing.T) {
 		"username": "another_user",
 	}, env.userToken)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+// =============================================================================
+// Reset Tests
+// =============================================================================
+
+func TestIntegration_SoftReset(t *testing.T) {
+	env := setupFullEnv(t)
+
+	t.Run("non-admin denied", func(t *testing.T) {
+		rec := doRequest(t, env, "POST", "/api/settings/soft-reset", nil, env.userToken)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+	})
+
+	t.Run("unauthenticated denied", func(t *testing.T) {
+		rec := doRequest(t, env, "POST", "/api/settings/soft-reset", nil, "")
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("admin succeeds", func(t *testing.T) {
+		// Verify seeded stream profiles exist before reset
+		rec := doRequest(t, env, "GET", "/api/stream-profiles/", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var profiles []map[string]interface{}
+		decodeResponse(t, rec, &profiles)
+		assert.Greater(t, len(profiles), 0)
+
+		// Perform soft reset
+		rec = doRequest(t, env, "POST", "/api/settings/soft-reset", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		// Stream profiles should be re-seeded (10 = 2 system + 5 regular + 3 client)
+		rec = doRequest(t, env, "GET", "/api/stream-profiles/", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		decodeResponse(t, rec, &profiles)
+		assert.Equal(t, 10, len(profiles))
+
+		// Channels should be empty
+		rec = doRequest(t, env, "GET", "/api/channels/", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var channels []map[string]interface{}
+		decodeResponse(t, rec, &channels)
+		assert.Len(t, channels, 0)
+
+		// Users should still exist
+		rec = doRequest(t, env, "GET", "/api/users/", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var users []map[string]interface{}
+		decodeResponse(t, rec, &users)
+		assert.Equal(t, 2, len(users))
+	})
+}
+
+func TestIntegration_HardReset(t *testing.T) {
+	env := setupFullEnv(t)
+
+	t.Run("non-admin denied", func(t *testing.T) {
+		rec := doRequest(t, env, "POST", "/api/settings/hard-reset", nil, env.userToken)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+	})
+
+	t.Run("admin succeeds", func(t *testing.T) {
+		// Perform hard reset
+		rec := doRequest(t, env, "POST", "/api/settings/hard-reset", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		// Old tokens are invalid after hard reset (users table was dropped and recreated)
+		// Login with the default admin/admin credentials
+		newToken, _ := loginHelper(t, env, "admin", "admin")
+
+		// Seeded stream profiles should be back
+		rec = doRequest(t, env, "GET", "/api/stream-profiles/", nil, newToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var profiles []map[string]interface{}
+		decodeResponse(t, rec, &profiles)
+		assert.Equal(t, 10, len(profiles))
+
+		// Seeded clients should be back
+		rec = doRequest(t, env, "GET", "/api/clients/", nil, newToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var clients []map[string]interface{}
+		decodeResponse(t, rec, &clients)
+		assert.Equal(t, 3, len(clients))
+
+		// Only the new default admin user should exist
+		rec = doRequest(t, env, "GET", "/api/users/", nil, newToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var users []map[string]interface{}
+		decodeResponse(t, rec, &users)
+		assert.Equal(t, 1, len(users))
+		assert.Equal(t, "admin", users[0]["username"])
+	})
 }

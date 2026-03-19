@@ -112,7 +112,7 @@ func main() {
 	outputHandler := handler.NewOutputHandler(outputService)
 	proxyHandler := handler.NewProxyHandler(proxyService, log)
 	vodHandler := handler.NewVODHandler(vodService, log)
-	settingsHandler := handler.NewSettingsHandler(settingsService)
+	settingsHandler := handler.NewSettingsHandler(settingsService, db, authService)
 	clientHandler := handler.NewClientHandler(clientService)
 
 	// Router
@@ -159,6 +159,7 @@ func main() {
 	r.Post("/channel/{channelID}/vod", vodHandler.CreateChannelSession)
 	r.Get("/vod/{sessionID}/status", vodHandler.Status)
 	r.Get("/vod/{sessionID}/seek", vodHandler.Seek)
+	r.Get("/vod/{sessionID}/stream", vodHandler.Stream)
 	r.Delete("/vod/{sessionID}", vodHandler.DeleteSession)
 
 	// Authenticated API routes
@@ -280,6 +281,8 @@ func main() {
 			r.Use(authMW.RequireAdmin)
 			r.Get("/", settingsHandler.List)
 			r.Put("/", settingsHandler.Update)
+			r.Post("/soft-reset", settingsHandler.SoftReset)
+			r.Post("/hard-reset", settingsHandler.HardReset)
 		})
 
 		r.Route("/api/clients", func(r chi.Router) {

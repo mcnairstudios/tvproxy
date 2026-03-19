@@ -243,128 +243,134 @@ var migrations = []migration{
 	{
 		name: "seed_data",
 		fn: func(ctx context.Context, db *sql.DB) error {
-			type profileSeed struct {
-				name       string
-				streamMode string
-				sourceType string
-				hwaccel    string
-				videoCodec string
-				container  string
-				isDefault  bool
-				isSystem   bool
-			}
-
-			profiles := []profileSeed{
-				{"Direct", "direct", "m3u", "none", "copy", "mpegts", false, true},
-				{"Proxy", "proxy", "m3u", "none", "copy", "mpegts", true, true},
-				{"Browser", "ffmpeg", "m3u", "none", "copy", "mp4", false, false},
-				{"SAT>IP Copy", "ffmpeg", "satip", "none", "copy", "mpegts", false, false},
-				{"M3U Copy", "ffmpeg", "m3u", "none", "copy", "mpegts", false, false},
-				{"M3U → MP4", "ffmpeg", "m3u", "none", "copy", "mp4", false, false},
-				{"M3U → Matroska", "ffmpeg", "m3u", "none", "copy", "matroska", false, false},
-			}
-
-			profileIDs := make(map[string]string)
-			for _, p := range profiles {
-				id := uuid.New().String()
-				args := ffmpeg.ComposeStreamProfileArgs(p.sourceType, p.hwaccel, p.videoCodec, p.container)
-				command := "ffmpeg"
-				if p.streamMode == "direct" || p.streamMode == "proxy" {
-					command = ""
-					args = ""
-				}
-				if _, err := db.ExecContext(ctx,
-					`INSERT INTO stream_profiles (id, name, stream_mode, source_type, hwaccel, video_codec, container, custom_args, command, args, is_default, is_system)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
-					id, p.name, p.streamMode, p.sourceType, p.hwaccel, p.videoCodec, p.container, command, args, p.isDefault, p.isSystem); err != nil {
-					return err
-				}
-				profileIDs[p.name] = id
-			}
-
-			type clientSeed struct {
-				name       string
-				priority   int
-				sourceType string
-				container  string
-				rules      []struct {
-					headerName string
-					matchType  string
-					matchValue string
-				}
-			}
-
-			clients := []clientSeed{
-				{
-					name:       "Plex",
-					priority:   10,
-					sourceType: "m3u",
-					container:  "mpegts",
-					rules: []struct {
-						headerName string
-						matchType  string
-						matchValue string
-					}{
-						{"User-Agent", "contains", "Lavf/"},
-						{"Icy-Metadata", "exists", ""},
-					},
-				},
-				{
-					name:       "VLC",
-					priority:   20,
-					sourceType: "m3u",
-					container:  "matroska",
-					rules: []struct {
-						headerName string
-						matchType  string
-						matchValue string
-					}{
-						{"User-Agent", "contains", "VLC/"},
-					},
-				},
-				{
-					name:       "Browser",
-					priority:   100,
-					sourceType: "m3u",
-					container:  "mp4",
-					rules: []struct {
-						headerName string
-						matchType  string
-						matchValue string
-					}{
-						{"User-Agent", "contains", "Mozilla/"},
-					},
-				},
-			}
-
-			for _, c := range clients {
-				args := ffmpeg.ComposeStreamProfileArgs(c.sourceType, "none", "copy", c.container)
-				profileID := uuid.New().String()
-				if _, err := db.ExecContext(ctx,
-					`INSERT INTO stream_profiles (id, name, stream_mode, source_type, hwaccel, video_codec, container, custom_args, command, args, is_default, is_system, is_client)
-					 VALUES (?, ?, 'ffmpeg', ?, 'none', 'copy', ?, '', 'ffmpeg', ?, 0, 0, 1)`,
-					profileID, c.name, c.sourceType, c.container, args); err != nil {
-					return err
-				}
-
-				clientID := uuid.New().String()
-				if _, err := db.ExecContext(ctx,
-					`INSERT INTO clients (id, name, priority, stream_profile_id, is_enabled) VALUES (?, ?, ?, ?, 1)`,
-					clientID, c.name, c.priority, profileID); err != nil {
-					return err
-				}
-
-				for _, r := range c.rules {
-					ruleID := uuid.New().String()
-					if _, err := db.ExecContext(ctx,
-						`INSERT INTO client_match_rules (id, client_id, header_name, match_type, match_value) VALUES (?, ?, ?, ?, ?)`,
-						ruleID, clientID, r.headerName, r.matchType, r.matchValue); err != nil {
-						return err
-					}
-				}
-			}
-
-			return nil
+			return seedData(ctx, db)
 		},
 	},
+}
+
+func seedData(ctx context.Context, db execContext) error {
+	type profileSeed struct {
+		name       string
+		streamMode string
+		sourceType string
+		hwaccel    string
+		videoCodec string
+		container  string
+		isDefault  bool
+		isSystem   bool
+	}
+
+	profiles := []profileSeed{
+		{"Direct", "direct", "m3u", "none", "copy", "mpegts", false, true},
+		{"Proxy", "proxy", "m3u", "none", "copy", "mpegts", true, true},
+		{"Browser", "ffmpeg", "m3u", "none", "copy", "mp4", false, false},
+		{"SAT>IP Copy", "ffmpeg", "satip", "none", "copy", "mpegts", false, false},
+		{"M3U Copy", "ffmpeg", "m3u", "none", "copy", "mpegts", false, false},
+		{"M3U → MP4", "ffmpeg", "m3u", "none", "copy", "mp4", false, false},
+		{"M3U → Matroska", "ffmpeg", "m3u", "none", "copy", "matroska", false, false},
+	}
+
+	for _, p := range profiles {
+		id := uuid.New().String()
+		args := ffmpeg.ComposeStreamProfileArgs(p.sourceType, p.hwaccel, p.videoCodec, p.container)
+		command := "ffmpeg"
+		if p.streamMode == "direct" || p.streamMode == "proxy" {
+			command = ""
+			args = ""
+		}
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO stream_profiles (id, name, stream_mode, source_type, hwaccel, video_codec, container, custom_args, command, args, is_default, is_system)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
+			id, p.name, p.streamMode, p.sourceType, p.hwaccel, p.videoCodec, p.container, command, args, p.isDefault, p.isSystem); err != nil {
+			return err
+		}
+	}
+
+	type clientSeed struct {
+		name       string
+		priority   int
+		sourceType string
+		container  string
+		rules      []struct {
+			headerName string
+			matchType  string
+			matchValue string
+		}
+	}
+
+	clients := []clientSeed{
+		{
+			name:       "Plex",
+			priority:   10,
+			sourceType: "m3u",
+			container:  "mpegts",
+			rules: []struct {
+				headerName string
+				matchType  string
+				matchValue string
+			}{
+				{"User-Agent", "contains", "Lavf/"},
+				{"Icy-Metadata", "exists", ""},
+			},
+		},
+		{
+			name:       "VLC",
+			priority:   20,
+			sourceType: "m3u",
+			container:  "matroska",
+			rules: []struct {
+				headerName string
+				matchType  string
+				matchValue string
+			}{
+				{"User-Agent", "contains", "VLC/"},
+			},
+		},
+		{
+			name:       "Browser",
+			priority:   100,
+			sourceType: "m3u",
+			container:  "mp4",
+			rules: []struct {
+				headerName string
+				matchType  string
+				matchValue string
+			}{
+				{"User-Agent", "contains", "Mozilla/"},
+			},
+		},
+	}
+
+	for _, c := range clients {
+		args := ffmpeg.ComposeStreamProfileArgs(c.sourceType, "none", "copy", c.container)
+		profileID := uuid.New().String()
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO stream_profiles (id, name, stream_mode, source_type, hwaccel, video_codec, container, custom_args, command, args, is_default, is_system, is_client)
+			 VALUES (?, ?, 'ffmpeg', ?, 'none', 'copy', ?, '', 'ffmpeg', ?, 0, 0, 1)`,
+			profileID, c.name, c.sourceType, c.container, args); err != nil {
+			return err
+		}
+
+		clientID := uuid.New().String()
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO clients (id, name, priority, stream_profile_id, is_enabled) VALUES (?, ?, ?, ?, 1)`,
+			clientID, c.name, c.priority, profileID); err != nil {
+			return err
+		}
+
+		for _, r := range c.rules {
+			ruleID := uuid.New().String()
+			if _, err := db.ExecContext(ctx,
+				`INSERT INTO client_match_rules (id, client_id, header_name, match_type, match_value) VALUES (?, ?, ?, ?, ?)`,
+				ruleID, clientID, r.headerName, r.matchType, r.matchValue); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+type execContext interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }

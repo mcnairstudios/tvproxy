@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make test:*)",
+      "Bash(node:*)",
+      "Bash(make docker-build:*)",
+      "Bash(grep:*)",
+      "Bash(python3:*)",
+      "Bash(ls:*)",
+      "Bash(make build:*)",
+      "Bash(curl:*)",
+      "Bash(SESSION_ID=\"71065b32-1659-48f3-b224-3cd00b5f1828\")",
+      "Bash(__NEW_LINE_df3c8a42cd3be0e1__ echo \"=== VOD Status ===\")",
+      "Bash(1 echo \"Exit: $?\" ls -la /tmp/vod-seek-test.mp4 echo \"\" echo \"=== Probe the seek output ===\" ffprobe -hide_banner /tmp/vod-seek-test.mp4)",
+      "Bash(CHANNEL_ID=\"71065b32-1659-48f3-b224-3cd00b5f1828\")",
+      "Bash(__NEW_LINE_f7a476d041930ce1__ echo \"=== VOD still alive ===\")",
+      "Bash(1 echo \"ffmpeg exit: $?\" ls -la /tmp/proxy-test.mp4 echo \"\" echo \"=== Server logs ===\" tail -20 /tmp/tvproxy.log)",
+      "Bash(SESSION_ID=\"71065b32-1659-48f3-b224-3cd00b5f1828\" echo \"=== File from previous run still on disk ===\" ls -la /tmp/tvproxy-vod/$SESSION_ID/video.mp4 echo \"\" echo \"=== Server logs \\(ffmpeg\\) ===\" grep -E \"ffmpeg|vod|VOD|error|503\" /tmp/tvproxy.log)",
+      "Bash(ffprobe:*)",
+      "Bash(pkill:*)",
+      "Bash(go build:*)",
+      "Bash(echo:*)",
+      "WebFetch(domain:staging.svgrepo.com)",
+      "WebSearch"
+    ]
+  }
+}

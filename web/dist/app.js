@@ -110,9 +110,11 @@
         if (!resp.ok) return false;
         const data = await resp.json();
         state.accessToken = data.access_token;
-        state.refreshToken = data.refresh_token;
         localStorage.setItem('access_token', data.access_token);
-        localStorage.setItem('refresh_token', data.refresh_token);
+        if (data.refresh_token) {
+          state.refreshToken = data.refresh_token;
+          localStorage.setItem('refresh_token', data.refresh_token);
+        }
         return true;
       } catch {
         return false;
@@ -1087,23 +1089,9 @@
           return;
         }
 
-        for (const key in rendered) {
-          if (!openSet.has(key)) delete rendered[key];
-        }
+        for (const key in rendered) delete rendered[key];
 
         groupsContainer.innerHTML = html.join('');
-
-        groupsContainer.querySelectorAll('details[open]').forEach(el => {
-          const gIdx = el.dataset.gidx;
-          const streams = filteredGroups[gIdx];
-          if (streams) {
-            rendered[gIdx] = searchTerm ? false : true;
-            const tableEl = document.createElement('table');
-            tableEl.className = 'stream-group-table';
-            tableEl.innerHTML = '<tbody>' + buildStreamRows(streams).join('') + '</tbody>';
-            el.appendChild(tableEl);
-          }
-        });
       }
 
       // Build shell
@@ -2350,6 +2338,8 @@
   };
   function codecName(s) { if (!s) return '?'; return CODEC_NAMES[s.split('.')[0].toLowerCase()] || s; }
 
+  let activePlayerCleanup = null;
+
   async function playStreamWithVODDetection(streamID, name, tvgId) {
     let session = null;
     try {
@@ -2373,6 +2363,7 @@
   }
 
   function openVideoPlayer(title, url, tvgId, dvr, channelID) {
+    if (activePlayerCleanup) { activePlayerCleanup(); activePlayerCleanup = null; }
     let mpegtsPlayer = null;
     let retryCount = 0;
     const MAX_RETRIES = 3;
@@ -2400,6 +2391,7 @@
     }
 
     function cleanup() {
+      activePlayerCleanup = null;
       if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
       if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
       if (progInterval) { clearInterval(progInterval); progInterval = null; }
@@ -2420,6 +2412,7 @@
         document.dispatchEvent(new CustomEvent('tvproxy-reload-page'));
       }
     }
+    activePlayerCleanup = cleanup;
 
     function fmtTime(secs) {
       const h = Math.floor(secs / 3600);
@@ -2445,24 +2438,32 @@
     hdrBtns.style.cssText = 'display:flex;gap:6px;flex-shrink:0;';
     const recordBtn = document.createElement('button');
     recordBtn.className = 'btn btn-sm';
-    recordBtn.textContent = '\u23FA';
     recordBtn.title = 'Record';
-    recordBtn.style.cssText = 'font-size:14px;';
+    recordBtn.style.cssText = 'padding:4px 8px;line-height:0;';
+    recordBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 215.11" width="24" height="10" fill="currentColor"><path fill-rule="nonzero" d="M0 83.78V41.11c0-11.31 4.62-21.6 12.06-29.05h.05C19.55 4.63 29.82 0 41.11 0h41.53v23.53H41.11c-4.84 0-9.24 1.98-12.43 5.15-3.17 3.21-5.15 7.61-5.15 12.43v42.67H0zm418.09 13.78h-20.34c-.14-1.7-.51-3.22-1.14-4.59-.61-1.37-1.45-2.56-2.52-3.55-1.07-1-2.35-1.77-3.87-2.31-1.51-.54-3.24-.81-5.17-.81-3.35 0-6.19.81-8.51 2.45-2.34 1.63-4.08 3.98-5.28 7.03-1.18 3.06-1.78 6.72-1.78 11 0 4.52.61 8.31 1.83 11.34 1.2 3.05 2.96 5.33 5.28 6.85 2.3 1.53 5.08 2.29 8.33 2.29 1.84 0 3.5-.22 4.97-.7 1.48-.47 2.75-1.15 3.83-2.05 1.08-.88 1.96-1.96 2.64-3.21.69-1.27 1.15-2.69 1.39-4.28l20.34.15c-.24 3.11-1.12 6.29-2.62 9.53-1.53 3.23-3.68 6.23-6.45 8.95-2.78 2.73-6.21 4.93-10.29 6.58-4.1 1.66-8.84 2.49-14.25 2.49-6.77 0-12.85-1.45-18.23-4.37-5.36-2.91-9.61-7.19-12.73-12.84-3.11-5.64-4.67-12.56-4.67-20.73 0-8.23 1.59-15.15 4.76-20.78 3.18-5.64 7.46-9.91 12.84-12.82 5.38-2.89 11.39-4.33 18.03-4.33 4.67 0 8.95.63 12.88 1.91 3.92 1.27 7.36 3.14 10.31 5.57 2.96 2.44 5.34 5.44 7.13 8.99 1.81 3.57 2.9 7.63 3.29 12.24zm-132.13 46.15V69.85h53.23v16.16h-33.17v12.7h30.43v16.14h-30.43v12.7h33.03v16.16h-53.09zm-67.79 0V69.85h31.88c5.49 0 10.27 1 14.39 3 4.11 2 7.31 4.87 9.59 8.61 2.29 3.76 3.42 8.26 3.42 13.49 0 5.3-1.16 9.75-3.52 13.38-2.33 3.63-5.62 6.37-9.83 8.23-4.23 1.84-9.14 2.78-14.77 2.78h-19.04v-15.59h15.01c2.35 0 4.36-.29 6.02-.88 1.68-.59 2.97-1.54 3.86-2.83.91-1.3 1.35-2.99 1.35-5.09 0-2.11-.44-3.84-1.35-5.16-.89-1.34-2.18-2.34-3.86-2.96-1.66-.65-3.67-.97-6.02-.97h-7.08v57.85h-20.05zm43.27-33.9 18.47 33.9h-21.78l-18.03-33.9h21.34zm-178.8 105.3H41.11c-11.29 0-21.58-4.63-29.03-12.08C4.64 195.59 0 185.31 0 174v-42.73h23.53V174c0 4.81 1.99 9.2 5.18 12.39 3.2 3.2 7.6 5.19 12.4 5.19h41.53v23.53zM488.47 83.78V41.11c0-4.82-1.98-9.22-5.17-12.41a17.464 17.464 0 0 0-12.41-5.17h-41.53V0h41.53c11.29 0 21.56 4.63 29 12.06h.05C507.38 19.51 512 29.8 512 41.11v42.67h-23.53zm-59.11 107.8h41.53c4.8 0 9.2-1.99 12.4-5.19 3.19-3.19 5.18-7.58 5.18-12.39v-42.73H512V174c0 11.31-4.64 21.59-12.08 29.03-7.45 7.45-17.74 12.08-29.03 12.08h-41.53v-23.53z"/><circle cx="138.03" cy="106.79" r="44.12"/></svg>';
+    const recDot = recordBtn.querySelector('circle');
+    let recFlash = null;
+    function startRecordingUI() {
+      isRecording = true;
+      recDot.setAttribute('fill', '#e53935');
+      recordBtn.title = 'Recording';
+      recordBtn.disabled = true;
+      recFlash = recDot.animate([{ opacity: 1 }, { opacity: 0.3 }, { opacity: 1 }], { duration: 1200, iterations: Infinity });
+    }
     recordBtn.onclick = async function() {
       if (isRecording || !dvr) return;
       var body = { program_title: nowProgram ? nowProgram.title : title, channel_name: title };
       if (nowProgram && nowProgram.stop) body.stop_at = new Date(nowProgram.stop).toISOString();
       try {
         await api.post('/vod/' + dvr.id + '/record', body);
-        isRecording = true;
-        recordBtn.style.color = '#e53935';
-        recordBtn.title = 'Recording';
-        recordBtn.disabled = true;
-      } catch(e) {}
+        startRecordingUI();
+      } catch(e) { toast.error('Record failed: ' + e.message); }
     };
     if (!dvr) recordBtn.style.display = 'none';
     const statsBtn = document.createElement('button');
-    statsBtn.className = 'btn btn-sm'; statsBtn.textContent = 'Stats'; statsBtn.title = 'Toggle stream statistics';
+    statsBtn.className = 'btn btn-sm'; statsBtn.title = 'Toggle stream statistics';
+    statsBtn.style.cssText = 'padding:4px 8px;line-height:0;';
+    statsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 294 294" width="14" height="14" fill="currentColor"><path d="M279,250H15c-8.284,0-15,6.716-15,15s6.716,15,15,15h264c8.284,0,15-6.716,15-15S287.284,250,279,250z"/><path d="M30.5,228h47c5.247,0,9.5-4.253,9.5-9.5v-130c0-5.247-4.253-9.5-9.5-9.5h-47c-5.247,0-9.5,4.253-9.5,9.5v130C21,223.747,25.253,228,30.5,228z"/><path d="M123.5,228h47c5.247,0,9.5-4.253,9.5-9.5v-195c0-5.247-4.253-9.5-9.5-9.5h-47c-5.247,0-9.5,4.253-9.5,9.5v195C114,223.747,118.253,228,123.5,228z"/><path d="M216.5,228h47c5.247,0,9.5-4.253,9.5-9.5v-105c0-5.247-4.253-9.5-9.5-9.5h-47c-5.247,0-9.5,4.253-9.5,9.5v105C207,223.747,211.253,228,216.5,228z"/></svg>';
     const closeBtn = document.createElement('button');
     closeBtn.className = 'btn btn-danger btn-sm btn-icon-circle'; closeBtn.textContent = '\u2715'; closeBtn.title = 'Close'; closeBtn.onclick = cleanup;
     hdrBtns.appendChild(recordBtn);
@@ -2655,7 +2656,8 @@
       video.pause();
       video.removeAttribute('src');
       dvrTracker.reset();
-      video.src = url;
+      var buf = dvrTracker.getBuffered();
+      video.src = buf > 5 ? '/vod/' + dvr.id + '/seek?t=' + Math.max(0, buf - 5).toFixed(1) : '/vod/' + dvr.id + '/stream';
       video.oncanplay = () => {
         videoWrap.style.minHeight = '';
         statusEl.style.color = '#4caf50';
@@ -2679,8 +2681,22 @@
     if (dvr && dvrTracker) {
       dvrPollInterval = setInterval(async () => {
         try {
-          const st = await fetch('/vod/' + dvr.id + '/status').then(r => r.json());
+          const resp = await fetch('/vod/' + dvr.id + '/status');
+          if (!resp.ok) {
+            if (dvrPollInterval) { clearInterval(dvrPollInterval); dvrPollInterval = null; }
+            if (dvrPosInterval) { clearInterval(dvrPosInterval); dvrPosInterval = null; }
+            return;
+          }
+          const st = await resp.json();
+          if (st.error && !st.recording) {
+            statusEl.style.color = '#ff6b6b';
+            statusEl.textContent = 'Source failed: ' + st.error;
+            if (dvrPollInterval) { clearInterval(dvrPollInterval); dvrPollInterval = null; }
+            if (dvrPosInterval) { clearInterval(dvrPosInterval); dvrPosInterval = null; }
+            return;
+          }
           dvrTracker.updateBuffered(st.buffered);
+          if (st.recording && !isRecording) startRecordingUI();
           var buf = st.buffered;
           const epg = getEpgTiming();
           if (isLive && epg) {
@@ -2807,7 +2823,7 @@
       if (isBrowserProfile) {
         statusEl.style.color = '#999';
         statusEl.textContent = 'Connecting...';
-        video.src = url;
+        video.src = dvr ? '/vod/' + dvr.id + '/stream' : url;
         video.oncanplay = () => {
           statusEl.style.color = '#4caf50';
           currentContainer = 'fMP4';
@@ -2859,12 +2875,12 @@
     function handleRetry() {
       if (retryCount >= MAX_RETRIES) {
         statusEl.style.color = '#ff6b6b';
-        statusEl.textContent = 'Stream stalled. ';
+        statusEl.textContent = 'Source unavailable. ';
         const retryBtn = document.createElement('a');
         retryBtn.textContent = 'Retry';
         retryBtn.href = '#';
         retryBtn.style.cssText = 'color:#4fc3f7;cursor:pointer;text-decoration:underline;';
-        retryBtn.onclick = (e) => { e.preventDefault(); retryCount = 0; startPlayback(); };
+        retryBtn.onclick = (e) => { e.preventDefault(); retryCount = 0; handleRetry(); };
         statusEl.appendChild(retryBtn);
         destroyPlayer();
         return;
@@ -2873,7 +2889,21 @@
       statusEl.style.color = '#ffa726';
       statusEl.textContent = 'Retrying... (' + retryCount + '/' + MAX_RETRIES + ')';
       destroyPlayer();
-      retryTimeout = setTimeout(startPlayback, 2000);
+      if (dvr && channelID) {
+        retryTimeout = setTimeout(async () => {
+          try {
+            fetch('/vod/' + dvr.id, { method: 'DELETE' }).catch(() => {});
+            const resp = await fetch('/channel/' + channelID + '/vod?profile=Browser', { method: 'POST' }).then(r => r.json());
+            if (resp.session_id) {
+              dvr = { id: resp.session_id, duration: resp.duration };
+              if (dvrTracker) dvrTracker.reset();
+            }
+          } catch(e) {}
+          startPlayback();
+        }, 2000);
+      } else {
+        retryTimeout = setTimeout(startPlayback, 2000);
+      }
     }
 
     video.addEventListener('waiting', () => {
@@ -2899,6 +2929,8 @@
     video.onerror = () => {
       if (!mpegtsPlayer && !(dvrTracker && dvrTracker.isSeeking())) {
         if (channelID) api.post('/api/channels/' + channelID + '/fail').catch(() => {});
+        statusEl.style.color = '#ff6b6b';
+        statusEl.textContent = 'Source error';
         handleRetry();
       }
     };
@@ -3830,6 +3862,41 @@
           h('div', { className: 'table-header' }, h('h3', null, 'Application Settings')),
           h('div', { style: 'padding: 16px' }, formEl,
             Object.keys(inputs).length > 0 ? h('div', { style: 'margin-top: 16px' }, saveBtn) : null,
+          ),
+        ));
+
+        const softResetBtn = h('button', { className: 'btn btn-danger', onClick: async () => {
+          if (!confirm('Soft Reset will delete all channels, streams, EPG data, stream profiles, clients, and HDHR devices. M3U accounts, EPG sources, users, and settings will be preserved.\n\nAre you sure?')) return;
+          softResetBtn.disabled = true;
+          try {
+            await api.post('/api/settings/soft-reset');
+            toast.success('Soft reset complete');
+          } catch (err) {
+            toast.error(err.message);
+          }
+          softResetBtn.disabled = false;
+        }}, 'Soft Reset');
+
+        const hardResetBtn = h('button', { className: 'btn btn-danger', style: 'margin-left: 12px', onClick: async () => {
+          if (!confirm('Hard Reset will delete ALL data and restore factory defaults. You will be logged out.\n\nAre you sure?')) return;
+          if (!confirm('This cannot be undone. All users, accounts, channels, and settings will be permanently deleted.\n\nProceed with hard reset?')) return;
+          hardResetBtn.disabled = true;
+          try {
+            await api.post('/api/settings/hard-reset');
+            toast.success('Hard reset complete. Logging out...');
+            setTimeout(() => auth.logout(), 1500);
+          } catch (err) {
+            toast.error(err.message);
+            hardResetBtn.disabled = false;
+          }
+        }}, 'Hard Reset');
+
+        container.appendChild(h('div', { className: 'table-container', style: 'margin-top: 24px' },
+          h('div', { className: 'table-header' }, h('h3', null, 'Database Management')),
+          h('div', { style: 'padding: 16px' },
+            h('p', { style: 'color: var(--text-muted); margin-bottom: 16px' },
+              'Soft Reset removes all derived data (channels, streams, EPG, profiles, clients, devices) but keeps your accounts, EPG sources, users, and settings. Hard Reset restores factory defaults — all data is deleted and default credentials are restored (admin/admin).'),
+            h('div', null, softResetBtn, hardResetBtn),
           ),
         ));
       } catch (err) {

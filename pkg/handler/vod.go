@@ -157,6 +157,45 @@ func (h *VODHandler) Seek(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *VODHandler) Stream(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+
+	session, ok := h.vodService.GetSession(sessionID)
+	if !ok {
+		respondError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	reader, err := h.vodService.StreamFile(r.Context(), session)
+	if err != nil {
+		h.log.Error().Err(err).Str("session_id", sessionID).Msg("stream failed")
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer reader.Close()
+
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+
+	buf := make([]byte, 32*1024)
+	for {
+		n, readErr := reader.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return
+			}
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		if readErr != nil {
+			return
+		}
+	}
+}
+
 func (h *VODHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
 	h.vodService.DeleteSession(sessionID)

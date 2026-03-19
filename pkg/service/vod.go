@@ -180,6 +180,7 @@ func (s *VODService) createSessionForURL(ctx context.Context, id string, streamU
 	}
 
 	filePath := filepath.Join(tempDir, "video.mp4")
+	os.Remove(filePath)
 
 	processID := s.ffmpegMgr.Start(streamURL, filePath, tempDir, command, profileArgs)
 
@@ -247,6 +248,75 @@ type seekReadCloser struct {
 func (s *seekReadCloser) Close() error {
 	s.ReadCloser.Close()
 	return s.cmd.Wait()
+}
+
+func (s *VODService) StreamFile(ctx context.Context, session *VODSession) (io.ReadCloser, error) {
+	var f *os.File
+	for i := 0; i < 50; i++ {
+		var err error
+		f, err = os.Open(session.FilePath)
+		if err == nil {
+			break
+		}
+		if s.ffmpegMgr.IsReady(session.ProcessID) {
+			if procErr := s.ffmpegMgr.GetError(session.ProcessID); procErr != nil {
+				return nil, procErr
+			}
+			return nil, fmt.Errorf("ffmpeg exited before creating file")
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	if f == nil {
+		return nil, fmt.Errorf("timed out waiting for VOD file")
+	}
+
+	isLive := session.Duration == 0
+
+	return &tailFollowReader{
+		file:      f,
+		ctx:       ctx,
+		isLive:    isLive,
+		processID: session.ProcessID,
+		ffmpegMgr: s.ffmpegMgr,
+	}, nil
+}
+
+type tailFollowReader struct {
+	file      *os.File
+	ctx       context.Context
+	isLive    bool
+	processID string
+	ffmpegMgr *FFmpegManager
+}
+
+func (r *tailFollowReader) Read(p []byte) (int, error) {
+	for {
+		n, err := r.file.Read(p)
+		if n > 0 {
+			return n, nil
+		}
+		if err != io.EOF {
+			return 0, err
+		}
+
+		if !r.isLive || r.ffmpegMgr.IsReady(r.processID) {
+			return 0, io.EOF
+		}
+
+		select {
+		case <-r.ctx.Done():
+			return 0, r.ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+func (r *tailFollowReader) Close() error {
+	return r.file.Close()
 }
 
 func (s *VODService) GetSession(id string) (*VODSession, bool) {
