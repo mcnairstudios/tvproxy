@@ -141,6 +141,8 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 
 		// Recording routes (any authenticated user)
 		r.Post("/vod/{sessionID}/record", vodHandler.MarkRecording)
+		r.Put("/vod/{sessionID}/record/{segmentID}", vodHandler.UpdateSegment)
+		r.Delete("/vod/{sessionID}/record/{segmentID}", vodHandler.DeleteSegment)
 		r.Post("/vod/{sessionID}/stop", vodHandler.StopRecording)
 		r.Post("/vod/{sessionID}/cancel", vodHandler.CancelRecording)
 		r.Post("/channel/{channelID}/record", vodHandler.CreateRecording)

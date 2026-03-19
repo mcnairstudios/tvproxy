@@ -102,12 +102,18 @@ func (h *VODHandler) Status(w http.ResponseWriter, r *http.Request) {
 		errMsg = procErr.Error()
 	}
 
+	segments := h.vodService.GetSegments(sessionID)
+	if segments == nil {
+		segments = []service.SegmentInfo{}
+	}
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"buffered":  buffered,
 		"duration":  session.Duration,
 		"ready":     ready,
 		"error":     errMsg,
 		"recording": h.vodService.IsRecording(sessionID),
+		"segments":  segments,
 	})
 }
 
@@ -203,9 +209,11 @@ func (h *VODHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 }
 
 type recordRequest struct {
-	ProgramTitle string `json:"program_title"`
-	ChannelName  string `json:"channel_name"`
-	StopAt       string `json:"stop_at"`
+	ProgramTitle string  `json:"program_title"`
+	ChannelName  string  `json:"channel_name"`
+	StopAt       string  `json:"stop_at"`
+	StartOffset  float64 `json:"start_offset"`
+	EndOffset    float64 `json:"end_offset"`
 }
 
 func (h *VODHandler) MarkRecording(w http.ResponseWriter, r *http.Request) {
@@ -232,13 +240,26 @@ func (h *VODHandler) MarkRecording(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.vodService.MarkRecording(sessionID, req.ProgramTitle, req.ChannelName, user.UserID, stopAt); err != nil {
-		h.log.Error().Err(err).Str("session_id", sessionID).Msg("mark recording failed")
+	seg, err := h.vodService.CreateSegment(sessionID, req.ProgramTitle, req.ChannelName, user.UserID, req.StartOffset, req.EndOffset, stopAt)
+	if err != nil {
+		h.log.Error().Err(err).Str("session_id", sessionID).Msg("create segment failed")
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{"status": "recording"})
+	resp := map[string]interface{}{"status": "recording"}
+	if seg != nil {
+		segResp := map[string]interface{}{
+			"id":           seg.ID,
+			"start_offset": seg.StartOffset,
+			"status":       string(seg.Status),
+		}
+		if seg.EndOffset != nil {
+			segResp["end_offset"] = *seg.EndOffset
+		}
+		resp["segment"] = segResp
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 func (h *VODHandler) CreateRecording(w http.ResponseWriter, r *http.Request) {
@@ -265,17 +286,25 @@ func (h *VODHandler) CreateRecording(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	session, err := h.vodService.CreateRecordingSession(r.Context(), channelID, req.ProgramTitle, req.ChannelName, user.UserID, stopAt)
+	session, seg, err := h.vodService.CreateRecordingSession(r.Context(), channelID, req.ProgramTitle, req.ChannelName, user.UserID, stopAt)
 	if err != nil {
 		h.log.Error().Err(err).Str("channel_id", channelID).Msg("create recording failed")
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"session_id": session.ID,
 		"status":     "recording",
-	})
+	}
+	if seg != nil {
+		resp["segment"] = map[string]interface{}{
+			"id":           seg.ID,
+			"start_offset": seg.StartOffset,
+			"status":       string(seg.Status),
+		}
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 func (h *VODHandler) ListRecordings(w http.ResponseWriter, r *http.Request) {
@@ -343,7 +372,14 @@ func (h *VODHandler) StopRecording(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if err := h.vodService.StopRecording(sessionID, user.UserID, user.IsAdmin); err != nil {
+	extract := r.URL.Query().Get("extract") == "true"
+	var err error
+	if extract {
+		err = h.vodService.CloseAndExtract(sessionID, user.UserID, user.IsAdmin)
+	} else {
+		err = h.vodService.CloseSegment(sessionID, user.UserID, user.IsAdmin)
+	}
+	if err != nil {
 		if err.Error() == "not authorized" {
 			respondError(w, http.StatusForbidden, err.Error())
 			return
@@ -361,7 +397,7 @@ func (h *VODHandler) CancelRecording(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if err := h.vodService.CancelRecording(sessionID, user.UserID, user.IsAdmin); err != nil {
+	if err := h.vodService.CancelSegment(sessionID, user.UserID, user.IsAdmin); err != nil {
 		if err.Error() == "not authorized" {
 			respondError(w, http.StatusForbidden, err.Error())
 			return
@@ -369,6 +405,57 @@ func (h *VODHandler) CancelRecording(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *VODHandler) UpdateSegment(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	segmentID := chi.URLParam(r, "segmentID")
+	user := middleware.UserFromContext(r.Context())
+	if user == nil {
+		respondError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	var req struct {
+		StartOffset *float64 `json:"start_offset"`
+		EndOffset   *float64 `json:"end_offset"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := h.vodService.UpdateSegment(sessionID, segmentID, user.UserID, user.IsAdmin, req.StartOffset, req.EndOffset); err != nil {
+		if err.Error() == "not authorized" {
+			respondError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *VODHandler) DeleteSegment(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	segmentID := chi.URLParam(r, "segmentID")
+	user := middleware.UserFromContext(r.Context())
+	if user == nil {
+		respondError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	if err := h.vodService.DeleteSegment(sessionID, segmentID, user.UserID, user.IsAdmin); err != nil {
+		if err.Error() == "not authorized" {
+			respondError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

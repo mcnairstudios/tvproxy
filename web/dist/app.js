@@ -2377,6 +2377,10 @@
     let currentCodec = '';
     let stallTimeout = null;
     let isRecording = false;
+    let activeSegmentID = null;
+    let segmentOverlays = [];
+    let dragState = null;
+    let pollFailures = 0;
     const isLive = !dvr || !dvr.duration;
     const dvrTracker = dvr ? createDVRTracker(isLive, dvr.duration) : null;
 
@@ -2446,16 +2450,32 @@
     function startRecordingUI() {
       isRecording = true;
       recDot.setAttribute('fill', '#e53935');
-      recordBtn.title = 'Recording';
-      recordBtn.disabled = true;
+      recordBtn.title = 'Stop Recording';
       recFlash = recDot.animate([{ opacity: 1 }, { opacity: 0.3 }, { opacity: 1 }], { duration: 1200, iterations: Infinity });
     }
+    function stopRecordingUI() {
+      isRecording = false;
+      activeSegmentID = null;
+      recDot.removeAttribute('fill');
+      recordBtn.title = 'Record';
+      if (recFlash) { recFlash.cancel(); recFlash = null; }
+    }
     recordBtn.onclick = async function() {
-      if (isRecording || !dvr) return;
+      if (!dvr || !dvrTracker) return;
+      if (isRecording) {
+        try {
+          await api.post('/vod/' + dvr.id + '/stop');
+          stopRecordingUI();
+        } catch(e) { toast.error('Stop recording failed: ' + e.message); }
+        return;
+      }
       var body = { program_title: nowProgram ? nowProgram.title : title, channel_name: title };
       if (nowProgram && nowProgram.stop) body.stop_at = new Date(nowProgram.stop).toISOString();
+      body.start_offset = dvrTracker.getPos(video.currentTime);
+      body.end_offset = dvrTracker.getBuffered();
       try {
-        await api.post('/vod/' + dvr.id + '/record', body);
+        var resp = await api.post('/vod/' + dvr.id + '/record', body);
+        if (resp && resp.segment) activeSegmentID = resp.segment.id;
         startRecordingUI();
       } catch(e) { toast.error('Record failed: ' + e.message); }
     };
@@ -2497,16 +2517,25 @@
 
     // Seek bar
     const seekOuter = document.createElement('div');
-    seekOuter.style.cssText = 'height:6px;background:var(--border);border-radius:3px;cursor:pointer;position:relative;margin-bottom:6px;';
+    seekOuter.style.cssText = 'height:6px;background:var(--border);border-radius:3px;cursor:pointer;position:relative;margin-top:20px;margin-bottom:6px;';
     const seekBuf = document.createElement('div');
     seekBuf.style.cssText = 'height:100%;background:rgba(76,175,80,0.3);border-radius:3px;width:0%;position:absolute;top:0;left:0;transition:width 1s linear;';
     const seekPos = document.createElement('div');
     seekPos.style.cssText = 'height:100%;background:var(--accent);border-radius:3px;width:0%;position:absolute;top:0;left:0;';
     const epgMarker = document.createElement('div');
     epgMarker.style.cssText = 'display:none;position:absolute;top:-2px;bottom:-2px;width:2px;background:#ffa726;border-radius:1px;z-index:2;pointer-events:none;';
+    const segOverlayContainer = document.createElement('div');
+    segOverlayContainer.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:3;';
+    const segHandleContainer = document.createElement('div');
+    segHandleContainer.style.cssText = 'position:absolute;top:-4px;left:0;right:0;bottom:-4px;pointer-events:none;z-index:5;';
+    const segDeleteContainer = document.createElement('div');
+    segDeleteContainer.style.cssText = 'position:absolute;top:-18px;left:0;right:0;height:16px;pointer-events:none;z-index:6;';
     seekOuter.appendChild(seekBuf);
     seekOuter.appendChild(seekPos);
     seekOuter.appendChild(epgMarker);
+    seekOuter.appendChild(segOverlayContainer);
+    seekOuter.appendChild(segHandleContainer);
+    seekOuter.appendChild(segDeleteContainer);
     controls.appendChild(seekOuter);
 
     // Button row: play/pause | time | spacer | live badge | volume | fullscreen
@@ -2630,9 +2659,15 @@
     }
 
     seekOuter.onclick = (e) => {
-      if (!dvrTracker || dvrTracker.getBuffered() <= 0) return;
       const rect = seekOuter.getBoundingClientRect();
       const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      if (!dvrTracker) {
+        if (video.duration && isFinite(video.duration)) {
+          video.currentTime = pct * video.duration;
+        }
+        return;
+      }
+      if (dvrTracker.getBuffered() <= 0) return;
       const epg = getEpgTiming();
       const buf = dvrTracker.getBuffered();
       let seekTime;
@@ -2648,6 +2683,121 @@
       }
       seekTo(seekTime);
     };
+
+    function segPctFromOffset(offset, buffered) {
+      var epg = getEpgTiming();
+      if (isLive && epg) {
+        var bufStart = epg.elapsed - buffered;
+        return ((bufStart + offset) / epg.duration) * 100;
+      }
+      var totalEnd = isLive ? buffered : (dvr.duration || buffered);
+      return totalEnd > 0 ? (offset / totalEnd) * 100 : 0;
+    }
+
+    function segOffsetFromPct(pct, buffered) {
+      var epg = getEpgTiming();
+      if (isLive && epg) {
+        var bufStart = epg.elapsed - buffered;
+        return pct * epg.duration - bufStart;
+      }
+      var totalEnd = isLive ? buffered : (dvr.duration || buffered);
+      return pct * totalEnd;
+    }
+
+    var segColorMap = {
+      recording: 'rgba(229,57,53,0.4)',
+      defined: 'rgba(255,167,38,0.4)',
+      extracting: 'rgba(255,167,38,0.25)',
+      completed: 'rgba(76,175,80,0.4)'
+    };
+
+    function renderSegmentOverlays(segments, buffered) {
+      segOverlayContainer.innerHTML = '';
+      segHandleContainer.innerHTML = '';
+      segDeleteContainer.innerHTML = '';
+      if (!segments || !dvrTracker) return;
+      segments.forEach(function(seg) {
+        var segEnd = (seg.status === 'recording' && seg.end_offset != null) ? Math.max(seg.end_offset, buffered) : (seg.end_offset != null ? seg.end_offset : buffered);
+        var startPct = Math.max(0, Math.min(100, segPctFromOffset(seg.start_offset, buffered)));
+        var endPct = Math.max(0, Math.min(100, segPctFromOffset(segEnd, buffered)));
+        var bg = segColorMap[seg.status] || segColorMap.recording;
+        var ov = document.createElement('div');
+        ov.style.cssText = 'position:absolute;top:0;bottom:0;border-radius:3px;background:' + bg + ';';
+        ov.style.left = startPct + '%';
+        ov.style.width = Math.max(0, endPct - startPct) + '%';
+        if (seg.status === 'extracting') {
+          ov.style.backgroundImage = 'repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(255,255,255,0.15) 4px,rgba(255,255,255,0.15) 8px)';
+        }
+        segOverlayContainer.appendChild(ov);
+
+        var isEditable = seg.status === 'recording' || seg.status === 'defined';
+        if (isEditable) {
+          var startHandle = document.createElement('div');
+          startHandle.style.cssText = 'position:absolute;top:0;bottom:0;width:8px;background:#e53935;border-radius:2px;cursor:ew-resize;pointer-events:auto;';
+          startHandle.style.left = 'calc(' + startPct + '% - 4px)';
+          startHandle.dataset.segId = seg.id;
+          startHandle.dataset.edge = 'start';
+          segHandleContainer.appendChild(startHandle);
+
+          var endHandle = document.createElement('div');
+          endHandle.style.cssText = 'position:absolute;top:0;bottom:0;width:8px;border-radius:2px;cursor:ew-resize;pointer-events:auto;';
+          endHandle.style.background = seg.status === 'defined' ? '#ffa726' : '#e53935';
+          endHandle.style.left = 'calc(' + endPct + '% - 4px)';
+          endHandle.dataset.segId = seg.id;
+          endHandle.dataset.edge = 'end';
+          segHandleContainer.appendChild(endHandle);
+
+          var delBtn = document.createElement('div');
+          delBtn.style.cssText = 'position:absolute;width:14px;height:14px;background:#e53935;color:#fff;border-radius:50%;font-size:10px;line-height:14px;text-align:center;cursor:pointer;pointer-events:auto;user-select:none;';
+          delBtn.style.left = 'calc(' + ((startPct + endPct) / 2) + '% - 7px)';
+          delBtn.textContent = '\u2715';
+          delBtn.title = 'Delete segment';
+          delBtn.dataset.segId = seg.id;
+          delBtn.onclick = function(ev) {
+            ev.stopPropagation();
+            api.del('/vod/' + dvr.id + '/record/' + seg.id).catch(function(err) {
+              toast.error('Delete segment failed: ' + err.message);
+            });
+          };
+          segDeleteContainer.appendChild(delBtn);
+        }
+      });
+    }
+
+    segHandleContainer.addEventListener('mousedown', function(e) {
+      var handle = e.target;
+      if (!handle.dataset || !handle.dataset.segId || !dvrTracker) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dragState = { segID: handle.dataset.segId, edge: handle.dataset.edge, rect: seekOuter.getBoundingClientRect(), handle: handle };
+    });
+
+    document.addEventListener('mousemove', function(e) {
+      if (!dragState || !dragState.handle) return;
+      e.preventDefault();
+      var pct = Math.max(0, Math.min(1, (e.clientX - dragState.rect.left) / dragState.rect.width));
+      dragState.handle.style.left = 'calc(' + (pct * 100) + '% - 4px)';
+    });
+
+    document.addEventListener('mouseup', function(e) {
+      if (!dragState || !dragState.handle) return;
+      var rect = dragState.rect;
+      var segID = dragState.segID;
+      var edge = dragState.edge;
+      dragState = null;
+      var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      var buf = dvrTracker.getBuffered();
+      var newOffset = Math.max(0, Math.min(buf, segOffsetFromPct(pct, buf)));
+      var body = {};
+      if (edge === 'start') {
+        body.start_offset = newOffset;
+      } else {
+        body.end_offset = (pct >= 0.98) ? -1 : newOffset;
+      }
+      api.put('/vod/' + dvr.id + '/record/' + segID, body).catch(function(err) {
+        toast.error('Update segment failed: ' + err.message);
+      });
+    });
 
     liveBadge.onclick = () => {
       if (!dvr) return;
@@ -2683,10 +2833,14 @@
         try {
           const resp = await fetch('/vod/' + dvr.id + '/status');
           if (!resp.ok) {
-            if (dvrPollInterval) { clearInterval(dvrPollInterval); dvrPollInterval = null; }
-            if (dvrPosInterval) { clearInterval(dvrPosInterval); dvrPosInterval = null; }
+            pollFailures++;
+            if (pollFailures >= 3) {
+              if (dvrPollInterval) { clearInterval(dvrPollInterval); dvrPollInterval = null; }
+              if (dvrPosInterval) { clearInterval(dvrPosInterval); dvrPosInterval = null; }
+            }
             return;
           }
+          pollFailures = 0;
           const st = await resp.json();
           if (st.error && !st.recording) {
             statusEl.style.color = '#ff6b6b';
@@ -2696,7 +2850,19 @@
             return;
           }
           dvrTracker.updateBuffered(st.buffered);
-          if (st.recording && !isRecording) startRecordingUI();
+          if (st.segments && st.segments.length > 0) {
+            var activeSeg = st.segments.find(function(seg) { return seg.status === 'recording'; });
+            if (activeSeg) {
+              activeSegmentID = activeSeg.id;
+              if (!isRecording) startRecordingUI();
+            } else {
+              if (isRecording) stopRecordingUI();
+            }
+            renderSegmentOverlays(st.segments, st.buffered);
+          } else {
+            if (isRecording) stopRecordingUI();
+            renderSegmentOverlays([], st.buffered);
+          }
           var buf = st.buffered;
           const epg = getEpgTiming();
           if (isLive && epg) {
@@ -2716,7 +2882,13 @@
           } else {
             seekBuf.style.width = '100%';
           }
-        } catch(e) {}
+        } catch(e) {
+          pollFailures++;
+          if (pollFailures >= 3) {
+            if (dvrPollInterval) { clearInterval(dvrPollInterval); dvrPollInterval = null; }
+            if (dvrPosInterval) { clearInterval(dvrPosInterval); dvrPosInterval = null; }
+          }
+        }
       }, 2000);
 
       dvrPosInterval = setInterval(() => {
@@ -2740,6 +2912,14 @@
           seekPos.style.width = d.pct + '%';
           timeLabel.textContent = fmtTime(d.pos) + ' / ' + fmtTime(d.total);
         }
+      }, 500);
+    } else {
+      dvrPosInterval = setInterval(() => {
+        if (!video || !video.duration || !isFinite(video.duration)) return;
+        var pct = (video.currentTime / video.duration) * 100;
+        seekPos.style.width = pct + '%';
+        seekBuf.style.width = '100%';
+        timeLabel.textContent = fmtTime(video.currentTime) + ' / ' + fmtTime(video.duration);
       }, 500);
     }
 
@@ -3708,16 +3888,19 @@
             return;
           }
           var table = h('table', { className: 'table' });
-          table.innerHTML = '<thead><tr><th>Channel</th><th>Program</th><th>Buffered</th><th>Stop At</th><th>Actions</th></tr></thead>';
+          table.innerHTML = '<thead><tr><th>Channel</th><th>Program</th><th>Buffered</th><th>Segments</th><th>Stop At</th><th>Actions</th></tr></thead>';
           var tbody = h('tbody');
           recordings.forEach(function(rec) {
             var stopStr = rec.stop_at ? new Date(rec.stop_at).toLocaleTimeString() : '-';
+            var segCount = rec.segments ? rec.segments.length : 0;
+            var activeSeg = rec.segments ? rec.segments.find(function(s) { return s.status === 'recording'; }) : null;
+            var segLabel = segCount + (activeSeg ? ' (recording)' : '');
             var actions = h('td', { style: 'display:flex;gap:4px;' });
             var playBtn = h('button', { className: 'btn btn-primary btn-sm', onClick: function() {
               playChannelWithDVR(rec.session_id, rec.channel_name || rec.program_title, null);
             }}, '\u25B6 Play');
             var stopBtn = h('button', { className: 'btn btn-warning btn-sm', onClick: async function() {
-              await api.post('/vod/' + rec.session_id + '/stop');
+              await api.post('/vod/' + rec.session_id + '/stop?extract=true');
               renderActive(activeDiv);
               renderCompleted(completedDiv);
             }}, 'Stop');
@@ -3733,6 +3916,7 @@
               h('td', null, rec.channel_name),
               h('td', null, rec.program_title),
               h('td', null, fmtDur(rec.buffered_secs)),
+              h('td', null, segLabel),
               h('td', null, stopStr),
               actions
             );

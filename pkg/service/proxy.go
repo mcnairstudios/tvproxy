@@ -304,6 +304,34 @@ func ShellSplit(s string) []string {
 	return args
 }
 
+func InjectReconnect(args []string, inputURL string) []string {
+	if !strings.HasPrefix(inputURL, "http://") && !strings.HasPrefix(inputURL, "https://") {
+		return args
+	}
+	for _, arg := range args {
+		if arg == "-reconnect" {
+			return args
+		}
+	}
+	for i, arg := range args {
+		if arg == "-i" {
+			reconnectArgs := []string{
+				"-reconnect", "1",
+				"-reconnect_streamed", "1",
+				"-reconnect_delay_max", "30",
+				"-reconnect_on_network_error", "1",
+				"-rw_timeout", "30000000",
+			}
+			newArgs := make([]string, 0, len(args)+len(reconnectArgs))
+			newArgs = append(newArgs, args[:i]...)
+			newArgs = append(newArgs, reconnectArgs...)
+			newArgs = append(newArgs, args[i:]...)
+			return newArgs
+		}
+	}
+	return args
+}
+
 func InjectUserAgent(args []string, userAgent string) []string {
 	for _, arg := range args {
 		if arg == "-user_agent" {
@@ -325,6 +353,7 @@ func InjectUserAgent(args []string, userAgent string) []string {
 func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream *models.Stream, profile *models.StreamProfile) (io.ReadCloser, error) {
 	argsStr := strings.Replace(profile.Args, "{input}", stream.URL, 1)
 	args := InjectUserAgent(ShellSplit(argsStr), s.config.UserAgent)
+	args = InjectReconnect(args, stream.URL)
 
 	s.log.Info().
 		Str("channel_id", channelID).
