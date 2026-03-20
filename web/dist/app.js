@@ -807,19 +807,39 @@
 
       var timeLabelEl = h('span', { className: 'epg-time-label' }, formatDate(windowStart) + ' \u2014 ' + formatDate(windowStop));
 
-      var prevBtn = h('button', { className: 'btn btn-secondary btn-sm', onClick: navigate.bind(null, -3) }, '\u2190 Earlier');
-      var nowBtn = h('button', { className: 'btn btn-primary btn-sm', onClick: navigate.bind(null, 0) }, 'Now');
-      var nextBtn = h('button', { className: 'btn btn-secondary btn-sm', onClick: navigate.bind(null, 3) }, 'Later \u2192');
+      var deltaPresets = [-24, -6, -3, -1, 1, 3, 6, 24];
+      var deltaLabels = { '-24': '-1d', '-6': '-6h', '-3': '-3h', '-1': '-1h', '1': '+1h', '3': '+3h', '6': '+6h', '24': '+1d' };
+      var nowBtn = h('button', { className: 'btn btn-sm btn-primary', onClick: function() { navigate(0); } }, 'Now');
+      var navEl = h('div', { className: 'epg-nav' });
+
+      function formatOffset(hrs) {
+        if (hrs === 0) return 'Now';
+        var sign = hrs > 0 ? '+' : '-';
+        var abs = Math.abs(hrs);
+        if (abs >= 24 && abs % 24 === 0) return 'Now ' + sign + (abs / 24) + 'd';
+        return 'Now ' + sign + abs + 'h';
+      }
+
+      deltaPresets.forEach(function(d) {
+        if (d > 0 && navEl.children.length === 4) navEl.appendChild(nowBtn);
+        navEl.appendChild(h('button', {
+          className: 'btn btn-sm btn-secondary',
+          onClick: navigate.bind(null, d),
+        }, deltaLabels[String(d)]));
+      });
+      if (navEl.children.length === 8) navEl.appendChild(nowBtn);
 
       var guideLoading = false;
 
-      function navigate(offsetDelta) {
+      function navigate(delta) {
         if (guideLoading) return;
-        if (offsetDelta === 0) {
+        if (delta === 0) {
           windowOffset = 0;
         } else {
-          windowOffset += offsetDelta;
+          windowOffset += delta;
         }
+        nowBtn.textContent = formatOffset(windowOffset);
+        nowBtn.className = 'btn btn-sm btn-primary';
         loadGuide();
       }
 
@@ -893,7 +913,7 @@
         container.innerHTML = '';
 
         var toolbar = h('div', { className: 'epg-toolbar' },
-          h('div', { className: 'epg-nav' }, prevBtn, nowBtn, nextBtn),
+          navEl,
           timeLabelEl,
           h('span', { style: 'font-size:13px;color:var(--text-muted)' }, channels.length + ' channels'),
         );

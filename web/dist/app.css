@@ -769,7 +769,7 @@ tbody tr:last-child td { border-bottom: none; }
   flex-wrap: wrap;
 }
 
-.epg-toolbar .epg-nav { display: flex; gap: 6px; }
+.epg-toolbar .epg-nav { display: flex; gap: 6px; flex-wrap: wrap; }
 .epg-toolbar .epg-time-label { font-size: 14px; color: var(--text-secondary); }
 
 .epg-scroll {
