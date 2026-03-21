@@ -6,14 +6,16 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
 
 type StreamHandler struct {
-	streamRepo *repository.StreamRepository
+	streamRepo  *repository.StreamRepository
+	logoService *service.LogoService
 }
 
-func NewStreamHandler(streamRepo *repository.StreamRepository) *StreamHandler {
-	return &StreamHandler{streamRepo: streamRepo}
+func NewStreamHandler(streamRepo *repository.StreamRepository, logoService *service.LogoService) *StreamHandler {
+	return &StreamHandler{streamRepo: streamRepo, logoService: logoService}
 }
 
 func (h *StreamHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -24,7 +26,9 @@ func (h *StreamHandler) List(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusInternalServerError, "failed to list streams")
 			return
 		}
-
+		for i := range streams {
+			streams[i].Logo = h.logoService.Resolve(streams[i].Logo)
+		}
 		respondJSON(w, http.StatusOK, streams)
 		return
 	}
@@ -35,17 +39,21 @@ func (h *StreamHandler) List(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusInternalServerError, "failed to list streams")
 			return
 		}
+		for i := range streams {
+			streams[i].Logo = h.logoService.Resolve(streams[i].Logo)
+		}
 		respondJSON(w, http.StatusOK, streams)
 		return
 	}
 
-	// Default: lightweight summaries (id, name, group, account_id only)
 	summaries, err := h.streamRepo.ListSummaries(r.Context())
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to list streams")
 		return
 	}
-
+	for i := range summaries {
+		summaries[i].Logo = h.logoService.Resolve(summaries[i].Logo)
+	}
 	respondJSON(w, http.StatusOK, summaries)
 }
 
@@ -58,6 +66,7 @@ func (h *StreamHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	stream.Logo = h.logoService.Resolve(stream.Logo)
 	respondJSON(w, http.StatusOK, stream)
 }
 

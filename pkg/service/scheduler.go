@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -17,8 +18,7 @@ const (
 	RecStatusPending   = "pending"
 	RecStatusRecording = "recording"
 	RecStatusCompleted = "completed"
-	RecStatusFailed    = "failed"
-	RecStatusCancelled = "cancelled"
+	RecStatusFailed = "failed"
 )
 
 var (
@@ -86,7 +86,7 @@ func (s *SchedulerService) Schedule(ctx context.Context, rec *models.ScheduledRe
 	return nil
 }
 
-func (s *SchedulerService) Cancel(ctx context.Context, id, userID string, isAdmin bool) error {
+func (s *SchedulerService) Delete(ctx context.Context, id, userID string, isAdmin bool) error {
 	rec, err := s.recRepo.GetByID(ctx, id)
 	if err != nil {
 		return ErrRecordingNotFound
@@ -95,10 +95,15 @@ func (s *SchedulerService) Cancel(ctx context.Context, id, userID string, isAdmi
 		return ErrNotAuthorized
 	}
 
-	if rec.Status != RecStatusPending && rec.Status != RecStatusRecording {
-		return fmt.Errorf("recording cannot be cancelled in status %s", rec.Status)
+	if rec.Status == RecStatusRecording && rec.SessionID != "" {
+		s.vodService.DeleteSession(rec.SessionID)
 	}
-	return s.recRepo.UpdateStatus(ctx, id, RecStatusCancelled, "")
+
+	if rec.FilePath != "" {
+		os.Remove(rec.FilePath)
+	}
+
+	return s.recRepo.Delete(ctx, id)
 }
 
 func (s *SchedulerService) List(ctx context.Context, userID string, isAdmin bool) ([]models.ScheduledRecording, error) {
@@ -125,7 +130,21 @@ func (s *SchedulerService) Tick(ctx context.Context) {
 }
 
 func (s *SchedulerService) startPendingRecordings(ctx context.Context) {
-	pending, err := s.recRepo.ListPending(ctx, time.Now())
+	now := time.Now()
+
+	expired, err := s.recRepo.ListByStatus(ctx, RecStatusPending)
+	if err != nil {
+		s.log.Error().Err(err).Msg("failed to list pending recordings for cleanup")
+	} else {
+		for _, rec := range expired {
+			if rec.StopAt.Before(now) {
+				s.recRepo.Delete(ctx, rec.ID)
+				s.log.Info().Str("id", rec.ID).Str("program", rec.ProgramTitle).Msg("removed missed pending recording")
+			}
+		}
+	}
+
+	pending, err := s.recRepo.ListPending(ctx, now)
 	if err != nil {
 		s.log.Error().Err(err).Msg("failed to list pending recordings")
 		return

@@ -738,21 +738,21 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 .stream-group-table td {
-  padding: 6px 16px 6px 40px;
+  padding: 6px 8px;
   font-size: 13px;
   border-top: 1px solid var(--border);
 }
 
-.stream-group-table td:first-child { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stream-group-table td:first-child { width: 40px; min-width: 40px; text-align: center; }
+.stream-group-table td:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .stream-group-table tr:hover { background: var(--bg-hover); }
 
 .stream-group-logo {
-  width: 24px;
-  height: 24px;
+  max-width: 28px;
+  max-height: 28px;
   border-radius: 2px;
   object-fit: contain;
-  background: var(--bg-input);
   vertical-align: middle;
 }
 

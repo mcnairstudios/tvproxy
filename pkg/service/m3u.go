@@ -19,24 +19,25 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/xtream"
 )
 
-// M3UService handles M3U account management and stream synchronization.
 type M3UService struct {
 	m3uAccountRepo *repository.M3UAccountRepository
 	streamRepo     *repository.StreamRepository
+	logoService    *LogoService
 	config         *config.Config
 	log            zerolog.Logger
 }
 
-// NewM3UService creates a new M3UService.
 func NewM3UService(
 	m3uAccountRepo *repository.M3UAccountRepository,
 	streamRepo *repository.StreamRepository,
+	logoService *LogoService,
 	cfg *config.Config,
 	log zerolog.Logger,
 ) *M3UService {
 	return &M3UService{
 		m3uAccountRepo: m3uAccountRepo,
 		streamRepo:     streamRepo,
+		logoService:    logoService,
 		config:         cfg,
 		log:            log.With().Str("service", "m3u").Logger(),
 	}
@@ -226,6 +227,10 @@ func (s *M3UService) upsertAndFinalize(ctx context.Context, account *models.M3UA
 		Str("account_id", account.ID).
 		Int("total", len(streams)).
 		Msg("account refresh complete")
+
+	if s.logoService != nil {
+		go s.logoService.CacheStreamLogos(context.Background(), streams)
+	}
 
 	return nil
 }

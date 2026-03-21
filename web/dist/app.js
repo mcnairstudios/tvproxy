@@ -1106,10 +1106,10 @@
         const rows = [];
         for (let j = 0; j < streams.length; j++) {
           const s = streams[j];
-          const logo = s.logo_url
-            ? '<img class="stream-group-logo" src="' + esc(s.logo_url) + '" loading="lazy" alt="">'
+          const logo = s.logo
+            ? '<img class="stream-group-logo" src="' + esc(s.logo) + '" loading="lazy" alt="">'
             : '';
-          rows.push('<tr><td style="width:40px;padding-left:40px">' + logo + '</td><td>' + esc(s.name) + '</td><td style="width:80px"><div class="actions-cell" style="justify-content:flex-end"><button class="btn btn-primary btn-sm btn-icon" title="Add as Channel" style="font-size:16px" data-qadd="1" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '" data-slogo="' + esc(s.logo_url || '') + '">+</button><button class="btn btn-secondary btn-sm btn-icon" title="Play" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '">\u25B6</button></div></td></tr>');
+          rows.push('<tr><td>' + logo + '</td><td>' + esc(s.name) + '</td><td style="width:80px"><div class="actions-cell" style="justify-content:flex-end"><button class="btn btn-primary btn-sm btn-icon" title="Add as Channel" style="font-size:16px" data-qadd="1" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '" data-slogo="' + esc(s.logo || '') + '">+</button><button class="btn btn-secondary btn-sm btn-icon" title="Play" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '">\u25B6</button></div></td></tr>');
         }
         return rows;
       }
@@ -3492,7 +3492,7 @@
         ],
       },
       columns: [
-        { key: 'logo', label: '', thStyle: 'width:30px;padding-right:0', tdStyle: 'padding-right:0', render: item =>
+        { key: 'logo', label: '', thStyle: 'width:30px;padding-right:0;text-align:center', tdStyle: 'padding-right:0;text-align:center', render: item =>
           item.logo ? h('img', { src: item.logo, style: 'height:24px;width:24px;object-fit:contain;border-radius:2px;' }) : null
         },
         { key: 'name', label: 'Name', render: item => {
@@ -3887,13 +3887,6 @@
         const enabledChk = h('input', { type: 'checkbox' });
         enabledChk.checked = existing ? existing.is_enabled : true;
 
-        const profileSelect = h('select');
-        profiles.forEach(p => {
-          const opt = h('option', { value: String(p.id) }, p.name);
-          if (existing && existing.stream_profile_id === p.id) opt.selected = true;
-          profileSelect.appendChild(opt);
-        });
-
         const rulesContainer = h('div');
 
         function renderRuleRows() {
@@ -3949,7 +3942,7 @@
               const updated = await api.put('/api/clients/' + existing.id, {
                 name: nameInp.value,
                 priority: parseInt(priorityInp.value, 10) || 0,
-                stream_profile_id: profileSelect.value || null,
+                stream_profile_id: existing.stream_profile_id,
                 is_enabled: enabledChk.checked,
                 match_rules: matchRules,
               });
@@ -3984,8 +3977,10 @@
         );
 
         if (isEdit) {
-          formContent.appendChild(h('div', { className: 'form-group' }, h('label', null, 'Stream Profile'), profileSelect,
-            h('small', { style: 'color: var(--text-muted); display: block' }, 'Auto-created on client creation. Edit the profile to change encoding settings.')));
+          const profileName = profileMap[existing.stream_profile_id] || '(unknown)';
+          formContent.appendChild(h('div', { className: 'form-group' }, h('label', null, 'Stream Profile'),
+            h('input', { type: 'text', value: profileName, disabled: true, style: 'opacity: 0.7' }),
+            h('small', { style: 'color: var(--text-muted); display: block' }, 'Auto-created on client creation. Edit the profile via Stream Profiles to change encoding settings.')));
         }
 
         formContent.appendChild(h('div', { className: 'form-check' }, enabledChk, h('label', null, 'Enabled')));
@@ -4161,34 +4156,31 @@
 
       async function renderScheduled(scheduledDiv) {
         try {
-          var recordings = await api.get('/api/recordings/schedule');
+          var allRecordings = await api.get('/api/recordings/schedule');
+          var recordings = (allRecordings || []).filter(function(r) { return r.status === 'pending'; });
           scheduledDiv.innerHTML = '';
-          if (!recordings || recordings.length === 0) {
+          if (recordings.length === 0) {
             scheduledDiv.appendChild(h('p', { style: 'color: var(--text-muted); padding: 16px;' }, 'No scheduled recordings.'));
             return;
           }
           var table = h('table', { className: 'table' });
-          table.innerHTML = '<thead><tr><th>Channel</th><th>Program</th><th>Start</th><th>Stop</th><th>Status</th><th>Actions</th></tr></thead>';
+          table.innerHTML = '<thead><tr><th>Channel</th><th>Program</th><th>Start</th><th>Stop</th><th>Actions</th></tr></thead>';
           var tbody = h('tbody');
           recordings.forEach(function(rec) {
             var startStr = new Date(rec.start_at).toLocaleString();
             var stopStr = new Date(rec.stop_at).toLocaleString();
-            var badge = h('span', { className: 'schedule-status-badge ' + rec.status }, rec.status);
             var actions = h('td', { style: 'display:flex;gap:4px;' });
-            if (rec.status === 'pending' || rec.status === 'recording') {
-              var cancelBtn = h('button', { className: 'btn btn-danger btn-sm', onClick: async function() {
-                if (!confirm('Cancel scheduled recording "' + (rec.program_title || '') + '"?')) return;
-                await api.del('/api/recordings/schedule/' + rec.id);
-                renderScheduled(scheduledDiv);
-              }}, 'Cancel');
-              actions.appendChild(cancelBtn);
-            }
+            var deleteBtn = h('button', { className: 'btn btn-danger btn-sm', onClick: async function() {
+              if (!confirm('Delete scheduled recording "' + (rec.program_title || '') + '"?')) return;
+              await api.del('/api/recordings/schedule/' + rec.id);
+              renderScheduled(scheduledDiv);
+            }}, 'Delete');
+            actions.appendChild(deleteBtn);
             var tr = h('tr', null,
               h('td', null, rec.channel_name),
               h('td', null, rec.program_title),
               h('td', null, startStr),
               h('td', null, stopStr),
-              h('td', null, badge),
               actions
             );
             tbody.appendChild(tr);
@@ -4299,6 +4291,33 @@
             ),
             h('p', { style: 'color: var(--text-muted); margin-top: 8px; font-size: 13px' },
               'When enabled, TVProxy advertises as a DLNA MediaServer on the network. DLNA clients (e.g. VLC, 4XVR) can discover and browse channels. Changes take effect within 30 seconds.'),
+          ),
+        ));
+
+        const logosDisabled = (Array.isArray(settings) ? settings : []).some(s => s.key === 'logos_enabled' && s.value === 'false');
+        const logosToggle = h('input', { type: 'checkbox', id: 'setting-logos-disabled' });
+        logosToggle.checked = logosDisabled;
+        logosToggle.onchange = async function() {
+          logosToggle.disabled = true;
+          try {
+            await api.put('/api/settings', { logos_enabled: logosToggle.checked ? 'false' : 'true' });
+            toast.success('Setting saved');
+          } catch (err) {
+            toast.error(err.message);
+            logosToggle.checked = !logosToggle.checked;
+          }
+          logosToggle.disabled = false;
+        };
+
+        container.appendChild(h('div', { className: 'table-container', style: 'margin-top: 24px' },
+          h('div', { className: 'table-header' }, h('h3', null, 'Logo Caching')),
+          h('div', { style: 'padding: 16px; font-size: 15px' },
+            h('div', { style: 'display:flex;align-items:center;gap:10px' },
+              logosToggle,
+              h('label', { for: 'setting-logos-disabled', style: 'cursor:pointer;margin:0' }, 'Disable local logo caching'),
+            ),
+            h('p', { style: 'color: var(--text-muted); margin-top: 8px; font-size: 13px' },
+              'Logo caching is on by default. Channel and stream logos are downloaded and served locally, improving performance for DLNA clients. Check this box to disable caching and use external logo URLs directly.'),
           ),
         ));
 

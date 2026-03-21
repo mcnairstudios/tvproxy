@@ -122,12 +122,13 @@ type StreamSummary struct {
 	M3UAccountID string `json:"m3u_account_id"`
 	Name         string `json:"name"`
 	Group        string `json:"group"`
+	Logo         string `json:"logo,omitempty"`
 }
 
-// ListSummaries returns only id, name, group, and account_id for all streams.
+// ListSummaries returns only id, name, group, logo, and account_id for all streams.
 func (r *StreamRepository) ListSummaries(ctx context.Context) ([]StreamSummary, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, m3u_account_id, name, "group" FROM streams ORDER BY name`,
+		`SELECT id, m3u_account_id, name, "group", logo FROM streams ORDER BY name`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing stream summaries: %w", err)
@@ -137,7 +138,7 @@ func (r *StreamRepository) ListSummaries(ctx context.Context) ([]StreamSummary, 
 	var streams []StreamSummary
 	for rows.Next() {
 		var s StreamSummary
-		if err := rows.Scan(&s.ID, &s.M3UAccountID, &s.Name, &s.Group); err != nil {
+		if err := rows.Scan(&s.ID, &s.M3UAccountID, &s.Name, &s.Group, &s.Logo); err != nil {
 			return nil, fmt.Errorf("scanning stream summary: %w", err)
 		}
 		streams = append(streams, s)

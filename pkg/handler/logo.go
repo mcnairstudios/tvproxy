@@ -6,19 +6,19 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
 
 type LogoHandler struct {
-	repo *repository.LogoRepository
+	logoService *service.LogoService
 }
 
-func NewLogoHandler(repo *repository.LogoRepository) *LogoHandler {
-	return &LogoHandler{repo: repo}
+func NewLogoHandler(logoService *service.LogoService) *LogoHandler {
+	return &LogoHandler{logoService: logoService}
 }
 
 func (h *LogoHandler) List(w http.ResponseWriter, r *http.Request) {
-	logos, err := h.repo.List(r.Context())
+	logos, err := h.logoService.List(r.Context())
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to list logos")
 		return
@@ -47,7 +47,7 @@ func (h *LogoHandler) Create(w http.ResponseWriter, r *http.Request) {
 		URL:  req.URL,
 	}
 
-	if err := h.repo.Create(r.Context(), logo); err != nil {
+	if err := h.logoService.Create(r.Context(), logo); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to create logo")
 		return
 	}
@@ -58,7 +58,7 @@ func (h *LogoHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *LogoHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	logo, err := h.repo.GetByID(r.Context(), id)
+	logo, err := h.logoService.GetByID(r.Context(), id)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "logo not found")
 		return
@@ -70,7 +70,7 @@ func (h *LogoHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *LogoHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	logo, err := h.repo.GetByID(r.Context(), id)
+	logo, err := h.logoService.GetByID(r.Context(), id)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "logo not found")
 		return
@@ -92,7 +92,7 @@ func (h *LogoHandler) Update(w http.ResponseWriter, r *http.Request) {
 		logo.URL = req.URL
 	}
 
-	if err := h.repo.Update(r.Context(), logo); err != nil {
+	if err := h.logoService.Update(r.Context(), logo); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update logo")
 		return
 	}
@@ -103,7 +103,7 @@ func (h *LogoHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *LogoHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	if err := h.repo.Delete(r.Context(), id); err != nil {
+	if err := h.logoService.Delete(r.Context(), id); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to delete logo")
 		return
 	}

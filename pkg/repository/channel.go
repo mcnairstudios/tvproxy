@@ -12,7 +12,7 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 )
 
-const channelSelect = `SELECT c.id, c.user_id, c.name, c.logo_id, COALESCE(l.url, ''), c.tvg_id, c.channel_group_id, c.fail_count, c.is_enabled, c.created_at, c.updated_at
+const channelSelect = `SELECT c.id, c.user_id, c.name, c.logo_id, COALESCE(l.url, ''), COALESCE(l.cached_filename, ''), c.tvg_id, c.channel_group_id, c.fail_count, c.is_enabled, c.created_at, c.updated_at
 		FROM channels c LEFT JOIN logos l ON c.logo_id = l.id`
 
 type channelScanner interface {
@@ -23,7 +23,7 @@ func scanChannel(s channelScanner) (*models.Channel, error) {
 	c := &models.Channel{}
 	var logoID, groupID sql.NullString
 	if err := s.Scan(
-		&c.ID, &c.UserID, &c.Name, &logoID, &c.Logo, &c.TvgID,
+		&c.ID, &c.UserID, &c.Name, &logoID, &c.Logo, &c.LogoCached, &c.TvgID,
 		&groupID, &c.FailCount, &c.IsEnabled, &c.CreatedAt, &c.UpdatedAt,
 	); err != nil {
 		return nil, err

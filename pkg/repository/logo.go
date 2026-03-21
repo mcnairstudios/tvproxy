@@ -24,8 +24,8 @@ func (r *LogoRepository) Create(ctx context.Context, logo *models.Logo) error {
 	now := time.Now()
 	logo.ID = uuid.New().String()
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO logos (id, name, url, created_at) VALUES (?, ?, ?, ?)`,
-		logo.ID, logo.Name, logo.URL, now,
+		`INSERT INTO logos (id, name, url, cached_filename, created_at) VALUES (?, ?, ?, ?, ?)`,
+		logo.ID, logo.Name, logo.URL, logo.CachedFilename, now,
 	)
 	if err != nil {
 		return fmt.Errorf("creating logo: %w", err)
@@ -37,8 +37,8 @@ func (r *LogoRepository) Create(ctx context.Context, logo *models.Logo) error {
 func (r *LogoRepository) GetByID(ctx context.Context, id string) (*models.Logo, error) {
 	logo := &models.Logo{}
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, name, url, created_at FROM logos WHERE id = ?`, id,
-	).Scan(&logo.ID, &logo.Name, &logo.URL, &logo.CreatedAt)
+		`SELECT id, name, url, cached_filename, created_at FROM logos WHERE id = ?`, id,
+	).Scan(&logo.ID, &logo.Name, &logo.URL, &logo.CachedFilename, &logo.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("logo not found: %w", err)
@@ -50,7 +50,7 @@ func (r *LogoRepository) GetByID(ctx context.Context, id string) (*models.Logo, 
 
 func (r *LogoRepository) List(ctx context.Context) ([]models.Logo, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, url, created_at FROM logos ORDER BY created_at`,
+		`SELECT id, name, url, cached_filename, created_at FROM logos ORDER BY created_at`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing logos: %w", err)
@@ -60,7 +60,7 @@ func (r *LogoRepository) List(ctx context.Context) ([]models.Logo, error) {
 	var logos []models.Logo
 	for rows.Next() {
 		var l models.Logo
-		if err := rows.Scan(&l.ID, &l.Name, &l.URL, &l.CreatedAt); err != nil {
+		if err := rows.Scan(&l.ID, &l.Name, &l.URL, &l.CachedFilename, &l.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scanning logo: %w", err)
 		}
 		logos = append(logos, l)
@@ -82,11 +82,21 @@ func (r *LogoRepository) Update(ctx context.Context, logo *models.Logo) error {
 	return nil
 }
 
+func (r *LogoRepository) UpdateCachedFilename(ctx context.Context, id, filename string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE logos SET cached_filename = ? WHERE id = ?`, filename, id,
+	)
+	if err != nil {
+		return fmt.Errorf("updating cached filename: %w", err)
+	}
+	return nil
+}
+
 func (r *LogoRepository) GetByURL(ctx context.Context, url string) (*models.Logo, error) {
 	logo := &models.Logo{}
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, name, url, created_at FROM logos WHERE url = ?`, url,
-	).Scan(&logo.ID, &logo.Name, &logo.URL, &logo.CreatedAt)
+		`SELECT id, name, url, cached_filename, created_at FROM logos WHERE url = ?`, url,
+	).Scan(&logo.ID, &logo.Name, &logo.URL, &logo.CachedFilename, &logo.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil

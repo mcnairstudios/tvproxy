@@ -447,6 +447,10 @@ ALTER TABLE program_data ADD COLUMN episode_num_system TEXT NOT NULL DEFAULT '';
 			return nil
 		},
 	},
+	{
+		name: "add_logos_cached_filename",
+		sql:  `ALTER TABLE logos ADD COLUMN cached_filename TEXT NOT NULL DEFAULT ''`,
+	},
 }
 
 func seedData(ctx context.Context, db execContext) error {

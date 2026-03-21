@@ -129,7 +129,7 @@ func (h *SchedulerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, rec)
 }
 
-func (h *SchedulerHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+func (h *SchedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 	if user == nil {
 		respondError(w, http.StatusUnauthorized, "authentication required")
@@ -137,7 +137,7 @@ func (h *SchedulerHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.schedulerService.Cancel(r.Context(), id, user.UserID, user.IsAdmin); err != nil {
+	if err := h.schedulerService.Delete(r.Context(), id, user.UserID, user.IsAdmin); err != nil {
 		if errors.Is(err, service.ErrRecordingNotFound) {
 			w.WriteHeader(http.StatusNoContent)
 			return

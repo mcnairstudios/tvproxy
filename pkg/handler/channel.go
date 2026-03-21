@@ -8,17 +8,16 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
 
 type ChannelHandler struct {
 	channelService *service.ChannelService
-	logoRepo       *repository.LogoRepository
+	logoService    *service.LogoService
 }
 
-func NewChannelHandler(channelService *service.ChannelService, logoRepo *repository.LogoRepository) *ChannelHandler {
-	return &ChannelHandler{channelService: channelService, logoRepo: logoRepo}
+func NewChannelHandler(channelService *service.ChannelService, logoService *service.LogoService) *ChannelHandler {
+	return &ChannelHandler{channelService: channelService, logoService: logoService}
 }
 
 func (h *ChannelHandler) resolveLogoID(ctx context.Context, logoID *string, logoURL string, channelName string) (*string, error) {
@@ -28,7 +27,7 @@ func (h *ChannelHandler) resolveLogoID(ctx context.Context, logoID *string, logo
 	if logoURL == "" {
 		return nil, nil
 	}
-	logo, err := h.logoRepo.GetByURL(ctx, logoURL)
+	logo, err := h.logoService.GetByURL(ctx, logoURL)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +39,7 @@ func (h *ChannelHandler) resolveLogoID(ctx context.Context, logoID *string, logo
 		name = "Auto"
 	}
 	logo = &models.Logo{Name: name, URL: logoURL}
-	if err := h.logoRepo.Create(ctx, logo); err != nil {
+	if err := h.logoService.Create(ctx, logo); err != nil {
 		return nil, err
 	}
 	return &logo.ID, nil
@@ -54,6 +53,7 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logoService.ResolveChannelLogos(channels)
 	respondJSON(w, http.StatusOK, channels)
 }
 
@@ -104,6 +104,7 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	channel.Logo = h.logoService.ResolveChannel(*channel)
 	respondJSON(w, http.StatusCreated, channel)
 }
 
@@ -117,6 +118,7 @@ func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	channel.Logo = h.logoService.ResolveChannel(*channel)
 	respondJSON(w, http.StatusOK, channel)
 }
 
@@ -169,6 +171,7 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	channel.Logo = h.logoService.ResolveChannel(*channel)
 	respondJSON(w, http.StatusOK, channel)
 }
 

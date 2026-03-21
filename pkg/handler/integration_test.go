@@ -44,6 +44,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 		Host:               "localhost",
 		Port:               8080,
 		BaseURL:            "http://localhost",
+		DatabasePath:       dbPath,
 		JWTSecret:          "test-jwt-secret",
 		AccessTokenExpiry:  15 * time.Minute,
 		RefreshTokenExpiry: 7 * 24 * time.Hour,
@@ -72,14 +73,17 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	require.NoError(t, err)
 	adminUserID := adminUser.ID
 
-	m3uService := service.NewM3UService(m3uAccountRepo, streamRepo, cfg, log)
+	settingsService := service.NewSettingsService(settingsRepo)
+	logoService := service.NewLogoService(logoRepo, settingsService, cfg, log)
+	logoService.EnsureDir()
+
+	m3uService := service.NewM3UService(m3uAccountRepo, streamRepo, logoService, cfg, log)
 	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamRepo, log)
 	epgService := service.NewEPGService(epgSourceRepo, epgDataRepo, programDataRepo, cfg, log)
-	settingsService := service.NewSettingsService(settingsRepo)
 	clientService := service.NewClientService(clientRepo, streamProfileRepo, log)
 	proxyService := service.NewProxyService(channelRepo, streamRepo, streamProfileRepo, clientService, cfg, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
-	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgDataRepo, programDataRepo, cfg, log)
+	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgDataRepo, programDataRepo, logoService, cfg, log)
 	ffmpegMgr := service.NewFFmpegManager(cfg, log)
 	vodService := service.NewVODService(channelRepo, streamRepo, streamProfileRepo, ffmpegMgr, cfg, log)
 	scheduledRecRepo := repository.NewScheduledRecordingRepository(db)
@@ -90,10 +94,10 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	authHandler := NewAuthHandler(authService)
 	userHandler := NewUserHandler(authService)
 	m3uAccountHandler := NewM3UAccountHandler(m3uService)
-	streamHandler := NewStreamHandler(streamRepo)
-	channelHandler := NewChannelHandler(channelService, logoRepo)
+	streamHandler := NewStreamHandler(streamRepo, logoService)
+	channelHandler := NewChannelHandler(channelService, logoService)
 	channelGroupHandler := NewChannelGroupHandler(channelService)
-	logoHandler := NewLogoHandler(logoRepo)
+	logoHandler := NewLogoHandler(logoService)
 	streamProfileHandler := NewStreamProfileHandler(streamProfileRepo)
 	epgSourceHandler := NewEPGSourceHandler(epgService)
 	epgDataHandler := NewEPGDataHandler(epgDataRepo, programDataRepo)
@@ -103,7 +107,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	settingsHandler := NewSettingsHandler(settingsService, db, authService)
 	clientHandler := NewClientHandler(clientService)
 	schedulerHandler := NewSchedulerHandler(schedulerService, log)
-	dlnaService := service.NewDLNAService(channelRepo, settingsService, cfg, log)
+	dlnaService := service.NewDLNAService(channelRepo, channelGroupRepo, settingsService, logoService, cfg, log)
 	dlnaHandler := NewDLNAHandler(dlnaService, cfg)
 
 	r := chi.NewRouter()
@@ -265,7 +269,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 			r.Post("/schedule", schedulerHandler.Schedule)
 			r.Get("/schedule", schedulerHandler.List)
 			r.Get("/schedule/{id}", schedulerHandler.Get)
-			r.Delete("/schedule/{id}", schedulerHandler.Cancel)
+			r.Delete("/schedule/{id}", schedulerHandler.Delete)
 		})
 	})
 
@@ -959,7 +963,7 @@ func TestIntegration_LogoChannelPropagation(t *testing.T) {
 	var chAfterDelete map[string]interface{}
 	decodeResponse(t, rec, &chAfterDelete)
 	assert.Nil(t, chAfterDelete["logo_id"])
-	assert.Nil(t, chAfterDelete["logo"])
+	assert.Contains(t, chAfterDelete["logo"], "data:image/svg+xml")
 }
 
 func TestIntegration_ChannelFailCount(t *testing.T) {
@@ -2804,17 +2808,14 @@ func TestIntegration_ScheduleRecording_CRUD(t *testing.T) {
 		assert.Equal(t, "Coronation Street", sr["program_title"])
 	})
 
-	t.Run("cancel", func(t *testing.T) {
+	t.Run("delete", func(t *testing.T) {
 		rec := doRequest(t, env, "DELETE", "/api/recordings/schedule/"+scheduleID, nil, env.adminToken)
 		assert.Equal(t, http.StatusNoContent, rec.Code)
 	})
 
-	t.Run("verify cancelled", func(t *testing.T) {
+	t.Run("verify deleted", func(t *testing.T) {
 		rec := doRequest(t, env, "GET", "/api/recordings/schedule/"+scheduleID, nil, env.adminToken)
-		assert.Equal(t, http.StatusOK, rec.Code)
-		var sr map[string]interface{}
-		decodeResponse(t, rec, &sr)
-		assert.Equal(t, "cancelled", sr["status"])
+		assert.Equal(t, http.StatusNotFound, rec.Code)
 	})
 }
 

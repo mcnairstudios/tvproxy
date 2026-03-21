@@ -18,6 +18,7 @@ type OutputService struct {
 	channelGroupRepo *repository.ChannelGroupRepository
 	epgDataRepo      *repository.EPGDataRepository
 	programDataRepo  *repository.ProgramDataRepository
+	logoService      *LogoService
 	config           *config.Config
 	log              zerolog.Logger
 }
@@ -27,6 +28,7 @@ func NewOutputService(
 	channelGroupRepo *repository.ChannelGroupRepository,
 	epgDataRepo *repository.EPGDataRepository,
 	programDataRepo *repository.ProgramDataRepository,
+	logoService *LogoService,
 	cfg *config.Config,
 	log zerolog.Logger,
 ) *OutputService {
@@ -35,6 +37,7 @@ func NewOutputService(
 		channelGroupRepo: channelGroupRepo,
 		epgDataRepo:      epgDataRepo,
 		programDataRepo:  programDataRepo,
+		logoService:      logoService,
 		config:           cfg,
 		log:              log.With().Str("service", "output").Logger(),
 	}
@@ -128,10 +131,7 @@ func (s *OutputService) generateM3U(ctx context.Context, groupFilter map[string]
 		b.WriteString(fmt.Sprintf(" tvg-id=\"%s\"", channelEPGID(ch)))
 		b.WriteString(fmt.Sprintf(" tvg-name=\"%s\"", ch.Name))
 
-		logo := ch.Logo
-		if logo == "" {
-			logo = placeholderLogo
-		}
+		logo := s.logoService.ResolveChannel(ch)
 		b.WriteString(fmt.Sprintf(" tvg-logo=\"%s\"", logo))
 
 		if ch.ChannelGroupID != nil {
@@ -191,11 +191,8 @@ func (s *OutputService) generateEPG(ctx context.Context, groupFilter map[string]
 	}
 
 	for _, ch := range noEPGChannels {
-		logo := ch.Logo
-		if logo == "" {
-			logo = placeholderLogo
-		}
-		s.writeXMLChannel(&b, channelEPGID(ch), ch.Name, logo)
+		chLogo := s.logoService.ResolveChannel(ch)
+		s.writeXMLChannel(&b, channelEPGID(ch), ch.Name, chLogo)
 	}
 
 	for _, epg := range epgDataList {

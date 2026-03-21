@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -79,28 +80,32 @@ func main() {
 	if err == nil && adminUser != nil {
 		adminUserID = adminUser.ID
 	}
-	m3uService := service.NewM3UService(m3uAccountRepo, streamRepo, cfg, log)
+	settingsService := service.NewSettingsService(settingsRepo)
+	logoService := service.NewLogoService(logoRepo, settingsService, cfg, log)
+	logoService.EnsureDir()
+	go logoService.CacheAll(context.Background())
+
+	m3uService := service.NewM3UService(m3uAccountRepo, streamRepo, logoService, cfg, log)
 	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamRepo, log)
 	epgService := service.NewEPGService(epgSourceRepo, epgDataRepo, programDataRepo, cfg, log)
-	settingsService := service.NewSettingsService(settingsRepo)
 	clientService := service.NewClientService(clientRepo, streamProfileRepo, log)
 	proxyService := service.NewProxyService(channelRepo, streamRepo, streamProfileRepo, clientService, cfg, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
-	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgDataRepo, programDataRepo, cfg, log)
+	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgDataRepo, programDataRepo, logoService, cfg, log)
 	ffmpegMgr := service.NewFFmpegManager(cfg, log)
 	vodService := service.NewVODService(channelRepo, streamRepo, streamProfileRepo, ffmpegMgr, cfg, log)
 	schedulerService := service.NewSchedulerService(scheduledRecRepo, channelRepo, vodService, cfg, log)
-	dlnaService := service.NewDLNAService(channelRepo, settingsService, cfg, log)
+	dlnaService := service.NewDLNAService(channelRepo, channelGroupRepo, settingsService, logoService, cfg, log)
 
 	authMW := middleware.NewAuthMiddleware(authService, cfg.APIKey, adminUserID)
 
 	authHandler := handler.NewAuthHandler(authService)
 	userHandler := handler.NewUserHandler(authService)
 	m3uAccountHandler := handler.NewM3UAccountHandler(m3uService)
-	streamHandler := handler.NewStreamHandler(streamRepo)
-	channelHandler := handler.NewChannelHandler(channelService, logoRepo)
+	streamHandler := handler.NewStreamHandler(streamRepo, logoService)
+	channelHandler := handler.NewChannelHandler(channelService, logoService)
 	channelGroupHandler := handler.NewChannelGroupHandler(channelService)
-	logoHandler := handler.NewLogoHandler(logoRepo)
+	logoHandler := handler.NewLogoHandler(logoService)
 	streamProfileHandler := handler.NewStreamProfileHandler(streamProfileRepo)
 	epgSourceHandler := handler.NewEPGSourceHandler(epgService)
 	epgDataHandler := handler.NewEPGDataHandler(epgDataRepo, programDataRepo)
@@ -301,9 +306,12 @@ func main() {
 			r.Post("/schedule", schedulerHandler.Schedule)
 			r.Get("/schedule", schedulerHandler.List)
 			r.Get("/schedule/{id}", schedulerHandler.Get)
-			r.Delete("/schedule/{id}", schedulerHandler.Cancel)
+			r.Delete("/schedule/{id}", schedulerHandler.Delete)
 		})
 	})
+
+	staticRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "static")
+	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir(staticRoot))))
 
 	distFS, err := fs.Sub(web.Assets, "dist")
 	if err != nil {
