@@ -13,5 +13,8 @@
 .vscode/
 .DS_Store
 
+# Runtime cached logos
+/static/
+
 # Project instructions (local only)
 CLAUDE.md
