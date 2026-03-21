@@ -12,6 +12,24 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 )
 
+const hdhrDeviceSelect = `SELECT id, name, device_id, device_auth, firmware_version, tuner_count, port, is_enabled, created_at, updated_at FROM hdhr_devices`
+
+type hdhrScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanDevice(s hdhrScanner) (*models.HDHRDevice, error) {
+	d := &models.HDHRDevice{}
+	if err := s.Scan(
+		&d.ID, &d.Name, &d.DeviceID, &d.DeviceAuth,
+		&d.FirmwareVersion, &d.TunerCount, &d.Port,
+		&d.IsEnabled, &d.CreatedAt, &d.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
 type HDHRDeviceRepository struct {
 	db *database.DB
 }
@@ -24,10 +42,10 @@ func (r *HDHRDeviceRepository) Create(ctx context.Context, device *models.HDHRDe
 	now := time.Now()
 	device.ID = uuid.New().String()
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO hdhr_devices (id, name, device_id, device_auth, firmware_version, tuner_count, port, channel_profile_id, is_enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO hdhr_devices (id, name, device_id, device_auth, firmware_version, tuner_count, port, is_enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		device.ID, device.Name, device.DeviceID, device.DeviceAuth, device.FirmwareVersion,
-		device.TunerCount, device.Port, device.ChannelProfileID, device.IsEnabled, now, now,
+		device.TunerCount, device.Port, device.IsEnabled, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("creating hdhr device: %w", err)
@@ -38,66 +56,29 @@ func (r *HDHRDeviceRepository) Create(ctx context.Context, device *models.HDHRDe
 }
 
 func (r *HDHRDeviceRepository) GetByID(ctx context.Context, id string) (*models.HDHRDevice, error) {
-	device := &models.HDHRDevice{}
-	var profileID sql.NullString
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, name, device_id, device_auth, firmware_version, tuner_count, port, channel_profile_id, is_enabled, created_at, updated_at
-		FROM hdhr_devices WHERE id = ?`, id,
-	).Scan(
-		&device.ID, &device.Name, &device.DeviceID, &device.DeviceAuth,
-		&device.FirmwareVersion, &device.TunerCount, &device.Port, &profileID,
-		&device.IsEnabled, &device.CreatedAt, &device.UpdatedAt,
-	)
+	device, err := scanDevice(r.db.QueryRowContext(ctx, hdhrDeviceSelect+` WHERE id = ?`, id))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("hdhr device not found: %w", err)
 		}
 		return nil, fmt.Errorf("getting hdhr device by id: %w", err)
 	}
-	if profileID.Valid {
-		device.ChannelProfileID = &profileID.String
-	}
-	groupIDs, err := r.GetChannelGroups(ctx, device.ID)
-	if err != nil {
-		return nil, fmt.Errorf("getting channel groups for device: %w", err)
-	}
-	device.ChannelGroupIDs = groupIDs
-	return device, nil
+	return r.loadGroups(ctx, device)
 }
 
 func (r *HDHRDeviceRepository) GetByDeviceID(ctx context.Context, deviceID string) (*models.HDHRDevice, error) {
-	device := &models.HDHRDevice{}
-	var profileID sql.NullString
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, name, device_id, device_auth, firmware_version, tuner_count, port, channel_profile_id, is_enabled, created_at, updated_at
-		FROM hdhr_devices WHERE device_id = ?`, deviceID,
-	).Scan(
-		&device.ID, &device.Name, &device.DeviceID, &device.DeviceAuth,
-		&device.FirmwareVersion, &device.TunerCount, &device.Port, &profileID,
-		&device.IsEnabled, &device.CreatedAt, &device.UpdatedAt,
-	)
+	device, err := scanDevice(r.db.QueryRowContext(ctx, hdhrDeviceSelect+` WHERE device_id = ?`, deviceID))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("hdhr device not found: %w", err)
 		}
 		return nil, fmt.Errorf("getting hdhr device by device id: %w", err)
 	}
-	if profileID.Valid {
-		device.ChannelProfileID = &profileID.String
-	}
-	groupIDs, err := r.GetChannelGroups(ctx, device.ID)
-	if err != nil {
-		return nil, fmt.Errorf("getting channel groups for device: %w", err)
-	}
-	device.ChannelGroupIDs = groupIDs
-	return device, nil
+	return r.loadGroups(ctx, device)
 }
 
 func (r *HDHRDeviceRepository) List(ctx context.Context) ([]models.HDHRDevice, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, device_id, device_auth, firmware_version, tuner_count, port, channel_profile_id, is_enabled, created_at, updated_at
-		FROM hdhr_devices ORDER BY created_at`,
-	)
+	rows, err := r.db.QueryContext(ctx, hdhrDeviceSelect+` ORDER BY created_at`)
 	if err != nil {
 		return nil, fmt.Errorf("listing hdhr devices: %w", err)
 	}
@@ -105,19 +86,11 @@ func (r *HDHRDeviceRepository) List(ctx context.Context) ([]models.HDHRDevice, e
 
 	var devices []models.HDHRDevice
 	for rows.Next() {
-		var d models.HDHRDevice
-		var profileID sql.NullString
-		if err := rows.Scan(
-			&d.ID, &d.Name, &d.DeviceID, &d.DeviceAuth,
-			&d.FirmwareVersion, &d.TunerCount, &d.Port, &profileID,
-			&d.IsEnabled, &d.CreatedAt, &d.UpdatedAt,
-		); err != nil {
+		d, err := scanDevice(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning hdhr device: %w", err)
 		}
-		if profileID.Valid {
-			d.ChannelProfileID = &profileID.String
-		}
-		devices = append(devices, d)
+		devices = append(devices, *d)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating hdhr devices: %w", err)
@@ -137,10 +110,10 @@ func (r *HDHRDeviceRepository) List(ctx context.Context) ([]models.HDHRDevice, e
 func (r *HDHRDeviceRepository) Update(ctx context.Context, device *models.HDHRDevice) error {
 	now := time.Now()
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE hdhr_devices SET name = ?, device_id = ?, device_auth = ?, firmware_version = ?, tuner_count = ?, port = ?, channel_profile_id = ?, is_enabled = ?, updated_at = ?
+		`UPDATE hdhr_devices SET name = ?, device_id = ?, device_auth = ?, firmware_version = ?, tuner_count = ?, port = ?, is_enabled = ?, updated_at = ?
 		WHERE id = ?`,
 		device.Name, device.DeviceID, device.DeviceAuth, device.FirmwareVersion,
-		device.TunerCount, device.Port, device.ChannelProfileID, device.IsEnabled, now, device.ID,
+		device.TunerCount, device.Port, device.IsEnabled, now, device.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating hdhr device: %w", err)
@@ -204,4 +177,13 @@ func (r *HDHRDeviceRepository) GetChannelGroups(ctx context.Context, deviceID st
 		return nil, fmt.Errorf("iterating channel group ids: %w", err)
 	}
 	return ids, nil
+}
+
+func (r *HDHRDeviceRepository) loadGroups(ctx context.Context, device *models.HDHRDevice) (*models.HDHRDevice, error) {
+	groupIDs, err := r.GetChannelGroups(ctx, device.ID)
+	if err != nil {
+		return nil, fmt.Errorf("getting channel groups for device: %w", err)
+	}
+	device.ChannelGroupIDs = groupIDs
+	return device, nil
 }

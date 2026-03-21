@@ -51,7 +51,6 @@ func main() {
 	streamRepo := repository.NewStreamRepository(db)
 	channelRepo := repository.NewChannelRepository(db)
 	channelGroupRepo := repository.NewChannelGroupRepository(db)
-	channelProfileRepo := repository.NewChannelProfileRepository(db)
 	logoRepo := repository.NewLogoRepository(db)
 	streamProfileRepo := repository.NewStreamProfileRepository(db)
 	epgSourceRepo := repository.NewEPGSourceRepository(db)
@@ -85,12 +84,13 @@ func main() {
 	epgService := service.NewEPGService(epgSourceRepo, epgDataRepo, programDataRepo, cfg, log)
 	settingsService := service.NewSettingsService(settingsRepo)
 	clientService := service.NewClientService(clientRepo, streamProfileRepo, log)
-	proxyService := service.NewProxyService(channelRepo, streamRepo, m3uAccountRepo, channelProfileRepo, streamProfileRepo, clientService, cfg, log)
-	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo, streamRepo, channelProfileRepo, streamProfileRepo, adminUserID, cfg, log)
-	outputService := service.NewOutputService(channelRepo, channelGroupRepo, streamRepo, channelProfileRepo, streamProfileRepo, epgDataRepo, programDataRepo, adminUserID, cfg, log)
+	proxyService := service.NewProxyService(channelRepo, streamRepo, streamProfileRepo, clientService, cfg, log)
+	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
+	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgDataRepo, programDataRepo, cfg, log)
 	ffmpegMgr := service.NewFFmpegManager(cfg, log)
 	vodService := service.NewVODService(channelRepo, streamRepo, streamProfileRepo, ffmpegMgr, cfg, log)
 	schedulerService := service.NewSchedulerService(scheduledRecRepo, channelRepo, vodService, cfg, log)
+	dlnaService := service.NewDLNAService(channelRepo, settingsService, cfg, log)
 
 	authMW := middleware.NewAuthMiddleware(authService, cfg.APIKey, adminUserID)
 
@@ -100,7 +100,6 @@ func main() {
 	streamHandler := handler.NewStreamHandler(streamRepo)
 	channelHandler := handler.NewChannelHandler(channelService, logoRepo)
 	channelGroupHandler := handler.NewChannelGroupHandler(channelService)
-	channelProfileHandler := handler.NewChannelProfileHandler(channelProfileRepo)
 	logoHandler := handler.NewLogoHandler(logoRepo)
 	streamProfileHandler := handler.NewStreamProfileHandler(streamProfileRepo)
 	epgSourceHandler := handler.NewEPGSourceHandler(epgService)
@@ -112,6 +111,7 @@ func main() {
 	settingsHandler := handler.NewSettingsHandler(settingsService, db, authService)
 	clientHandler := handler.NewClientHandler(clientService)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerService, log)
+	dlnaHandler := handler.NewDLNAHandler(dlnaService, cfg)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -148,9 +148,18 @@ func main() {
 	r.Get("/capability", hdhrHandler.DeviceXML)
 
 	r.Get("/output/m3u", outputHandler.M3U)
+	r.Get("/channels.m3u", outputHandler.M3U)
+	r.Get("/channels.m3u8", outputHandler.M3U8)
 	r.Get("/output/epg", outputHandler.EPG)
 
+	r.Get("/dlna/device.xml", dlnaHandler.DeviceDescription)
+	r.Get("/dlna/ContentDirectory.xml", dlnaHandler.ContentDirectorySCPD)
+	r.Get("/dlna/ConnectionManager.xml", dlnaHandler.ConnectionManagerSCPD)
+	r.Post("/dlna/control/ContentDirectory", dlnaHandler.ContentDirectoryControl)
+	r.Post("/dlna/control/ConnectionManager", dlnaHandler.ConnectionManagerControl)
+
 	r.Get("/channel/{channelID}", proxyHandler.Stream)
+	r.Head("/channel/{channelID}", proxyHandler.StreamHead)
 	r.Get("/stream/{streamID}", proxyHandler.RawStream)
 
 	r.Get("/stream/{streamID}/probe", vodHandler.ProbeStream)
@@ -223,15 +232,6 @@ func main() {
 			r.Get("/{id}", channelGroupHandler.Get)
 			r.Put("/{id}", channelGroupHandler.Update)
 			r.Delete("/{id}", channelGroupHandler.Delete)
-		})
-
-		r.Route("/api/channel-profiles", func(r chi.Router) {
-			r.Use(authMW.RequireAdmin)
-			r.Get("/", channelProfileHandler.List)
-			r.Post("/", channelProfileHandler.Create)
-			r.Get("/{id}", channelProfileHandler.Get)
-			r.Put("/{id}", channelProfileHandler.Update)
-			r.Delete("/{id}", channelProfileHandler.Delete)
 		})
 
 		r.Route("/api/logos", func(r chi.Router) {
@@ -328,6 +328,7 @@ func main() {
 	wm.Add("ssdp", worker.NewSSDPWorker(hdhrDeviceRepo, cfg.BaseURL, log))
 	wm.Add("hdhr_discover", worker.NewHDHRDiscoverWorker(hdhrDeviceRepo, cfg.BaseURL, log))
 	wm.Add("hdhr_servers", worker.NewHDHRServerWorker(hdhrDeviceRepo, hdhrService, proxyService, outputService, cfg, log))
+	wm.Add("dlna", worker.NewDLNAWorker(dlnaService, cfg.BaseURL, cfg.Port, log))
 	wm.Add("vod_cleanup", worker.NewVODCleanupWorker(vodService, 60*time.Second, log))
 	wm.Add("recording_scheduler", worker.NewSchedulerWorker(schedulerService, 30*time.Second, log))
 	wm.Add("wal_checkpoint", worker.NewWALCheckpointWorker(db, 5*time.Minute, log))

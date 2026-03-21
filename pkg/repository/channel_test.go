@@ -56,7 +56,6 @@ func TestChannelCRUD(t *testing.T) {
 	assert.Equal(t, "test.channel", fetched.TvgID)
 	assert.True(t, fetched.IsEnabled)
 	assert.Nil(t, fetched.ChannelGroupID)
-	assert.Nil(t, fetched.ChannelProfileID)
 
 	// Update logo URL
 	logo2 := &models.Logo{Name: "New Logo", URL: "http://example.com/newlogo.png"}
@@ -114,15 +113,13 @@ func TestChannelGetByIDNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "channel not found")
 }
 
-func TestChannelWithGroupAndProfile(t *testing.T) {
+func TestChannelWithGroup(t *testing.T) {
 	db := setupTestDB(t)
 	channelRepo := NewChannelRepository(db)
 	groupRepo := NewChannelGroupRepository(db)
-	profileRepo := NewChannelProfileRepository(db)
 	ctx := context.Background()
 	userID := createTestUser(t, db)
 
-	// Create a channel group
 	group := &models.ChannelGroup{
 		UserID:    userID,
 		Name:      "Sports",
@@ -132,21 +129,11 @@ func TestChannelWithGroupAndProfile(t *testing.T) {
 	err := groupRepo.Create(ctx, group)
 	require.NoError(t, err)
 
-	// Create a channel profile
-	profile := &models.ChannelProfile{
-		Name:      "HD Profile",
-		SortOrder: 1,
-	}
-	err = profileRepo.Create(ctx, profile)
-	require.NoError(t, err)
-
-	// Create a channel with group and profile
 	channel := &models.Channel{
-		UserID:           userID,
-		Name:             "ESPN",
-		IsEnabled:        true,
-		ChannelGroupID:   &group.ID,
-		ChannelProfileID: &profile.ID,
+		UserID:         userID,
+		Name:           "ESPN",
+		IsEnabled:      true,
+		ChannelGroupID: &group.ID,
 	}
 	err = channelRepo.Create(ctx, channel)
 	require.NoError(t, err)
@@ -154,9 +141,7 @@ func TestChannelWithGroupAndProfile(t *testing.T) {
 	fetched, err := channelRepo.GetByID(ctx, channel.ID)
 	require.NoError(t, err)
 	require.NotNil(t, fetched.ChannelGroupID)
-	require.NotNil(t, fetched.ChannelProfileID)
 	assert.Equal(t, group.ID, *fetched.ChannelGroupID)
-	assert.Equal(t, profile.ID, *fetched.ChannelProfileID)
 }
 
 func TestChannelAssignStreams(t *testing.T) {

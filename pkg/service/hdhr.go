@@ -7,9 +7,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/rs/zerolog"
-
-	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
 )
@@ -60,35 +57,17 @@ type deviceXMLInner struct {
 }
 
 type HDHRService struct {
-	hdhrDeviceRepo     *repository.HDHRDeviceRepository
-	channelRepo        *repository.ChannelRepository
-	streamRepo         *repository.StreamRepository
-	channelProfileRepo *repository.ChannelProfileRepository
-	streamProfileRepo  *repository.StreamProfileRepository
-	adminUserID        string
-	config             *config.Config
-	log                zerolog.Logger
+	hdhrDeviceRepo *repository.HDHRDeviceRepository
+	channelRepo    *repository.ChannelRepository
 }
 
 func NewHDHRService(
 	hdhrDeviceRepo *repository.HDHRDeviceRepository,
 	channelRepo *repository.ChannelRepository,
-	streamRepo *repository.StreamRepository,
-	channelProfileRepo *repository.ChannelProfileRepository,
-	streamProfileRepo *repository.StreamProfileRepository,
-	adminUserID string,
-	cfg *config.Config,
-	log zerolog.Logger,
 ) *HDHRService {
 	return &HDHRService{
-		hdhrDeviceRepo:     hdhrDeviceRepo,
-		channelRepo:        channelRepo,
-		streamRepo:         streamRepo,
-		channelProfileRepo: channelProfileRepo,
-		streamProfileRepo:  streamProfileRepo,
-		adminUserID:        adminUserID,
-		config:             cfg,
-		log:                log.With().Str("service", "hdhr").Logger(),
+		hdhrDeviceRepo: hdhrDeviceRepo,
+		channelRepo:    channelRepo,
 	}
 }
 
@@ -176,10 +155,7 @@ func (s *HDHRService) GetDiscoverDataForDevice(ctx context.Context, device *mode
 func (s *HDHRService) GetLineupForDevice(ctx context.Context, device *models.HDHRDevice, baseURL string) ([]LineupEntry, error) {
 	var groupSet map[string]bool
 	if len(device.ChannelGroupIDs) > 0 {
-		groupSet = make(map[string]bool, len(device.ChannelGroupIDs))
-		for _, gid := range device.ChannelGroupIDs {
-			groupSet[gid] = true
-		}
+		groupSet = toStringSet(device.ChannelGroupIDs)
 	}
 	return s.buildLineup(ctx, baseURL, groupSet)
 }
@@ -221,9 +197,6 @@ func (s *HDHRService) firstEnabledDevice(ctx context.Context) (*models.HDHRDevic
 }
 
 func (s *HDHRService) listChannels(ctx context.Context) ([]models.Channel, error) {
-	if s.adminUserID != "" {
-		return s.channelRepo.ListByUserID(ctx, s.adminUserID)
-	}
 	return s.channelRepo.List(ctx)
 }
 
@@ -245,7 +218,7 @@ func (s *HDHRService) buildLineup(ctx context.Context, baseURL string, groupFilt
 			}
 		}
 
-		streamURL := ResolveChannelURL(ctx, &ch, baseURL, s.channelRepo, s.streamRepo, s.channelProfileRepo, s.streamProfileRepo, s.log)
+		streamURL := ResolveChannelURL(ch.ID, baseURL)
 
 		lineup = append(lineup, LineupEntry{
 			GuideNumber: strconv.Itoa(guideNum),

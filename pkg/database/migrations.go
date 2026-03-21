@@ -367,6 +367,86 @@ ALTER TABLE program_data ADD COLUMN episode_num_system TEXT NOT NULL DEFAULT '';
 		CREATE INDEX idx_scheduled_recordings_status ON scheduled_recordings(status);
 		CREATE INDEX idx_scheduled_recordings_start_at ON scheduled_recordings(start_at);`,
 	},
+	{
+		name: "seed_quest_client",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			args := ffmpeg.ComposeStreamProfileArgs("m3u", "none", "copy", "mpegts")
+			profileID := uuid.New().String()
+			if _, err := db.ExecContext(ctx,
+				`INSERT INTO stream_profiles (id, name, stream_mode, source_type, hwaccel, video_codec, container, custom_args, command, args, is_default, is_system, is_client)
+				 VALUES (?, 'Quest (Client)', 'ffmpeg', 'm3u', 'none', 'copy', 'mpegts', '', 'ffmpeg', ?, 0, 0, 1)`,
+				profileID, args); err != nil {
+				return err
+			}
+			clientID := uuid.New().String()
+			if _, err := db.ExecContext(ctx,
+				`INSERT INTO clients (id, name, priority, stream_profile_id, is_enabled) VALUES (?, 'Quest', 30, ?, 1)`,
+				clientID, profileID); err != nil {
+				return err
+			}
+			ruleID := uuid.New().String()
+			if _, err := db.ExecContext(ctx,
+				`INSERT INTO client_match_rules (id, client_id, header_name, match_type, match_value) VALUES (?, ?, 'User-Agent', 'contains', 'Quest')`,
+				ruleID, clientID); err != nil {
+				return err
+			}
+			return nil
+		},
+	},
+	{
+		name: "remove_channel_profiles",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			stmts := []string{
+				`PRAGMA foreign_keys = OFF`,
+				`CREATE TABLE channels_new (
+					id TEXT PRIMARY KEY,
+					user_id TEXT NOT NULL DEFAULT '' REFERENCES users(id),
+					name TEXT NOT NULL,
+					logo_id TEXT,
+					tvg_id TEXT NOT NULL DEFAULT '',
+					channel_group_id TEXT,
+					is_enabled INTEGER NOT NULL DEFAULT 1,
+					fail_count INTEGER NOT NULL DEFAULT 0,
+					created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					FOREIGN KEY (logo_id) REFERENCES logos(id) ON DELETE SET NULL,
+					FOREIGN KEY (channel_group_id) REFERENCES channel_groups(id) ON DELETE SET NULL
+				)`,
+				`INSERT INTO channels_new (id, user_id, name, logo_id, tvg_id, channel_group_id, is_enabled, fail_count, created_at, updated_at)
+				 SELECT id, user_id, name, logo_id, tvg_id, channel_group_id, is_enabled, fail_count, created_at, updated_at FROM channels`,
+				`DROP TABLE channels`,
+				`ALTER TABLE channels_new RENAME TO channels`,
+				`CREATE INDEX idx_channels_logo_id ON channels(logo_id)`,
+				`CREATE INDEX idx_channels_user_id ON channels(user_id)`,
+
+				`CREATE TABLE hdhr_devices_new (
+					id TEXT PRIMARY KEY,
+					name TEXT NOT NULL,
+					device_id TEXT NOT NULL UNIQUE,
+					device_auth TEXT NOT NULL,
+					firmware_version TEXT NOT NULL DEFAULT '20240101',
+					tuner_count INTEGER NOT NULL DEFAULT 2,
+					port INTEGER NOT NULL DEFAULT 0,
+					is_enabled INTEGER NOT NULL DEFAULT 1,
+					created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+				)`,
+				`INSERT INTO hdhr_devices_new (id, name, device_id, device_auth, firmware_version, tuner_count, port, is_enabled, created_at, updated_at)
+				 SELECT id, name, device_id, device_auth, firmware_version, tuner_count, port, is_enabled, created_at, updated_at FROM hdhr_devices`,
+				`DROP TABLE hdhr_devices`,
+				`ALTER TABLE hdhr_devices_new RENAME TO hdhr_devices`,
+
+				`DROP TABLE IF EXISTS channel_profiles`,
+				`PRAGMA foreign_keys = ON`,
+			}
+			for _, s := range stmts {
+				if _, err := db.ExecContext(ctx, s); err != nil {
+					return fmt.Errorf("executing %q: %w", s[:40], err)
+				}
+			}
+			return nil
+		},
+	},
 }
 
 func seedData(ctx context.Context, db execContext) error {

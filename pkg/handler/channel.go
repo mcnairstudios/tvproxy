@@ -61,13 +61,12 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 
 	var req struct {
-		Name             string  `json:"name"`
-		Logo             string  `json:"logo"`
-		LogoID           *string `json:"logo_id"`
-		TvgID            string  `json:"tvg_id"`
-		ChannelGroupID   *string `json:"channel_group_id"`
-		ChannelProfileID *string `json:"channel_profile_id"`
-		IsEnabled        bool    `json:"is_enabled"`
+		Name           string  `json:"name"`
+		Logo           string  `json:"logo"`
+		LogoID         *string `json:"logo_id"`
+		TvgID          string  `json:"tvg_id"`
+		ChannelGroupID *string `json:"channel_group_id"`
+		IsEnabled      bool    `json:"is_enabled"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -86,13 +85,12 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	channel := &models.Channel{
-		UserID:           user.UserID,
-		Name:             req.Name,
-		LogoID:           logoID,
-		TvgID:            req.TvgID,
-		ChannelGroupID:   req.ChannelGroupID,
-		ChannelProfileID: req.ChannelProfileID,
-		IsEnabled:        req.IsEnabled,
+		UserID:         user.UserID,
+		Name:           req.Name,
+		LogoID:         logoID,
+		TvgID:          req.TvgID,
+		ChannelGroupID: req.ChannelGroupID,
+		IsEnabled:      req.IsEnabled,
 	}
 
 	if err := h.channelService.CreateChannel(r.Context(), channel); err != nil {
@@ -133,13 +131,12 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name             string  `json:"name"`
-		Logo             string  `json:"logo"`
-		LogoID           *string `json:"logo_id"`
-		TvgID            string  `json:"tvg_id"`
-		ChannelGroupID   *string `json:"channel_group_id"`
-		ChannelProfileID *string `json:"channel_profile_id"`
-		IsEnabled        bool    `json:"is_enabled"`
+		Name           string  `json:"name"`
+		Logo           string  `json:"logo"`
+		LogoID         *string `json:"logo_id"`
+		TvgID          string  `json:"tvg_id"`
+		ChannelGroupID *string `json:"channel_group_id"`
+		IsEnabled      bool    `json:"is_enabled"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -159,7 +156,6 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	channel.TvgID = req.TvgID
 	channel.ChannelGroupID = req.ChannelGroupID
-	channel.ChannelProfileID = req.ChannelProfileID
 	channel.IsEnabled = req.IsEnabled
 
 	if err := h.channelService.UpdateChannelForUser(r.Context(), channel, user.UserID); err != nil {

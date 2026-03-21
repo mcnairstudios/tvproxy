@@ -82,7 +82,7 @@ func TestTablesExist(t *testing.T) {
 
 	tables := []string{
 		"users", "m3u_accounts", "streams", "channel_groups",
-		"channel_profiles", "channels", "channel_streams", "logos",
+		"channels", "channel_streams", "logos",
 		"stream_profiles", "epg_sources", "epg_data", "program_data",
 		"hdhr_devices", "core_settings",
 	}

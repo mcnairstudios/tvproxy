@@ -70,7 +70,7 @@ func (db *DB) SoftReset(ctx context.Context) error {
 		tables := []string{
 			"channel_streams", "channels", "streams", "program_data", "epg_data",
 			"client_match_rules", "clients", "hdhr_device_channel_groups", "hdhr_devices",
-			"channel_profiles", "channel_groups", "logos", "stream_profiles",
+			"channel_groups", "logos", "stream_profiles",
 		}
 		for _, t := range tables {
 			if _, err := tx.ExecContext(ctx, "DELETE FROM "+t); err != nil {

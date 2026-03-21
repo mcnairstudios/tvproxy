@@ -14,41 +14,29 @@ import (
 )
 
 type OutputService struct {
-	channelRepo        *repository.ChannelRepository
-	channelGroupRepo   *repository.ChannelGroupRepository
-	streamRepo         *repository.StreamRepository
-	channelProfileRepo *repository.ChannelProfileRepository
-	streamProfileRepo  *repository.StreamProfileRepository
-	epgDataRepo        *repository.EPGDataRepository
-	programDataRepo    *repository.ProgramDataRepository
-	adminUserID        string
-	config             *config.Config
-	log                zerolog.Logger
+	channelRepo      *repository.ChannelRepository
+	channelGroupRepo *repository.ChannelGroupRepository
+	epgDataRepo      *repository.EPGDataRepository
+	programDataRepo  *repository.ProgramDataRepository
+	config           *config.Config
+	log              zerolog.Logger
 }
 
 func NewOutputService(
 	channelRepo *repository.ChannelRepository,
 	channelGroupRepo *repository.ChannelGroupRepository,
-	streamRepo *repository.StreamRepository,
-	channelProfileRepo *repository.ChannelProfileRepository,
-	streamProfileRepo *repository.StreamProfileRepository,
 	epgDataRepo *repository.EPGDataRepository,
 	programDataRepo *repository.ProgramDataRepository,
-	adminUserID string,
 	cfg *config.Config,
 	log zerolog.Logger,
 ) *OutputService {
 	return &OutputService{
-		channelRepo:        channelRepo,
-		channelGroupRepo:   channelGroupRepo,
-		streamRepo:         streamRepo,
-		channelProfileRepo: channelProfileRepo,
-		streamProfileRepo:  streamProfileRepo,
-		epgDataRepo:        epgDataRepo,
-		programDataRepo:    programDataRepo,
-		adminUserID:        adminUserID,
-		config:             cfg,
-		log:                log.With().Str("service", "output").Logger(),
+		channelRepo:      channelRepo,
+		channelGroupRepo: channelGroupRepo,
+		epgDataRepo:      epgDataRepo,
+		programDataRepo:  programDataRepo,
+		config:           cfg,
+		log:              log.With().Str("service", "output").Logger(),
 	}
 }
 
@@ -62,55 +50,52 @@ func channelEPGID(ch models.Channel) string {
 }
 
 func (s *OutputService) listChannels(ctx context.Context) ([]models.Channel, error) {
-	if s.adminUserID != "" {
-		return s.channelRepo.ListByUserID(ctx, s.adminUserID)
-	}
 	return s.channelRepo.List(ctx)
 }
 
 func (s *OutputService) listChannelGroups(ctx context.Context) ([]models.ChannelGroup, error) {
-	if s.adminUserID != "" {
-		return s.channelGroupRepo.ListByUserID(ctx, s.adminUserID)
-	}
 	return s.channelGroupRepo.List(ctx)
 }
 
-func (s *OutputService) GenerateM3U(ctx context.Context) (string, error) {
-	baseURL := fmt.Sprintf("%s:%d", s.config.BaseURL, s.config.Port)
-	return s.generateM3U(ctx, nil, baseURL)
+func (s *OutputService) baseURL() string {
+	return fmt.Sprintf("%s:%d", s.config.BaseURL, s.config.Port)
 }
 
-// GenerateM3UForGroups generates an M3U playlist filtered to channels in the
-// given groups. If groupIDs is empty, all enabled channels are included.
+func (s *OutputService) GenerateM3U(ctx context.Context) (string, error) {
+	return s.generateM3U(ctx, nil, s.baseURL(), "")
+}
+
+func (s *OutputService) GenerateM3UWithExtension(ctx context.Context, ext string) (string, error) {
+	return s.generateM3U(ctx, nil, s.baseURL(), ext)
+}
+
 func (s *OutputService) GenerateM3UForGroups(ctx context.Context, groupIDs []string, baseURL string) (string, error) {
 	if len(groupIDs) == 0 {
 		return s.GenerateM3U(ctx)
 	}
-	groupSet := make(map[string]bool, len(groupIDs))
-	for _, gid := range groupIDs {
-		groupSet[gid] = true
-	}
-	return s.generateM3U(ctx, groupSet, baseURL)
+	return s.generateM3U(ctx, toStringSet(groupIDs), baseURL, "")
 }
 
 func (s *OutputService) GenerateEPG(ctx context.Context) (string, error) {
 	return s.generateEPG(ctx, nil)
 }
 
-// GenerateEPGForGroups generates XMLTV EPG data filtered to channels in the
-// given groups. If groupIDs is empty, all data is included.
 func (s *OutputService) GenerateEPGForGroups(ctx context.Context, groupIDs []string) (string, error) {
 	if len(groupIDs) == 0 {
 		return s.GenerateEPG(ctx)
 	}
-	groupSet := make(map[string]bool, len(groupIDs))
-	for _, gid := range groupIDs {
-		groupSet[gid] = true
-	}
-	return s.generateEPG(ctx, groupSet)
+	return s.generateEPG(ctx, toStringSet(groupIDs))
 }
 
-func (s *OutputService) generateM3U(ctx context.Context, groupFilter map[string]bool, baseURL string) (string, error) {
+func toStringSet(ids []string) map[string]bool {
+	m := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		m[id] = true
+	}
+	return m
+}
+
+func (s *OutputService) generateM3U(ctx context.Context, groupFilter map[string]bool, baseURL string, urlSuffix string) (string, error) {
 	channels, err := s.listChannels(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing channels: %w", err)
@@ -140,11 +125,9 @@ func (s *OutputService) generateM3U(ctx context.Context, groupFilter map[string]
 
 		b.WriteString("#EXTINF:-1")
 
-		// tvg-id so Plex can link to the EPG
 		b.WriteString(fmt.Sprintf(" tvg-id=\"%s\"", channelEPGID(ch)))
 		b.WriteString(fmt.Sprintf(" tvg-name=\"%s\"", ch.Name))
 
-		// tvg-logo with placeholder fallback
 		logo := ch.Logo
 		if logo == "" {
 			logo = placeholderLogo
@@ -159,8 +142,8 @@ func (s *OutputService) generateM3U(ctx context.Context, groupFilter map[string]
 
 		b.WriteString(fmt.Sprintf(",%s\n", ch.Name))
 
-		streamURL := ResolveChannelURL(ctx, &ch, baseURL, s.channelRepo, s.streamRepo, s.channelProfileRepo, s.streamProfileRepo, s.log)
-		b.WriteString(streamURL + "\n")
+		streamURL := ResolveChannelURL(ch.ID, baseURL)
+		b.WriteString(streamURL + urlSuffix + "\n")
 	}
 
 	return b.String(), nil

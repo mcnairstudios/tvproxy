@@ -100,7 +100,6 @@ realSetTimeout(async () => {
     'm3u-accounts',
     'channels',        // has groupBy — this is the key one to test
     'channel-groups',
-    'channel-profiles',
     'epg-sources',
     'stream-profiles',
     'hdhr-devices',

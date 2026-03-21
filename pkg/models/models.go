@@ -46,18 +46,17 @@ type Stream struct {
 }
 
 type Channel struct {
-	ID               string    `json:"id"`
-	UserID           string    `json:"user_id"`
-	Name             string    `json:"name"`
-	LogoID           *string   `json:"logo_id,omitempty"`
-	Logo             string    `json:"logo,omitempty"`
-	TvgID            string    `json:"tvg_id,omitempty"`
-	ChannelGroupID   *string   `json:"channel_group_id,omitempty"`
-	ChannelProfileID *string   `json:"channel_profile_id,omitempty"`
-	FailCount        int       `json:"fail_count"`
-	IsEnabled        bool      `json:"is_enabled"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	UserID         string    `json:"user_id"`
+	Name           string    `json:"name"`
+	LogoID         *string   `json:"logo_id,omitempty"`
+	Logo           string    `json:"logo,omitempty"`
+	TvgID          string    `json:"tvg_id,omitempty"`
+	ChannelGroupID *string   `json:"channel_group_id,omitempty"`
+	FailCount      int       `json:"fail_count"`
+	IsEnabled      bool      `json:"is_enabled"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type ChannelStream struct {
@@ -75,15 +74,6 @@ type ChannelGroup struct {
 	SortOrder int       `json:"sort_order"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type ChannelProfile struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	StreamProfile string    `json:"stream_profile,omitempty"`
-	SortOrder     int       `json:"sort_order"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type Logo struct {
@@ -157,18 +147,17 @@ type ProgramData struct {
 }
 
 type HDHRDevice struct {
-	ID               string    `json:"id"`
-	Name             string    `json:"name"`
-	DeviceID         string    `json:"device_id"`
-	DeviceAuth       string    `json:"device_auth"`
-	FirmwareVersion  string    `json:"firmware_version"`
-	TunerCount       int       `json:"tuner_count"`
-	Port             int       `json:"port"`
-	ChannelProfileID *string   `json:"channel_profile_id,omitempty"`
-	ChannelGroupIDs  []string  `json:"channel_group_ids,omitempty"`
-	IsEnabled        bool      `json:"is_enabled"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	DeviceID        string    `json:"device_id"`
+	DeviceAuth      string    `json:"device_auth"`
+	FirmwareVersion string    `json:"firmware_version"`
+	TunerCount      int       `json:"tuner_count"`
+	Port            int       `json:"port"`
+	ChannelGroupIDs []string  `json:"channel_group_ids,omitempty"`
+	IsEnabled       bool      `json:"is_enabled"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type CoreSetting struct {

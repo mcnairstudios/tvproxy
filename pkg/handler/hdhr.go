@@ -43,13 +43,23 @@ type lineupStatusResponse struct {
 	SourceList     []string `json:"SourceList"`
 }
 
-// BaseURL is portless (e.g. http://192.168.1.149), so we append the main server port.
-func (h *HDHRHandler) resolveBaseURL(r *http.Request) string {
+type hdhrDeviceRequest struct {
+	Name            string   `json:"name"`
+	DeviceID        string   `json:"device_id"`
+	DeviceAuth      string   `json:"device_auth"`
+	FirmwareVersion string   `json:"firmware_version"`
+	TunerCount      int      `json:"tuner_count"`
+	Port            int      `json:"port"`
+	ChannelGroupIDs []string `json:"channel_group_ids"`
+	IsEnabled       bool     `json:"is_enabled"`
+}
+
+func (h *HDHRHandler) baseURL() string {
 	return fmt.Sprintf("%s:%d", h.cfg.BaseURL, h.cfg.Port)
 }
 
 func (h *HDHRHandler) Discover(w http.ResponseWriter, r *http.Request) {
-	baseURL := h.resolveBaseURL(r)
+	baseURL := h.baseURL()
 
 	data, err := h.hdhrService.GetDiscoverData(r.Context(), baseURL)
 	if err != nil {
@@ -76,7 +86,7 @@ func (h *HDHRHandler) LineupStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HDHRHandler) Lineup(w http.ResponseWriter, r *http.Request) {
-	baseURL := h.resolveBaseURL(r)
+	baseURL := h.baseURL()
 
 	lineup, err := h.hdhrService.GetLineup(r.Context(), baseURL)
 	if err != nil {
@@ -88,7 +98,7 @@ func (h *HDHRHandler) Lineup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HDHRHandler) DeviceXML(w http.ResponseWriter, r *http.Request) {
-	baseURL := h.resolveBaseURL(r)
+	baseURL := h.baseURL()
 
 	deviceXML, err := h.hdhrService.GetDeviceXML(r.Context(), baseURL)
 	if err != nil {
@@ -116,17 +126,7 @@ func (h *HDHRHandler) ListDevices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HDHRHandler) CreateDevice(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name             string   `json:"name"`
-		DeviceID         string   `json:"device_id"`
-		DeviceAuth       string   `json:"device_auth"`
-		FirmwareVersion  string   `json:"firmware_version"`
-		TunerCount       int      `json:"tuner_count"`
-		Port             int      `json:"port"`
-		ChannelProfileID *string  `json:"channel_profile_id"`
-		ChannelGroupIDs  []string `json:"channel_group_ids"`
-		IsEnabled        bool     `json:"is_enabled"`
-	}
+	var req hdhrDeviceRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -137,7 +137,6 @@ func (h *HDHRHandler) CreateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto-assign port if not provided
 	port := req.Port
 	if port == 0 {
 		nextPort, err := h.hdhrDeviceRepo.NextAvailablePort(r.Context())
@@ -149,14 +148,13 @@ func (h *HDHRHandler) CreateDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	device := &models.HDHRDevice{
-		Name:             req.Name,
-		DeviceID:         req.DeviceID,
-		DeviceAuth:       req.DeviceAuth,
-		FirmwareVersion:  req.FirmwareVersion,
-		TunerCount:       req.TunerCount,
-		Port:             port,
-		ChannelProfileID: req.ChannelProfileID,
-		IsEnabled:        req.IsEnabled,
+		Name:            req.Name,
+		DeviceID:        req.DeviceID,
+		DeviceAuth:      req.DeviceAuth,
+		FirmwareVersion: req.FirmwareVersion,
+		TunerCount:      req.TunerCount,
+		Port:            port,
+		IsEnabled:       req.IsEnabled,
 	}
 
 	if err := h.hdhrService.CreateDevice(r.Context(), device); err != nil {
@@ -196,17 +194,7 @@ func (h *HDHRHandler) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Name             string   `json:"name"`
-		DeviceID         string   `json:"device_id"`
-		DeviceAuth       string   `json:"device_auth"`
-		FirmwareVersion  string   `json:"firmware_version"`
-		TunerCount       int      `json:"tuner_count"`
-		Port             int      `json:"port"`
-		ChannelProfileID *string  `json:"channel_profile_id"`
-		ChannelGroupIDs  []string `json:"channel_group_ids"`
-		IsEnabled        bool     `json:"is_enabled"`
-	}
+	var req hdhrDeviceRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -224,7 +212,6 @@ func (h *HDHRHandler) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 	if req.Port != 0 {
 		device.Port = req.Port
 	}
-	device.ChannelProfileID = req.ChannelProfileID
 	device.IsEnabled = req.IsEnabled
 
 	if err := h.hdhrService.UpdateDevice(r.Context(), device); err != nil {

@@ -44,14 +44,12 @@ type channelConnection struct {
 }
 
 type ProxyService struct {
-	channelRepo        *repository.ChannelRepository
-	streamRepo         *repository.StreamRepository
-	m3uAccountRepo     *repository.M3UAccountRepository
-	channelProfileRepo *repository.ChannelProfileRepository
-	streamProfileRepo  *repository.StreamProfileRepository
-	clientService      *ClientService
-	config             *config.Config
-	log                zerolog.Logger
+	channelRepo       *repository.ChannelRepository
+	streamRepo        *repository.StreamRepository
+	streamProfileRepo *repository.StreamProfileRepository
+	clientService     *ClientService
+	config            *config.Config
+	log               zerolog.Logger
 
 	mu          sync.RWMutex
 	connections map[string]*channelConnection
@@ -60,23 +58,19 @@ type ProxyService struct {
 func NewProxyService(
 	channelRepo *repository.ChannelRepository,
 	streamRepo *repository.StreamRepository,
-	m3uAccountRepo *repository.M3UAccountRepository,
-	channelProfileRepo *repository.ChannelProfileRepository,
 	streamProfileRepo *repository.StreamProfileRepository,
 	clientService *ClientService,
 	cfg *config.Config,
 	log zerolog.Logger,
 ) *ProxyService {
 	return &ProxyService{
-		channelRepo:        channelRepo,
-		streamRepo:         streamRepo,
-		m3uAccountRepo:     m3uAccountRepo,
-		channelProfileRepo: channelProfileRepo,
-		streamProfileRepo:  streamProfileRepo,
-		clientService:      clientService,
-		config:             cfg,
-		log:                log.With().Str("service", "proxy").Logger(),
-		connections:        make(map[string]*channelConnection),
+		channelRepo:       channelRepo,
+		streamRepo:        streamRepo,
+		streamProfileRepo: streamProfileRepo,
+		clientService:     clientService,
+		config:            cfg,
+		log:               log.With().Str("service", "proxy").Logger(),
+		connections:       make(map[string]*channelConnection),
 	}
 }
 
@@ -102,10 +96,6 @@ func writeStreamHeaders(w http.ResponseWriter, contentType string) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ProxyStream proxies a live stream for the given channel. When another client
-// is already watching the same channel with the default profile, the new client
-// shares the existing upstream connection. Profile overrides and client-detected
-// profiles get dedicated connections to avoid mixing output formats.
 func (s *ProxyService) ProxyStream(ctx context.Context, w http.ResponseWriter, r *http.Request, channelID string, profileOverride string) error {
 	channel, err := s.channelRepo.GetByID(ctx, channelID)
 	if err != nil {
@@ -163,8 +153,7 @@ func (s *ProxyService) resolveProfile(ctx context.Context, r *http.Request, chan
 		}
 	}
 
-	mode, sp := ResolveStreamMode(ctx, channel, s.channelProfileRepo, s.streamProfileRepo, s.log)
-	return mode, sp, false
+	return "proxy", nil, false
 }
 
 func (s *ProxyService) tryJoinExisting(channelID string, c *streamClient, r *http.Request) bool {
@@ -527,7 +516,6 @@ func (s *ProxyService) cleanupConnection(channelID string) {
 	s.mu.Unlock()
 }
 
-// ProxyRawStream proxies a single stream by ID, optionally transcoding via the named profile.
 func (s *ProxyService) ProxyRawStream(ctx context.Context, w http.ResponseWriter, r *http.Request, streamID string, profileOverride string) error {
 	stream, err := s.streamRepo.GetByID(ctx, streamID)
 	if err != nil {
@@ -564,32 +552,16 @@ func (s *ProxyService) proxyRawStreamFFmpeg(ctx context.Context, w http.Response
 		cancel()
 		return fmt.Errorf("starting ffmpeg: %w", err)
 	}
+	defer cancel()
+	defer reader.Close()
 
 	s.log.Info().Str("stream_id", stream.ID).Str("profile", profile.Name).Msg("raw stream ffmpeg started")
 
 	writeStreamHeaders(w, contentTypeForProfile("ffmpeg", profile))
 	flusher.Flush()
 
-	buf := make([]byte, tsBufferSize)
-	for {
-		n, readErr := reader.Read(buf)
-		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				cancel()
-				reader.Close()
-				return nil
-			}
-			flusher.Flush()
-		}
-		if readErr != nil {
-			if readErr != io.EOF {
-				s.log.Error().Err(readErr).Str("stream_id", stream.ID).Msg("raw stream read error")
-			}
-			cancel()
-			reader.Close()
-			return nil
-		}
-	}
+	s.copyToClient(reader, w, flusher, stream.ID)
+	return nil
 }
 
 func (s *ProxyService) proxyRawStreamPassthrough(ctx context.Context, w http.ResponseWriter, r *http.Request, stream *models.Stream) error {
@@ -619,20 +591,25 @@ func (s *ProxyService) proxyRawStreamPassthrough(ctx context.Context, w http.Res
 	writeStreamHeaders(w, "video/mp2t")
 	flusher.Flush()
 
+	s.copyToClient(resp.Body, w, flusher, stream.ID)
+	return nil
+}
+
+func (s *ProxyService) copyToClient(reader io.Reader, w http.ResponseWriter, flusher http.Flusher, streamID string) {
 	buf := make([]byte, tsBufferSize)
 	for {
-		n, readErr := resp.Body.Read(buf)
+		n, readErr := reader.Read(buf)
 		if n > 0 {
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return nil
+				return
 			}
 			flusher.Flush()
 		}
 		if readErr != nil {
 			if readErr != io.EOF {
-				s.log.Error().Err(readErr).Str("stream_id", stream.ID).Msg("raw stream read error")
+				s.log.Error().Err(readErr).Str("stream_id", streamID).Msg("raw stream read error")
 			}
-			return nil
+			return
 		}
 	}
 }

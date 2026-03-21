@@ -611,7 +611,6 @@
     { section: 'Channels' },
     { id: 'channels', label: 'Channels', icon: '\ud83d\udcfa', tip: 'Define your custom channels and assign streams and EPG data' },
     { id: 'epg-guide', label: 'EPG Guide', icon: '\ud83d\udcf0', tip: 'TV programme guide grid for your channels' },
-    { id: 'channel-profiles', label: 'Channel Profiles', icon: '\u2699', tip: 'Control which channels are exposed to each HDHR device', adminOnly: true },
     { section: 'Configuration', adminOnly: true },
     { id: 'stream-profiles', label: 'Stream Profiles', icon: '\ud83d\udd27', tip: 'Configure transcoding profiles for stream processing', adminOnly: true },
     { id: 'hdhr-devices', label: 'HDHR Devices', icon: '\ud83d\udce1', tip: 'Virtual HDHomeRun devices for Plex, Jellyfin, and Emby', adminOnly: true },
@@ -3548,13 +3547,6 @@
           },
         },
         {
-          key: 'channel_profile_id', label: 'Channel Profile', type: 'async-select',
-          emptyLabel: '-- No Profile --',
-          loadOptions: () => api.get('/api/channel-profiles'),
-          valueKey: 'id', displayKey: 'name',
-          help: 'Assign a profile to control which HDHR devices expose this channel',
-        },
-        {
           key: '_stream', label: 'Stream', type: 'autocomplete',
           placeholder: 'Search streams...',
           help: 'Search and select a stream source for this channel.',
@@ -3655,33 +3647,6 @@
       ],
       fields: [
         { key: 'name', label: 'Group Name', placeholder: 'Entertainment' },
-        { key: 'sort_order', label: 'Sort Order', type: 'number', default: 0 },
-      ],
-    }),
-
-    'channel-profiles': buildCrudPage({
-      title: 'Channel Profiles',
-      singular: 'Channel Profile',
-      apiPath: '/api/channel-profiles',
-      create: true,
-      update: true,
-      columns: [
-        { key: 'name', label: 'Name' },
-        { key: 'stream_profile', label: 'Stream Profile', render: item => item.stream_profile || '-' },
-        { key: 'sort_order', label: 'Sort Order' },
-      ],
-      fields: [
-        { key: 'name', label: 'Profile Name', placeholder: 'Default Profile' },
-        {
-          key: 'stream_profile', label: 'Stream Profile', type: 'async-select',
-          emptyLabel: '-- Default --',
-          loadOptions: async () => {
-            const profiles = await api.get('/api/stream-profiles');
-            return (profiles || []).map(p => ({ id: p.name, name: p.name }));
-          },
-          valueKey: 'id', displayKey: 'name',
-          help: 'Stream processing profile to use for channels in this profile',
-        },
         { key: 'sort_order', label: 'Sort Order', type: 'number', default: 0 },
       ],
     }),
@@ -3808,13 +3773,6 @@
         { key: 'device_id', label: 'Device ID', placeholder: '12345678', help: '8-character hex device ID' },
         { key: 'tuner_count', label: 'Tuner Count', type: 'number', default: 2 },
         { key: 'port', label: 'Port', type: 'number', help: 'Auto-assigned starting at 47601. Each device needs a unique port for Plex.' },
-        {
-          key: 'channel_profile_id', label: 'Channel Profile', type: 'async-select',
-          emptyLabel: '-- Default --',
-          loadOptions: () => api.get('/api/channel-profiles'),
-          valueKey: 'id', displayKey: 'name',
-          help: 'Stream profile used for channels on this device.',
-        },
         {
           key: 'channel_group_ids', label: 'Channel Groups', type: 'async-multi-select',
           loadOptions: () => channelGroupsCache.getAll(),
@@ -4030,8 +3988,7 @@
             h('small', { style: 'color: var(--text-muted); display: block' }, 'Auto-created on client creation. Edit the profile to change encoding settings.')));
         }
 
-        formContent.appendChild(h('div', { className: 'form-group' },
-          h('label', { style: 'display:flex;align-items:center;gap:8px' }, enabledChk, 'Enabled')));
+        formContent.appendChild(h('div', { className: 'form-check' }, enabledChk, h('label', null, 'Enabled')));
         formContent.appendChild(h('div', { style: 'display: flex; gap: 8px; margin-top: 16px' }, saveBtn, cancelBtn));
 
         container.appendChild(h('div', { className: 'table-container' },
@@ -4315,6 +4272,33 @@
             ),
             h('p', { style: 'color: var(--text-muted); margin-top: 8px; font-size: 13px' },
               'When enabled, the VOD player shows a dropdown to switch between stream profiles for testing transcoding. When disabled, Browser profile is always used.'),
+          ),
+        ));
+
+        const dlnaEnabled = (Array.isArray(settings) ? settings : []).some(s => s.key === 'dlna_enabled' && s.value === 'true');
+        const dlnaToggle = h('input', { type: 'checkbox', id: 'setting-dlna-enabled' });
+        dlnaToggle.checked = dlnaEnabled;
+        dlnaToggle.onchange = async function() {
+          dlnaToggle.disabled = true;
+          try {
+            await api.put('/api/settings', { dlna_enabled: dlnaToggle.checked ? 'true' : 'false' });
+            toast.success('Setting saved');
+          } catch (err) {
+            toast.error(err.message);
+            dlnaToggle.checked = !dlnaToggle.checked;
+          }
+          dlnaToggle.disabled = false;
+        };
+
+        container.appendChild(h('div', { className: 'table-container', style: 'margin-top: 24px' },
+          h('div', { className: 'table-header' }, h('h3', null, 'DLNA Server')),
+          h('div', { style: 'padding: 16px; font-size: 15px' },
+            h('div', { style: 'display:flex;align-items:center;gap:10px' },
+              dlnaToggle,
+              h('label', { for: 'setting-dlna-enabled', style: 'cursor:pointer;margin:0' }, 'Enable DLNA MediaServer'),
+            ),
+            h('p', { style: 'color: var(--text-muted); margin-top: 8px; font-size: 13px' },
+              'When enabled, TVProxy advertises as a DLNA MediaServer on the network. DLNA clients (e.g. VLC, 4XVR) can discover and browse channels. Changes take effect within 30 seconds.'),
           ),
         ));
 
