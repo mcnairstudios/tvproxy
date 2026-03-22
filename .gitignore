@@ -1,5 +1,9 @@
-# Compiled binary
+# Compiled binaries
 /tvproxy
+/wgtest
+
+# Gob store files
+*.gob
 
 # Database files
 *.db

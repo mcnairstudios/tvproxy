@@ -52,6 +52,7 @@ type ProxyService struct {
 	clientService     *ClientService
 	activity          *ActivityService
 	config            *config.Config
+	httpClient        *http.Client
 	log               zerolog.Logger
 
 	mu          sync.RWMutex
@@ -65,8 +66,12 @@ func NewProxyService(
 	clientService *ClientService,
 	activity *ActivityService,
 	cfg *config.Config,
+	httpClient *http.Client,
 	log zerolog.Logger,
 ) *ProxyService {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
 	return &ProxyService{
 		channelRepo:       channelRepo,
 		streamStore:       streamStore,
@@ -74,6 +79,7 @@ func NewProxyService(
 		clientService:     clientService,
 		activity:          activity,
 		config:            cfg,
+		httpClient:        httpClient,
 		log:               log.With().Str("service", "proxy").Logger(),
 		connections:       make(map[string]*channelConnection),
 	}
@@ -292,7 +298,7 @@ func (s *ProxyService) startHTTPPassthrough(ctx context.Context, channelID strin
 	}
 	req.Header.Set("User-Agent", s.config.UserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("upstream connection failed: %w", err)
 	}
@@ -647,7 +653,7 @@ func (s *ProxyService) proxyRawStreamPassthrough(ctx context.Context, w http.Res
 	}
 	req.Header.Set("User-Agent", s.config.UserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("upstream connection failed: %w", err)
 	}

@@ -56,11 +56,15 @@ global.MutationObserver = class { observe() {} disconnect() {} };
 
 global.fetch = async (path) => {
   fetchCallLog.push(path);
+  var body = '[]';
+  if (typeof path === 'string' && path.indexOf('/api/wireguard/status') !== -1) {
+    body = JSON.stringify({ state: 'unconfigured', config: {} });
+  }
   return {
     ok: true,
     status: 200,
-    text: async () => '[]',
-    json: async () => [],
+    text: async () => body,
+    json: async () => JSON.parse(body),
   };
 };
 
@@ -106,6 +110,7 @@ realSetTimeout(async () => {
     'logos',
     'users',
     'recordings',
+    'wireguard',
   ];
 
   for (const name of pageNames) {

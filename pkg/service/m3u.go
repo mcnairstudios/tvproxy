@@ -26,6 +26,7 @@ type M3UService struct {
 	channelRepo    *repository.ChannelRepository
 	logoService    *LogoService
 	config         *config.Config
+	httpClient     *http.Client
 	log            zerolog.Logger
 }
 
@@ -35,14 +36,19 @@ func NewM3UService(
 	channelRepo *repository.ChannelRepository,
 	logoService *LogoService,
 	cfg *config.Config,
+	httpClient *http.Client,
 	log zerolog.Logger,
 ) *M3UService {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
 	return &M3UService{
 		m3uAccountRepo: m3uAccountRepo,
 		streamStore:    streamStore,
 		channelRepo:    channelRepo,
 		logoService:    logoService,
 		config:         cfg,
+		httpClient:     httpClient,
 		log:            log.With().Str("service", "m3u").Logger(),
 	}
 }
@@ -127,7 +133,7 @@ func (s *M3UService) refreshXtreamAccount(ctx context.Context, account *models.M
 	s.log.Info().Str("account_id", account.ID).Str("name", account.Name).Msg("refreshing xtream account")
 
 	xtreamTimeout := s.config.Settings.Network.XtreamAPITimeout
-	client := xtream.NewClient(account.URL, account.Username, account.Password, s.config.UserAgent, xtreamTimeout)
+	client := xtream.NewClient(account.URL, account.Username, account.Password, s.config.UserAgent, xtreamTimeout, s.httpClient.Transport)
 
 	if _, err := client.Authenticate(ctx); err != nil {
 		return fmt.Errorf("xtream authentication failed: %w", err)
@@ -285,7 +291,7 @@ func (s *M3UService) fetchURL(ctx context.Context, url string) (io.ReadCloser, e
 
 	req.Header.Set("User-Agent", s.config.UserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("executing request: %w", err)
 	}

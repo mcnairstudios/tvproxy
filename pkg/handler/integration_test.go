@@ -90,15 +90,15 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	adminUserID := adminUser.ID
 
 	settingsService := service.NewSettingsService(settingsRepo)
-	logoService := service.NewLogoService(logoRepo, settingsService, cfg, log)
+	logoService := service.NewLogoService(logoRepo, settingsService, cfg, nil, log)
 	logoService.EnsureDir()
 
-	m3uService := service.NewM3UService(m3uAccountRepo, streamStore, channelRepo, logoService, cfg, log)
+	m3uService := service.NewM3UService(m3uAccountRepo, streamStore, channelRepo, logoService, cfg, nil, log)
 	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamStore, log)
-	epgService := service.NewEPGService(epgSourceRepo, epgStore, cfg, log)
+	epgService := service.NewEPGService(epgSourceRepo, epgStore, cfg, nil, log)
 	activityService := service.NewActivityService()
 	clientService := service.NewClientService(clientRepo, streamProfileRepo, settingsService, log)
-	proxyService := service.NewProxyService(channelRepo, streamStore, streamProfileRepo, clientService, activityService, cfg, log)
+	proxyService := service.NewProxyService(channelRepo, streamStore, streamProfileRepo, clientService, activityService, cfg, nil, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgStore, logoService, cfg, log)
 	ffmpegMgr := service.NewFFmpegManager(cfg, log)

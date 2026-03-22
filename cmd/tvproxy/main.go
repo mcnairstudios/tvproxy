@@ -113,16 +113,25 @@ func main() {
 	}
 	settingsService := service.NewSettingsService(settingsRepo)
 	settingsService.LoadDebugFlag(ctx)
-	logoService := service.NewLogoService(logoRepo, settingsService, cfg, log)
+
+	wgService := service.NewWireGuardService(settingsService, log)
+	if err := wgService.Start(ctx); err != nil {
+		log.Error().Err(err).Msg("failed to start wireguard tunnel (continuing without VPN)")
+	}
+
+	wgHTTPClient := wgService.HTTPClient()
+	wgTransport := wgService.Transport()
+
+	logoService := service.NewLogoService(logoRepo, settingsService, cfg, wgTransport, log)
 	logoService.EnsureDir()
 	go logoService.CacheAll(context.Background())
 
-	m3uService := service.NewM3UService(m3uAccountRepo, streamStore, channelRepo, logoService, cfg, log)
+	m3uService := service.NewM3UService(m3uAccountRepo, streamStore, channelRepo, logoService, cfg, wgHTTPClient, log)
 	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamStore, log)
-	epgService := service.NewEPGService(epgSourceRepo, epgStore, cfg, log)
+	epgService := service.NewEPGService(epgSourceRepo, epgStore, cfg, wgHTTPClient, log)
 	activityService := service.NewActivityService()
 	clientService := service.NewClientService(clientRepo, streamProfileRepo, settingsService, log)
-	proxyService := service.NewProxyService(channelRepo, streamStore, streamProfileRepo, clientService, activityService, cfg, log)
+	proxyService := service.NewProxyService(channelRepo, streamStore, streamProfileRepo, clientService, activityService, cfg, wgHTTPClient, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgStore, logoService, cfg, log)
 	ffmpegMgr := service.NewFFmpegManager(cfg, log)
@@ -152,6 +161,7 @@ func main() {
 	clientHandler := handler.NewClientHandler(clientService)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerService, log)
 	dlnaHandler := handler.NewDLNAHandler(dlnaService, settingsService, cfg, log)
+	wgHandler := handler.NewWireGuardHandler(wgService, log)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -352,6 +362,14 @@ func main() {
 			r.Use(authMW.RequireAdmin)
 			r.Get("/", activityHandler.List)
 		})
+
+		r.Route("/api/wireguard", func(r chi.Router) {
+			r.Use(authMW.RequireAdmin)
+			r.Get("/status", wgHandler.Status)
+			r.Post("/reconnect", wgHandler.Reconnect)
+			r.Post("/connect", wgHandler.Connect)
+			r.Post("/disconnect", wgHandler.Disconnect)
+		})
 	})
 
 	staticRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "static")
@@ -392,6 +410,7 @@ func main() {
 	wm.Add("vod_cleanup", worker.NewVODCleanupWorker(vodService, 60*time.Second, log))
 	wm.Add("recording_scheduler", worker.NewSchedulerWorker(schedulerService, 30*time.Second, log))
 	wm.Add("wal_checkpoint", worker.NewWALCheckpointWorker(db, 5*time.Minute, log))
+	wm.Add("wireguard", worker.NewWireGuardWorker(wgService, 30*time.Second, log))
 
 	wm.Start(ctx)
 
@@ -413,6 +432,7 @@ func main() {
 	<-ctx.Done()
 	log.Info().Msg("shutting down")
 
+	wgService.Stop()
 	vodService.Shutdown()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)

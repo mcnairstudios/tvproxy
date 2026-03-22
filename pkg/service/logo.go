@@ -24,6 +24,7 @@ type LogoService struct {
 	repo            *repository.LogoRepository
 	settingsService *SettingsService
 	config          *config.Config
+	transport       http.RoundTripper
 	logosDir        string
 	streamLogosDir  string
 	log             zerolog.Logger
@@ -36,6 +37,7 @@ func NewLogoService(
 	repo *repository.LogoRepository,
 	settingsService *SettingsService,
 	cfg *config.Config,
+	transport http.RoundTripper,
 	log zerolog.Logger,
 ) *LogoService {
 	staticRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "static")
@@ -43,6 +45,7 @@ func NewLogoService(
 		repo:            repo,
 		settingsService: settingsService,
 		config:          cfg,
+		transport:       transport,
 		logosDir:        filepath.Join(staticRoot, "logos"),
 		streamLogosDir:  filepath.Join(staticRoot, "streams", "logoscache"),
 		log:             log.With().Str("service", "logo").Logger(),
@@ -150,18 +153,16 @@ func (s *LogoService) CacheAll(ctx context.Context) {
 	}
 }
 
-var logoHTTPClient *http.Client
-
 func (s *LogoService) httpClient() *http.Client {
-	if logoHTTPClient != nil {
-		return logoHTTPClient
-	}
 	timeout := 10 * time.Second
 	if s.config.Settings != nil {
 		timeout = s.config.Settings.Network.LogoDownloadTimeout
 	}
-	logoHTTPClient = &http.Client{Timeout: timeout}
-	return logoHTTPClient
+	c := &http.Client{Timeout: timeout}
+	if s.transport != nil {
+		c.Transport = s.transport
+	}
+	return c
 }
 
 func (s *LogoService) downloadLogo(ctx context.Context, id, url string) {

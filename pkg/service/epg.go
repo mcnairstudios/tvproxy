@@ -21,6 +21,7 @@ type EPGService struct {
 	epgSourceRepo *repository.EPGSourceRepository
 	epgStore      store.EPGStore
 	config        *config.Config
+	httpClient    *http.Client
 	log           zerolog.Logger
 }
 
@@ -28,12 +29,17 @@ func NewEPGService(
 	epgSourceRepo *repository.EPGSourceRepository,
 	epgStore store.EPGStore,
 	cfg *config.Config,
+	httpClient *http.Client,
 	log zerolog.Logger,
 ) *EPGService {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
 	return &EPGService{
 		epgSourceRepo: epgSourceRepo,
 		epgStore:      epgStore,
 		config:        cfg,
+		httpClient:    httpClient,
 		log:           log.With().Str("service", "epg").Logger(),
 	}
 }
@@ -257,7 +263,7 @@ func (s *EPGService) fetchURL(ctx context.Context, url string) (io.ReadCloser, e
 
 	req.Header.Set("User-Agent", s.config.UserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
