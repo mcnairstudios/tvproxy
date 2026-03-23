@@ -9,13 +9,14 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
+	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 )
 
 func newTestFFmpegManager(t *testing.T) *FFmpegManager {
 	t.Helper()
 	cfg := &config.Config{UserAgent: "test"}
 	log := zerolog.Nop()
-	return NewFFmpegManager(cfg, log)
+	return NewFFmpegManager(cfg, nil, log)
 }
 
 func TestParseProgress_NormalValues(t *testing.T) {
@@ -34,12 +35,11 @@ func TestParseProgress_CapsAt48Hours(t *testing.T) {
 	mgr := newTestFFmpegManager(t)
 	proc := &ManagedProcess{ID: "test-proc"}
 
-	// 200000 seconds = ~55.5 hours, exceeds 48h cap (172800)
 	input := "out_time_us=200000000000\n"
 	mgr.parseProgress(proc, strings.NewReader(input))
 
 	proc.mu.Lock()
-	assert.Equal(t, 172800.0, proc.BufferedSecs, "should be capped at 48 hours")
+	assert.Equal(t, maxBufferedSecs, proc.BufferedSecs, "should be capped at 48 hours")
 	proc.mu.Unlock()
 }
 
@@ -112,7 +112,7 @@ func TestSanitizeFilename(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		name := sanitizeFilename(tt.title, ts)
+		name := ffmpeg.SanitizeFilename(tt.title, ts)
 		assert.Equal(t, tt.expected, name, "for title: %q", tt.title)
 	}
 }
@@ -120,7 +120,6 @@ func TestSanitizeFilename(t *testing.T) {
 func TestSanitizeFilename_Truncation(t *testing.T) {
 	ts := time.Date(2025, 1, 15, 14, 30, 0, 0, time.UTC)
 	longTitle := strings.Repeat("a", 100)
-	name := sanitizeFilename(longTitle, ts)
-	// 60 chars max for name part + "_" + "20250115_1430" = 74 chars max
+	name := ffmpeg.SanitizeFilename(longTitle, ts)
 	assert.LessOrEqual(t, len(name), 74, "should truncate long names")
 }

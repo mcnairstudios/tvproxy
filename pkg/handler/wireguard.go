@@ -2,8 +2,12 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
+	"net/netip"
+	"strings"
 
 	"github.com/rs/zerolog"
 
@@ -54,7 +58,7 @@ func (h *WireGuardHandler) Connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if errs := service.ValidateConfig(req); len(errs) > 0 {
+	if errs := validateWireGuardConfig(req); len(errs) > 0 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		json.NewEncoder(w).Encode(map[string]interface{}{"errors": errs})
@@ -79,4 +83,55 @@ func (h *WireGuardHandler) Disconnect(w http.ResponseWriter, r *http.Request) {
 	status := h.wgService.Status(r.Context())
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+func validateWireGuardConfig(req service.ConnectRequest) map[string]string {
+	errs := make(map[string]string)
+
+	if req.PrivateKey == "" {
+		errs["private_key"] = "Private key is required"
+	} else {
+		raw, err := base64.StdEncoding.DecodeString(req.PrivateKey)
+		if err != nil || len(raw) != 32 {
+			errs["private_key"] = "Configuration invalid \u2014 example: YWJjZGVm...base64...NTY="
+		}
+	}
+
+	if req.Address == "" {
+		errs["address"] = "Address is required"
+	} else if _, err := netip.ParsePrefix(req.Address); err != nil {
+		errs["address"] = "Configuration invalid \u2014 example: 10.20.30.40/24"
+	}
+
+	if req.DNS == "" {
+		errs["dns"] = "DNS is required"
+	} else {
+		for _, d := range strings.Split(req.DNS, ",") {
+			d = strings.TrimSpace(d)
+			if d == "" {
+				continue
+			}
+			if _, err := netip.ParseAddr(d); err != nil {
+				errs["dns"] = "Configuration invalid \u2014 example: 1.1.1.1, 8.8.8.8"
+				break
+			}
+		}
+	}
+
+	if req.PeerPublicKey == "" {
+		errs["peer_public_key"] = "Peer public key is required"
+	} else {
+		raw, err := base64.StdEncoding.DecodeString(req.PeerPublicKey)
+		if err != nil || len(raw) != 32 {
+			errs["peer_public_key"] = "Configuration invalid \u2014 example: YWJjZGVm...base64...NTY="
+		}
+	}
+
+	if req.PeerEndpoint == "" {
+		errs["peer_endpoint"] = "Peer endpoint is required"
+	} else if _, _, err := net.SplitHostPort(req.PeerEndpoint); err != nil {
+		errs["peer_endpoint"] = "Configuration invalid \u2014 example: vpn.example.com:51820"
+	}
+
+	return errs
 }

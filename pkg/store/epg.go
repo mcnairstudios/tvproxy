@@ -172,6 +172,12 @@ func (s *EPGStoreImpl) ListPrograms(_ context.Context, epgDataID string) ([]mode
 }
 
 func (s *EPGStoreImpl) BulkCreateEPGData(_ context.Context, data []models.EPGData) error {
+	for i := range data {
+		if data[i].ID == "" {
+			data[i].ID = uuid.New().String()
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -187,9 +193,6 @@ func (s *EPGStoreImpl) BulkCreateEPGData(_ context.Context, data []models.EPGDat
 			delete(s.epgData, oldID)
 		}
 
-		if data[i].ID == "" {
-			data[i].ID = uuid.New().String()
-		}
 		s.epgData[data[i].ID] = data[i]
 		s.bySourceID[data[i].EPGSourceID] = append(s.bySourceID[data[i].EPGSourceID], data[i].ID)
 		s.epgByChannelID[data[i].ChannelID] = data[i].ID
@@ -208,13 +211,16 @@ func (s *EPGStoreImpl) removeFromSourceIndex(sourceID, epgID string) {
 }
 
 func (s *EPGStoreImpl) BulkCreatePrograms(_ context.Context, programs []models.ProgramData) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	for i := range programs {
 		if programs[i].ID == "" {
 			programs[i].ID = uuid.New().String()
 		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range programs {
 		s.programs[programs[i].ID] = programs[i]
 		s.programsByEPGID[programs[i].EPGDataID] = append(s.programsByEPGID[programs[i].EPGDataID], programs[i].ID)
 	}

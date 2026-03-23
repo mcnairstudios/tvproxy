@@ -11,14 +11,12 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
 )
 
-// SettingsService handles application-level key/value settings.
 type SettingsService struct {
 	settingsRepo   *repository.CoreSettingsRepository
 	debug          atomic.Bool
 	normalLogLevel zerolog.Level
 }
 
-// NewSettingsService creates a new SettingsService.
 func NewSettingsService(settingsRepo *repository.CoreSettingsRepository) *SettingsService {
 	return &SettingsService{
 		settingsRepo:   settingsRepo,
@@ -26,7 +24,6 @@ func NewSettingsService(settingsRepo *repository.CoreSettingsRepository) *Settin
 	}
 }
 
-// Get retrieves a setting value by key.
 func (s *SettingsService) Get(ctx context.Context, key string) (string, error) {
 	setting, err := s.settingsRepo.Get(ctx, key)
 	if err != nil {
@@ -53,7 +50,6 @@ func (s *SettingsService) setDebug(on bool) {
 	}
 }
 
-// Set stores a setting value by key. If the key already exists, it is overwritten.
 func (s *SettingsService) Set(ctx context.Context, key, value string) error {
 	if err := s.settingsRepo.Set(ctx, key, value); err != nil {
 		return fmt.Errorf("setting %q: %w", key, err)
@@ -64,7 +60,6 @@ func (s *SettingsService) Set(ctx context.Context, key, value string) error {
 	return nil
 }
 
-// List returns all settings.
 func (s *SettingsService) List(ctx context.Context) ([]models.CoreSetting, error) {
 	settings, err := s.settingsRepo.List(ctx)
 	if err != nil {
@@ -73,7 +68,6 @@ func (s *SettingsService) List(ctx context.Context) ([]models.CoreSetting, error
 	return settings, nil
 }
 
-// Delete removes a setting by key.
 func (s *SettingsService) Delete(ctx context.Context, key string) error {
 	if err := s.settingsRepo.Delete(ctx, key); err != nil {
 		return fmt.Errorf("deleting setting %q: %w", key, err)

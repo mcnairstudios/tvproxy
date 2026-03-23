@@ -35,7 +35,7 @@ func newTestVODService(t *testing.T) (*VODService, *config.Config) {
 	streamStore := store.NewStreamStore(filepath.Join(t.TempDir(), "streams.gob"), zerolog.New(os.Stderr).Level(zerolog.Disabled))
 	streamProfileRepo := repository.NewStreamProfileRepository(db)
 	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
-	ffmpegMgr := NewFFmpegManager(cfg, log)
+	ffmpegMgr := NewFFmpegManager(cfg, nil, log)
 	svc := NewVODService(channelRepo, streamStore, streamProfileRepo, ffmpegMgr, nil, cfg, log)
 	return svc, cfg
 }

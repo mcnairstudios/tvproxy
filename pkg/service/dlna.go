@@ -14,6 +14,7 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/xmlutil"
 )
 
 var dlnaNamespace = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
@@ -23,6 +24,7 @@ const didlHeader = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lit
 type DLNAService struct {
 	channelRepo      *repository.ChannelRepository
 	channelGroupRepo *repository.ChannelGroupRepository
+	userRepo         *repository.UserRepository
 	settingsService  *SettingsService
 	logoService      *LogoService
 	config           *config.Config
@@ -32,6 +34,7 @@ type DLNAService struct {
 func NewDLNAService(
 	channelRepo *repository.ChannelRepository,
 	channelGroupRepo *repository.ChannelGroupRepository,
+	userRepo *repository.UserRepository,
 	settingsService *SettingsService,
 	logoService *LogoService,
 	cfg *config.Config,
@@ -40,6 +43,7 @@ func NewDLNAService(
 	return &DLNAService{
 		channelRepo:      channelRepo,
 		channelGroupRepo: channelGroupRepo,
+		userRepo:         userRepo,
 		settingsService:  settingsService,
 		logoService:      logoService,
 		config:           cfg,
@@ -70,7 +74,7 @@ func (s *DLNAService) DeviceDescriptionXML(baseURL string) string {
     <manufacturer>TVProxy</manufacturer>
     <modelName>TVProxy</modelName>
     <modelDescription>TVProxy DLNA MediaServer</modelDescription>
-    <UDN>` + xmlEscape(udn) + `</UDN>
+    <UDN>` + xmlutil.XmlEscape(udn) + `</UDN>
     <serviceList>
       <service>
         <serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType>
@@ -197,12 +201,14 @@ type browseRequest struct {
 	SortCriteria   string `xml:"SortCriteria"`
 }
 
-func (s *DLNAService) HandleContentDirectoryAction(ctx context.Context, baseURL, soapAction string, body []byte) (string, error) {
+func (s *DLNAService) HandleContentDirectoryAction(ctx context.Context, baseURL, soapAction string, body []byte, user *models.User) (string, error) {
 	action := extractAction(soapAction)
+
+	groupFilter := s.resolveUserGroupFilter(ctx, user)
 
 	switch action {
 	case "Browse":
-		return s.handleBrowse(ctx, baseURL, body)
+		return s.handleBrowse(ctx, baseURL, body, groupFilter)
 	case "GetSearchCapabilities":
 		return soapResponse("ContentDirectory", "GetSearchCapabilities", "<SearchCaps></SearchCaps>"), nil
 	case "GetSortCapabilities":
@@ -233,7 +239,22 @@ func (s *DLNAService) HandleConnectionManagerAction(_ context.Context, soapActio
 	}
 }
 
-func (s *DLNAService) handleBrowse(ctx context.Context, baseURL string, body []byte) (string, error) {
+func (s *DLNAService) resolveUserGroupFilter(ctx context.Context, user *models.User) map[string]bool {
+	if user == nil || user.IsAdmin {
+		return nil
+	}
+	ids, err := s.userRepo.GetGroupIDsForUser(ctx, user.ID)
+	if err != nil {
+		s.log.Warn().Err(err).Str("user_id", user.ID).Msg("failed to load user group filter")
+		return nil
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return xmlutil.ToStringSet(ids)
+}
+
+func (s *DLNAService) handleBrowse(ctx context.Context, baseURL string, body []byte, groupFilter map[string]bool) (string, error) {
 	var env soapEnvelope
 	if err := xml.Unmarshal(body, &env); err != nil {
 		return "", fmt.Errorf("parsing SOAP envelope: %w", err)
@@ -246,19 +267,19 @@ func (s *DLNAService) handleBrowse(ctx context.Context, baseURL string, body []b
 
 	switch {
 	case req.ObjectID == "0":
-		return s.browseRoot(ctx, req.BrowseFlag)
+		return s.browseRoot(ctx, req.BrowseFlag, groupFilter)
 	case strings.HasPrefix(req.ObjectID, "grp-"):
-		return s.browseGroup(ctx, baseURL, req.ObjectID, req.BrowseFlag, req.StartingIndex, req.RequestedCount)
+		return s.browseGroup(ctx, baseURL, req.ObjectID, req.BrowseFlag, req.StartingIndex, req.RequestedCount, groupFilter)
 	case strings.HasPrefix(req.ObjectID, "ch-"):
 		return s.browseChannelItem(ctx, baseURL, req.ObjectID, req.BrowseFlag)
 	default:
 		didl := `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"></DIDL-Lite>`
-		return soapBrowseResponse(xmlEscape(didl), 0, 0), nil
+		return soapBrowseResponse(xmlutil.XmlEscape(didl), 0, 0), nil
 	}
 }
 
-func (s *DLNAService) browseRoot(ctx context.Context, browseFlag string) (string, error) {
-	groups, ungroupedCount, err := s.groupedChannelCounts(ctx)
+func (s *DLNAService) browseRoot(ctx context.Context, browseFlag string, groupFilter map[string]bool) (string, error) {
+	groups, ungroupedCount, err := s.groupedChannelCounts(ctx, groupFilter)
 	if err != nil {
 		return "", err
 	}
@@ -273,15 +294,15 @@ func (s *DLNAService) browseRoot(ctx context.Context, browseFlag string) (string
 			fmt.Sprintf(`<container id="0" parentID="-1" childCount="%d" restricted="1">`, childCount) +
 			`<dc:title>TVProxy</dc:title><upnp:class>object.container</upnp:class>` +
 			`</container></DIDL-Lite>`
-		return soapBrowseResponse(xmlEscape(didl), 1, 1), nil
+		return soapBrowseResponse(xmlutil.XmlEscape(didl), 1, 1), nil
 	}
 
 	var b strings.Builder
 	b.WriteString(didlHeader)
 	for _, g := range groups {
 		b.WriteString(fmt.Sprintf(`<container id="grp-%s" parentID="0" childCount="%d" restricted="1">`,
-			xmlEscape(g.id), g.count))
-		b.WriteString(fmt.Sprintf(`<dc:title>%s</dc:title>`, xmlEscape(g.name)))
+			xmlutil.XmlEscape(g.id), g.count))
+		b.WriteString(fmt.Sprintf(`<dc:title>%s</dc:title>`, xmlutil.XmlEscape(g.name)))
 		b.WriteString(`<upnp:class>object.container</upnp:class></container>`)
 	}
 	if ungroupedCount > 0 {
@@ -290,11 +311,16 @@ func (s *DLNAService) browseRoot(ctx context.Context, browseFlag string) (string
 		b.WriteString(`<dc:title>Ungrouped</dc:title><upnp:class>object.container</upnp:class></container>`)
 	}
 	b.WriteString(`</DIDL-Lite>`)
-	return soapBrowseResponse(xmlEscape(b.String()), childCount, childCount), nil
+	return soapBrowseResponse(xmlutil.XmlEscape(b.String()), childCount, childCount), nil
 }
 
-func (s *DLNAService) browseGroup(ctx context.Context, baseURL, objectID, browseFlag string, startIdx, reqCount int) (string, error) {
+func (s *DLNAService) browseGroup(ctx context.Context, baseURL, objectID, browseFlag string, startIdx, reqCount int, groupFilter map[string]bool) (string, error) {
 	groupID := strings.TrimPrefix(objectID, "grp-")
+
+	if groupFilter != nil && groupID != "ungrouped" && !groupFilter[groupID] {
+		didl := `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"></DIDL-Lite>`
+		return soapBrowseResponse(xmlutil.XmlEscape(didl), 0, 0), nil
+	}
 
 	channels, err := s.listChannels(ctx)
 	if err != nil {
@@ -326,10 +352,10 @@ func (s *DLNAService) browseGroup(ctx context.Context, baseURL, objectID, browse
 			}
 		}
 		didl := didlHeader +
-			fmt.Sprintf(`<container id="%s" parentID="0" childCount="%d" restricted="1">`, xmlEscape(objectID), len(enabled)) +
-			fmt.Sprintf(`<dc:title>%s</dc:title>`, xmlEscape(title)) +
+			fmt.Sprintf(`<container id="%s" parentID="0" childCount="%d" restricted="1">`, xmlutil.XmlEscape(objectID), len(enabled)) +
+			fmt.Sprintf(`<dc:title>%s</dc:title>`, xmlutil.XmlEscape(title)) +
 			`<upnp:class>object.container</upnp:class></container></DIDL-Lite>`
-		return soapBrowseResponse(xmlEscape(didl), 1, 1), nil
+		return soapBrowseResponse(xmlutil.XmlEscape(didl), 1, 1), nil
 	}
 
 	total := len(enabled)
@@ -348,32 +374,32 @@ func (s *DLNAService) browseGroup(ctx context.Context, baseURL, objectID, browse
 	var b strings.Builder
 	b.WriteString(didlHeader)
 	for _, ch := range page {
-		b.WriteString(fmt.Sprintf(`<item id="ch-%s" parentID="%s" restricted="1">`, xmlEscape(ch.id), xmlEscape(objectID)))
-		b.WriteString(fmt.Sprintf(`<dc:title>%s</dc:title>`, xmlEscape(ch.name)))
+		b.WriteString(fmt.Sprintf(`<item id="ch-%s" parentID="%s" restricted="1">`, xmlutil.XmlEscape(ch.id), xmlutil.XmlEscape(objectID)))
+		b.WriteString(fmt.Sprintf(`<dc:title>%s</dc:title>`, xmlutil.XmlEscape(ch.name)))
 		b.WriteString(`<upnp:class>object.item.videoItem.videoBroadcast</upnp:class>`)
 		if ch.logo != "" && strings.HasPrefix(ch.logo, "http") {
 			profile, _ := dlnaLogoMeta(ch.logo)
-			b.WriteString(fmt.Sprintf(`<upnp:albumArtURI dlna:profileID="%s">%s</upnp:albumArtURI>`, profile, xmlEscape(ch.logo)))
+			b.WriteString(fmt.Sprintf(`<upnp:albumArtURI dlna:profileID="%s">%s</upnp:albumArtURI>`, profile, xmlutil.XmlEscape(ch.logo)))
 		}
 		b.WriteString(fmt.Sprintf(`<res protocolInfo="http-get:*:video/mp2t:DLNA.ORG_PN=MPEG_TS_SD_EU;DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=89000000000000000000000000000000">%s/channel/%s.mp4</res>`,
-			xmlEscape(baseURL), xmlEscape(ch.id)))
+			xmlutil.XmlEscape(baseURL), xmlutil.XmlEscape(ch.id)))
 		b.WriteString(`</item>`)
 	}
 	b.WriteString(`</DIDL-Lite>`)
-	return soapBrowseResponse(xmlEscape(b.String()), len(page), total), nil
+	return soapBrowseResponse(xmlutil.XmlEscape(b.String()), len(page), total), nil
 }
 
 func (s *DLNAService) browseChannelItem(ctx context.Context, baseURL, objectID, browseFlag string) (string, error) {
 	if browseFlag != "BrowseMetadata" {
 		didl := `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"></DIDL-Lite>`
-		return soapBrowseResponse(xmlEscape(didl), 0, 0), nil
+		return soapBrowseResponse(xmlutil.XmlEscape(didl), 0, 0), nil
 	}
 
 	channelID := strings.TrimPrefix(objectID, "ch-")
 	ch, err := s.getChannel(ctx, channelID)
 	if err != nil || ch == nil || !ch.IsEnabled {
 		didl := `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"></DIDL-Lite>`
-		return soapBrowseResponse(xmlEscape(didl), 0, 0), nil
+		return soapBrowseResponse(xmlutil.XmlEscape(didl), 0, 0), nil
 	}
 
 	parentID := "grp-ungrouped"
@@ -384,17 +410,17 @@ func (s *DLNAService) browseChannelItem(ctx context.Context, baseURL, objectID, 
 	logo := s.logoService.ResolveChannel(*ch)
 	var b strings.Builder
 	b.WriteString(didlHeader)
-	b.WriteString(fmt.Sprintf(`<item id="ch-%s" parentID="%s" restricted="1">`, xmlEscape(ch.ID), xmlEscape(parentID)))
-	b.WriteString(fmt.Sprintf(`<dc:title>%s</dc:title>`, xmlEscape(ch.Name)))
+	b.WriteString(fmt.Sprintf(`<item id="ch-%s" parentID="%s" restricted="1">`, xmlutil.XmlEscape(ch.ID), xmlutil.XmlEscape(parentID)))
+	b.WriteString(fmt.Sprintf(`<dc:title>%s</dc:title>`, xmlutil.XmlEscape(ch.Name)))
 	b.WriteString(`<upnp:class>object.item.videoItem.videoBroadcast</upnp:class>`)
 	if strings.HasPrefix(logo, "http") {
 		profile, _ := dlnaLogoMeta(logo)
-		b.WriteString(fmt.Sprintf(`<upnp:albumArtURI dlna:profileID="%s">%s</upnp:albumArtURI>`, profile, xmlEscape(logo)))
+		b.WriteString(fmt.Sprintf(`<upnp:albumArtURI dlna:profileID="%s">%s</upnp:albumArtURI>`, profile, xmlutil.XmlEscape(logo)))
 	}
 	b.WriteString(fmt.Sprintf(`<res protocolInfo="http-get:*:video/mp2t:DLNA.ORG_PN=MPEG_TS_SD_EU;DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=89000000000000000000000000000000">%s/channel/%s.mp4</res>`,
-		xmlEscape(baseURL), xmlEscape(ch.ID)))
+		xmlutil.XmlEscape(baseURL), xmlutil.XmlEscape(ch.ID)))
 	b.WriteString(`</item></DIDL-Lite>`)
-	return soapBrowseResponse(xmlEscape(b.String()), 1, 1), nil
+	return soapBrowseResponse(xmlutil.XmlEscape(b.String()), 1, 1), nil
 }
 
 type channelEntry struct {
@@ -421,7 +447,7 @@ type groupCount struct {
 	count int
 }
 
-func (s *DLNAService) groupedChannelCounts(ctx context.Context) ([]groupCount, int, error) {
+func (s *DLNAService) groupedChannelCounts(ctx context.Context, groupFilter map[string]bool) ([]groupCount, int, error) {
 	channels, err := s.listChannels(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -438,9 +464,13 @@ func (s *DLNAService) groupedChannelCounts(ctx context.Context) ([]groupCount, i
 			continue
 		}
 		if ch.ChannelGroupID == nil {
-			ungrouped++
+			if groupFilter == nil {
+				ungrouped++
+			}
 		} else {
-			counts[*ch.ChannelGroupID]++
+			if groupFilter == nil || groupFilter[*ch.ChannelGroupID] {
+				counts[*ch.ChannelGroupID]++
+			}
 		}
 	}
 

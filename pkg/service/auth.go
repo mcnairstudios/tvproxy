@@ -147,7 +147,6 @@ func (s *AuthService) GetUser(ctx context.Context, id string) (*models.User, err
 	return user, nil
 }
 
-// UpdateUser updates a user. If newPassword is non-empty, the password is re-hashed.
 func (s *AuthService) UpdateUser(ctx context.Context, user *models.User, newPassword string) error {
 	if newPassword != "" {
 		hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
@@ -171,7 +170,6 @@ func (s *AuthService) DeleteUser(ctx context.Context, id string) error {
 	return nil
 }
 
-// FindFirstAdmin returns the first admin user, ordered by creation time.
 func (s *AuthService) FindFirstAdmin(ctx context.Context) (*models.User, error) {
 	return s.userRepo.GetFirstAdmin(ctx)
 }
@@ -219,6 +217,20 @@ func (s *AuthService) AcceptInvite(ctx context.Context, token, password string) 
 		return fmt.Errorf("accepting invite: %w", err)
 	}
 	return nil
+}
+
+func (s *AuthService) AuthenticateBasicAuth(ctx context.Context, username, password string) (*models.User, error) {
+	user, err := s.userRepo.GetByUsername(ctx, username)
+	if err != nil {
+		return nil, fmt.Errorf("invalid credentials")
+	}
+	if user.PasswordHash == "" {
+		return nil, fmt.Errorf("invalid credentials")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		return nil, fmt.Errorf("invalid credentials")
+	}
+	return user, nil
 }
 
 func (s *AuthService) generateToken(user *models.User, expiry time.Duration, subject string) (string, error) {

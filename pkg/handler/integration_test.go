@@ -90,7 +90,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	adminUserID := adminUser.ID
 
 	settingsService := service.NewSettingsService(settingsRepo)
-	logoService := service.NewLogoService(logoRepo, settingsService, cfg, nil, log)
+	logoService := service.NewLogoService(logoRepo, cfg, log)
 	logoService.EnsureDir()
 
 	m3uService := service.NewM3UService(m3uAccountRepo, streamStore, channelRepo, logoService, cfg, nil, log)
@@ -101,7 +101,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	proxyService := service.NewProxyService(channelRepo, streamStore, streamProfileRepo, clientService, activityService, cfg, nil, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgStore, logoService, cfg, log)
-	ffmpegMgr := service.NewFFmpegManager(cfg, log)
+	ffmpegMgr := service.NewFFmpegManager(cfg, nil, log)
 	vodService := service.NewVODService(channelRepo, streamStore, streamProfileRepo, ffmpegMgr, activityService, cfg, log)
 	vodService.RecoverRecordings(context.Background())
 	scheduledRecRepo := repository.NewScheduledRecordingRepository(db)
@@ -126,8 +126,8 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	settingsHandler := NewSettingsHandler(settingsService, db, authService, streamStore, epgStore)
 	clientHandler := NewClientHandler(clientService)
 	schedulerHandler := NewSchedulerHandler(schedulerService, log)
-	dlnaService := service.NewDLNAService(channelRepo, channelGroupRepo, settingsService, logoService, cfg, log)
-	dlnaHandler := NewDLNAHandler(dlnaService, settingsService, cfg, log)
+	dlnaService := service.NewDLNAService(channelRepo, channelGroupRepo, userRepo, settingsService, logoService, cfg, log)
+	dlnaHandler := NewDLNAHandler(dlnaService, authService, settingsService, cfg, log)
 
 	r := chi.NewRouter()
 

@@ -60,7 +60,9 @@ func (h *ProxyHandler) Stream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ProxyHandler) StreamHead(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "video/mp2t")
+	channelID := stripExtension(chi.URLParam(r, "channelID"))
+	contentType := h.proxyService.ResolveContentType(r.Context(), r, channelID, r.URL.Query().Get("profile"))
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Accept-Ranges", "none")
 	w.Header().Set("transferMode.dlna.org", "Streaming")
 	w.Header().Set("contentFeatures.dlna.org", "DLNA.ORG_PN=MPEG_TS_SD_EU;DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=89000000000000000000000000000000")

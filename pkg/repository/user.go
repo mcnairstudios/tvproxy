@@ -141,3 +141,41 @@ func (r *UserRepository) Delete(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+func (r *UserRepository) GetGroupIDsForUser(ctx context.Context, userID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT channel_group_id FROM user_channel_groups WHERE user_id = ?`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("getting channel groups for user: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning channel group id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (r *UserRepository) SetGroupIDsForUser(ctx context.Context, userID string, groupIDs []string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("starting transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_channel_groups WHERE user_id = ?`, userID); err != nil {
+		return fmt.Errorf("clearing user channel groups: %w", err)
+	}
+	for _, gid := range groupIDs {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO user_channel_groups (user_id, channel_group_id) VALUES (?, ?)`,
+			userID, gid); err != nil {
+			return fmt.Errorf("inserting user channel group: %w", err)
+		}
+	}
+	return tx.Commit()
+}

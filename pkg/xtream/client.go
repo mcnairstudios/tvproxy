@@ -11,11 +11,13 @@ import (
 )
 
 type Client struct {
-	baseURL    string
-	username   string
-	password   string
-	userAgent  string
-	httpClient *http.Client
+	baseURL      string
+	username     string
+	password     string
+	userAgent    string
+	bypassHeader string
+	bypassSecret string
+	httpClient   *http.Client
 }
 
 type Category struct {
@@ -54,7 +56,7 @@ type AuthResponse struct {
 	ServerInfo ServerInfo `json:"server_info"`
 }
 
-func NewClient(baseURL, username, password, userAgent string, timeout time.Duration, transport http.RoundTripper) *Client {
+func NewClient(baseURL, username, password, userAgent, bypassHeader, bypassSecret string, timeout time.Duration, transport http.RoundTripper) *Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
@@ -63,11 +65,13 @@ func NewClient(baseURL, username, password, userAgent string, timeout time.Durat
 		c.Transport = transport
 	}
 	return &Client{
-		baseURL:    baseURL,
-		username:   username,
-		password:   password,
-		userAgent:  userAgent,
-		httpClient: c,
+		baseURL:      baseURL,
+		username:     username,
+		password:     password,
+		userAgent:    userAgent,
+		bypassHeader: bypassHeader,
+		bypassSecret: bypassSecret,
+		httpClient:   c,
 	}
 }
 
@@ -112,6 +116,12 @@ func (c *Client) get(ctx context.Context, url string, result interface{}) error 
 	}
 	if c.userAgent != "" {
 		req.Header.Set("User-Agent", c.userAgent)
+	}
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Connection", "keep-alive")
+	if c.bypassHeader != "" && c.bypassSecret != "" {
+		req.Header.Set(c.bypassHeader, c.bypassSecret)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

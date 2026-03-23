@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,7 +17,11 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
+	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 )
+
+const maxBufferedSecs = 172800.0
 
 type ManagedProcess struct {
 	ID           string
@@ -27,22 +31,28 @@ type ManagedProcess struct {
 	BufferedSecs float64
 	Error        error
 	Ready        chan struct{}
+	readyOnce    sync.Once
 	cancel       context.CancelFunc
 	mu           sync.Mutex
 }
 
 type FFmpegManager struct {
-	config    *config.Config
-	log       zerolog.Logger
-	mu        sync.RWMutex
-	processes map[string]*ManagedProcess
+	config     *config.Config
+	httpClient *http.Client
+	log        zerolog.Logger
+	mu         sync.RWMutex
+	processes  map[string]*ManagedProcess
 }
 
-func NewFFmpegManager(cfg *config.Config, log zerolog.Logger) *FFmpegManager {
+func NewFFmpegManager(cfg *config.Config, httpClient *http.Client, log zerolog.Logger) *FFmpegManager {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
 	return &FFmpegManager{
-		config:    cfg,
-		log:       log.With().Str("component", "ffmpeg_manager").Logger(),
-		processes: make(map[string]*ManagedProcess),
+		config:     cfg,
+		httpClient: httpClient,
+		log:        log.With().Str("component", "ffmpeg_manager").Logger(),
+		processes:  make(map[string]*ManagedProcess),
 	}
 }
 
@@ -64,29 +74,39 @@ func (m *FFmpegManager) Start(inputURL, outputPath, tempDir, command string, arg
 	m.mu.Unlock()
 
 	if args == nil {
-		args = ShellSplit("-hide_banner -loglevel warning -i {input} -c copy -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof {output}")
+		args = ffmpeg.ShellSplit("-hide_banner -loglevel warning -i {input} -c copy -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof {output}")
 	}
+
+	httpInput := ffmpeg.IsHTTPURL(inputURL)
 
 	for i, arg := range args {
 		switch arg {
 		case "{input}":
-			args[i] = inputURL
+			if httpInput {
+				args[i] = "pipe:0"
+			} else {
+				args[i] = inputURL
+			}
 		case "{output}", "pipe:1":
 			args[i] = outputPath
 		}
 	}
 
 	args = append([]string{"-y"}, args...)
-	args = InjectUserAgent(args, m.config.UserAgent)
-	delayMax, rwTimeout := 30, 30000000
-	if m.config.Settings != nil {
-		delayMax = m.config.Settings.Network.ReconnectDelayMax
-		rwTimeout = m.config.Settings.Network.ReconnectRWTimeout
+
+	if !httpInput {
+		args = ffmpeg.InjectUserAgent(args, m.config.UserAgent)
+		delayMax, rwTimeout := 30, 30000000
+		if m.config.Settings != nil {
+			delayMax = m.config.Settings.Network.ReconnectDelayMax
+			rwTimeout = m.config.Settings.Network.ReconnectRWTimeout
+		}
+		args = ffmpeg.InjectReconnect(args, inputURL, delayMax, rwTimeout)
 	}
-	args = InjectReconnect(args, inputURL, delayMax, rwTimeout)
+
 	args = append(args, "-progress", "pipe:2")
 
-	go m.run(ctx, proc, command, args)
+	go m.run(ctx, proc, command, args, inputURL)
 
 	return id
 }
@@ -156,7 +176,7 @@ func (m *FFmpegManager) Remove(id string) {
 	m.mu.Unlock()
 }
 
-func (m *FFmpegManager) run(ctx context.Context, proc *ManagedProcess, command string, args []string) {
+func (m *FFmpegManager) run(ctx context.Context, proc *ManagedProcess, command string, args []string, inputURL string) {
 	m.log.Info().Str("process_id", proc.ID).Strs("args", args).Msg("starting ffmpeg")
 
 	cmd := exec.CommandContext(ctx, command, args...)
@@ -169,20 +189,51 @@ func (m *FFmpegManager) run(ctx context.Context, proc *ManagedProcess, command s
 	}
 	cmd.WaitDelay = waitDelay
 
+	var httpResp *http.Response
+	if ffmpeg.IsHTTPURL(inputURL) {
+		resp, err := httputil.Fetch(ctx, m.httpClient, m.config, inputURL)
+		if err != nil {
+			m.log.Error().Err(err).Str("process_id", proc.ID).Str("url", inputURL).Msg("upstream connection failed")
+			proc.mu.Lock()
+			proc.Error = fmt.Errorf("upstream connection failed: %w", err)
+			proc.mu.Unlock()
+			proc.readyOnce.Do(func() { close(proc.Ready) })
+			return
+		}
+		if resp.StatusCode != http.StatusOK {
+			httputil.LogUpstreamFailure(m.log, resp, inputURL)
+			resp.Body.Close()
+			m.log.Error().Int("status", resp.StatusCode).Str("process_id", proc.ID).Str("url", inputURL).Msg("upstream returned non-200")
+			proc.mu.Lock()
+			proc.Error = fmt.Errorf("upstream returned %d", resp.StatusCode)
+			proc.mu.Unlock()
+			proc.readyOnce.Do(func() { close(proc.Ready) })
+			return
+		}
+		httpResp = resp
+		cmd.Stdin = resp.Body
+	}
+
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		if httpResp != nil {
+			httpResp.Body.Close()
+		}
 		proc.mu.Lock()
 		proc.Error = fmt.Errorf("creating stderr pipe: %w", err)
 		proc.mu.Unlock()
-		close(proc.Ready)
+		proc.readyOnce.Do(func() { close(proc.Ready) })
 		return
 	}
 
 	if err := cmd.Start(); err != nil {
+		if httpResp != nil {
+			httpResp.Body.Close()
+		}
 		proc.mu.Lock()
 		proc.Error = fmt.Errorf("starting ffmpeg: %w", err)
 		proc.mu.Unlock()
-		close(proc.Ready)
+		proc.readyOnce.Do(func() { close(proc.Ready) })
 		return
 	}
 
@@ -205,38 +256,17 @@ func (m *FFmpegManager) run(ctx context.Context, proc *ManagedProcess, command s
 	waitErr := cmd.Wait()
 	startupTimeout.Stop()
 
+	if httpResp != nil {
+		httpResp.Body.Close()
+	}
+
 	if waitErr != nil && ctx.Err() == nil {
 		proc.mu.Lock()
 		proc.Error = fmt.Errorf("ffmpeg failed: %w", waitErr)
 		proc.mu.Unlock()
 	}
 
-	close(proc.Ready)
-}
-
-var nonAlphanumRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
-
-var ffmpegNoisePatterns = []string{
-	"non-existing PPS",
-	"non-existing SPS",
-	"no frame!",
-	"skipping",
-	"missing picture",
-	"concealing",
-	"decode_slice_header",
-	"error while decoding",
-	"missing reference picture",
-	"reference picture reordering",
-	"Last message repeated",
-}
-
-func isFFmpegNoise(line string) bool {
-	for _, pattern := range ffmpegNoisePatterns {
-		if strings.Contains(line, pattern) {
-			return true
-		}
-	}
-	return false
+	proc.readyOnce.Do(func() { close(proc.Ready) })
 }
 
 func (m *FFmpegManager) parseProgress(proc *ManagedProcess, r io.Reader) {
@@ -248,30 +278,46 @@ func (m *FFmpegManager) parseProgress(proc *ManagedProcess, r io.Reader) {
 			us, err := strconv.ParseInt(usStr, 10, 64)
 			if err == nil && us > 0 {
 				secs := float64(us) / 1_000_000.0
-				if secs > 172800 {
+				if secs > maxBufferedSecs {
 					m.log.Warn().Str("process_id", proc.ID).Float64("secs", secs).Msg("ffmpeg progress exceeds 48h cap")
-					secs = 172800
+					secs = maxBufferedSecs
 				}
 				proc.mu.Lock()
 				proc.BufferedSecs = secs
 				proc.mu.Unlock()
 			}
-		} else if !strings.HasPrefix(line, "progress=") &&
-			!strings.HasPrefix(line, "out_time_ms=") &&
-			!strings.HasPrefix(line, "out_time=") &&
-			!strings.HasPrefix(line, "frame=") &&
-			!strings.HasPrefix(line, "fps=") &&
-			!strings.HasPrefix(line, "stream_") &&
-			!strings.HasPrefix(line, "bitrate=") &&
-			!strings.HasPrefix(line, "total_size=") &&
-			!strings.HasPrefix(line, "speed=") &&
-			!strings.HasPrefix(line, "dup_frames=") &&
-			!strings.HasPrefix(line, "drop_frames=") &&
-			!isFFmpegNoise(line) &&
-			line != "" {
+		} else if !isProgressNoise(line) && line != "" {
 			m.log.Warn().Str("process_id", proc.ID).Str("ffmpeg", line).Msg("ffmpeg output")
 		}
 	}
+}
+
+var progressPrefixes = []string{
+	"progress=", "out_time_ms=", "out_time=", "frame=", "fps=",
+	"stream_", "bitrate=", "total_size=", "speed=", "dup_frames=", "drop_frames=",
+}
+
+func isProgressNoise(line string) bool {
+	for _, p := range progressPrefixes {
+		if strings.HasPrefix(line, p) {
+			return true
+		}
+	}
+	return ffmpeg.IsFFmpegNoise(line)
+}
+
+func (m *FFmpegManager) ProbeURL(ctx context.Context, url string) (*ffmpeg.ProbeResult, error) {
+	resp, err := httputil.Fetch(ctx, m.httpClient, m.config, url)
+	if err != nil {
+		return nil, fmt.Errorf("probe upstream: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("probe upstream returned %d", resp.StatusCode)
+	}
+
+	return ffmpeg.ProbeReader(ctx, resp.Body)
 }
 
 func (m *FFmpegManager) ExtractSegment(inputPath, outputPath string, startSecs, endSecs float64) error {
@@ -300,16 +346,4 @@ func (m *FFmpegManager) ExtractSegment(inputPath, outputPath string, startSecs, 
 
 	m.log.Info().Str("output", outputPath).Msg("segment extraction complete")
 	return nil
-}
-
-func sanitizeFilename(title string, t time.Time) string {
-	name := nonAlphanumRe.ReplaceAllString(title, "_")
-	name = strings.Trim(name, "_")
-	if len(name) > 60 {
-		name = name[:60]
-	}
-	if name == "" {
-		name = "recording"
-	}
-	return name + "_" + t.Format("20060102_1504")
 }

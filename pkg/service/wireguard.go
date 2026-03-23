@@ -2,12 +2,9 @@ package service
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -136,73 +133,33 @@ func (s *WireGuardService) Disconnect(ctx context.Context) {
 	s.log.Info().Msg("wireguard disconnected")
 }
 
-func ValidateConfig(req ConnectRequest) map[string]string {
-	errs := make(map[string]string)
-
-	if req.PrivateKey == "" {
-		errs["private_key"] = "Private key is required"
-	} else {
-		raw, err := base64.StdEncoding.DecodeString(req.PrivateKey)
-		if err != nil || len(raw) != 32 {
-			errs["private_key"] = "Configuration invalid \u2014 example: YWJjZGVm...base64...NTY="
-		}
-	}
-
-	if req.Address == "" {
-		errs["address"] = "Address is required"
-	} else if _, err := netip.ParsePrefix(req.Address); err != nil {
-		errs["address"] = "Configuration invalid \u2014 example: 10.20.30.40/24"
-	}
-
-	if req.DNS == "" {
-		errs["dns"] = "DNS is required"
-	} else {
-		for _, d := range strings.Split(req.DNS, ",") {
-			d = strings.TrimSpace(d)
-			if d == "" {
-				continue
-			}
-			if _, err := netip.ParseAddr(d); err != nil {
-				errs["dns"] = "Configuration invalid \u2014 example: 1.1.1.1, 8.8.8.8"
-				break
-			}
-		}
-	}
-
-	if req.PeerPublicKey == "" {
-		errs["peer_public_key"] = "Peer public key is required"
-	} else {
-		raw, err := base64.StdEncoding.DecodeString(req.PeerPublicKey)
-		if err != nil || len(raw) != 32 {
-			errs["peer_public_key"] = "Configuration invalid \u2014 example: YWJjZGVm...base64...NTY="
-		}
-	}
-
-	if req.PeerEndpoint == "" {
-		errs["peer_endpoint"] = "Peer endpoint is required"
-	} else if _, _, err := net.SplitHostPort(req.PeerEndpoint); err != nil {
-		errs["peer_endpoint"] = "Configuration invalid \u2014 example: vpn.example.com:51820"
-	}
-
-	return errs
-}
 
 func (s *WireGuardService) HTTPClient() *http.Client {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.httpClient != nil {
-		return s.httpClient
+	return &http.Client{
+		Transport: s.StableTransport(),
 	}
-	return http.DefaultClient
 }
 
 func (s *WireGuardService) Transport() http.RoundTripper {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.transport != nil {
-		return s.transport
+	return s.StableTransport()
+}
+
+func (s *WireGuardService) StableTransport() *stableTransport {
+	return &stableTransport{svc: s}
+}
+
+type stableTransport struct {
+	svc *WireGuardService
+}
+
+func (t *stableTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.svc.mu.RLock()
+	transport := t.svc.transport
+	t.svc.mu.RUnlock()
+	if transport != nil {
+		return transport.RoundTrip(req)
 	}
-	return nil
+	return http.DefaultTransport.RoundTrip(req)
 }
 
 func (s *WireGuardService) IsEnabled(ctx context.Context) bool {
@@ -262,6 +219,11 @@ func (s *WireGuardService) Status(ctx context.Context) map[string]interface{} {
 	if ep, err := s.settingsService.Get(ctx, "wg_peer_endpoint"); err == nil {
 		config["peer_endpoint"] = ep
 	}
+	if rh, err := s.settingsService.Get(ctx, "wg_route_hosts"); err == nil && rh != "" {
+		config["route_hosts"] = rh
+	} else {
+		config["route_hosts"] = "(all traffic)"
+	}
 	config["private_key"] = "***"
 	result["config"] = config
 
@@ -320,7 +282,7 @@ func (s *WireGuardService) doConnect(ctx context.Context) error {
 	}
 
 	routeHosts, _ := s.settingsService.Get(ctx, "wg_route_hosts")
-	transport := wireguard.NewRoutingTransport(tunnel, routeHosts)
+	transport := wireguard.NewRoutingTransport(tunnel, routeHosts, s.log)
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   30 * time.Second,

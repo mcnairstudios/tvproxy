@@ -16,18 +16,20 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
+	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
 )
 
+const placeholderLogo = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Crect width='200' height='200' rx='20' fill='%23374151'/%3E%3Ctext x='100' y='115' font-family='sans-serif' font-size='80' fill='%239CA3AF' text-anchor='middle'%3ETV%3C/text%3E%3C/svg%3E`
+
 type LogoService struct {
-	repo            *repository.LogoRepository
-	settingsService *SettingsService
-	config          *config.Config
-	transport       http.RoundTripper
-	logosDir        string
-	streamLogosDir  string
-	log             zerolog.Logger
+	repo           *repository.LogoRepository
+	config         *config.Config
+	httpClient     *http.Client
+	logosDir       string
+	streamLogosDir string
+	log            zerolog.Logger
 
 	streamLogoMu    sync.RWMutex
 	streamLogoCache map[string]string
@@ -35,17 +37,18 @@ type LogoService struct {
 
 func NewLogoService(
 	repo *repository.LogoRepository,
-	settingsService *SettingsService,
 	cfg *config.Config,
-	transport http.RoundTripper,
 	log zerolog.Logger,
 ) *LogoService {
 	staticRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "static")
+	timeout := 10 * time.Second
+	if cfg.Settings != nil {
+		timeout = cfg.Settings.Network.LogoDownloadTimeout
+	}
 	return &LogoService{
 		repo:            repo,
-		settingsService: settingsService,
 		config:          cfg,
-		transport:       transport,
+		httpClient:      &http.Client{Timeout: timeout},
 		logosDir:        filepath.Join(staticRoot, "logos"),
 		streamLogosDir:  filepath.Join(staticRoot, "streams", "logoscache"),
 		log:             log.With().Str("service", "logo").Logger(),
@@ -77,21 +80,11 @@ func (s *LogoService) buildStreamLogoCache() {
 	s.log.Info().Int("count", len(s.streamLogoCache)).Msg("loaded stream logo cache")
 }
 
-func (s *LogoService) IsEnabled(ctx context.Context) bool {
-	val, err := s.settingsService.Get(ctx, "logos_enabled")
-	if err != nil {
-		return true
-	}
-	return val != "false"
-}
-
 func (s *LogoService) Create(ctx context.Context, logo *models.Logo) error {
 	if err := s.repo.Create(ctx, logo); err != nil {
 		return err
 	}
-	if s.IsEnabled(ctx) {
-		go s.downloadLogo(context.Background(), logo.ID, logo.URL)
-	}
+	go s.downloadLogo(context.Background(), logo.ID, logo.URL)
 	return nil
 }
 
@@ -109,9 +102,7 @@ func (s *LogoService) Update(ctx context.Context, logo *models.Logo) error {
 			os.Remove(filepath.Join(s.logosDir, old.CachedFilename))
 			s.repo.UpdateCachedFilename(ctx, logo.ID, "")
 		}
-		if s.IsEnabled(ctx) {
-			go s.downloadLogo(context.Background(), logo.ID, logo.URL)
-		}
+		go s.downloadLogo(context.Background(), logo.ID, logo.URL)
 	}
 	return nil
 }
@@ -137,9 +128,6 @@ func (s *LogoService) GetByURL(ctx context.Context, url string) (*models.Logo, e
 }
 
 func (s *LogoService) CacheAll(ctx context.Context) {
-	if !s.IsEnabled(ctx) {
-		return
-	}
 	logos, err := s.repo.List(ctx)
 	if err != nil {
 		s.log.Error().Err(err).Msg("failed to list logos for caching")
@@ -153,31 +141,12 @@ func (s *LogoService) CacheAll(ctx context.Context) {
 	}
 }
 
-func (s *LogoService) httpClient() *http.Client {
-	timeout := 10 * time.Second
-	if s.config.Settings != nil {
-		timeout = s.config.Settings.Network.LogoDownloadTimeout
-	}
-	c := &http.Client{Timeout: timeout}
-	if s.transport != nil {
-		c.Transport = s.transport
-	}
-	return c
-}
-
 func (s *LogoService) downloadLogo(ctx context.Context, id, url string) {
 	if url == "" {
 		return
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		s.log.Debug().Err(err).Str("url", url).Msg("failed to create logo request")
-		return
-	}
-	req.Header.Set("User-Agent", s.config.UserAgent)
-
-	resp, err := s.httpClient().Do(req)
+	resp, err := httputil.Fetch(ctx, s.httpClient, s.config, url)
 	if err != nil {
 		s.log.Debug().Err(err).Str("url", url).Msg("failed to download logo")
 		return
@@ -215,6 +184,11 @@ func (s *LogoService) BaseURL() string {
 	return fmt.Sprintf("%s:%d", s.config.BaseURL, s.config.Port)
 }
 
+func isDisplayableURL(u string) bool {
+	return strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") ||
+		strings.HasPrefix(u, "/") || strings.HasPrefix(u, "data:")
+}
+
 func (s *LogoService) Resolve(url string) string {
 	if url == "" {
 		return placeholderLogo
@@ -223,14 +197,17 @@ func (s *LogoService) Resolve(url string) string {
 	if cached := s.StreamLogoFilename(url); cached != "" {
 		return baseURL + "/static/" + cached
 	}
-	return url
+	if isDisplayableURL(url) {
+		return url
+	}
+	return placeholderLogo
 }
 
 func (s *LogoService) ResolveChannel(ch models.Channel) string {
 	if ch.LogoCached != "" {
 		return s.BaseURL() + "/static/logos/" + ch.LogoCached
 	}
-	if ch.Logo != "" {
+	if ch.Logo != "" && isDisplayableURL(ch.Logo) {
 		return ch.Logo
 	}
 	return placeholderLogo
@@ -243,9 +220,6 @@ func (s *LogoService) ResolveChannelLogos(channels []models.Channel) {
 }
 
 func (s *LogoService) CacheStreamLogos(ctx context.Context, streams []models.Stream) {
-	if !s.IsEnabled(ctx) {
-		return
-	}
 	for _, stream := range streams {
 		if stream.Logo == "" {
 			continue
@@ -276,13 +250,7 @@ func (s *LogoService) StreamLogoFilename(url string) string {
 }
 
 func (s *LogoService) downloadStreamLogo(ctx context.Context, url, hash string) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return
-	}
-	req.Header.Set("User-Agent", s.config.UserAgent)
-
-	resp, err := s.httpClient().Do(req)
+	resp, err := httputil.Fetch(ctx, s.httpClient, s.config, url)
 	if err != nil {
 		return
 	}

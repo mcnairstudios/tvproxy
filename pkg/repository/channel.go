@@ -12,7 +12,7 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 )
 
-const channelSelect = `SELECT c.id, c.user_id, c.name, c.logo_id, COALESCE(l.url, ''), COALESCE(l.cached_filename, ''), c.tvg_id, c.channel_group_id, c.fail_count, c.is_enabled, c.created_at, c.updated_at
+const channelSelect = `SELECT c.id, c.user_id, c.name, c.logo_id, COALESCE(l.url, ''), COALESCE(l.cached_filename, ''), c.tvg_id, c.channel_group_id, c.stream_profile_id, c.fail_count, c.is_enabled, c.created_at, c.updated_at
 		FROM channels c LEFT JOIN logos l ON c.logo_id = l.id`
 
 type channelScanner interface {
@@ -21,10 +21,10 @@ type channelScanner interface {
 
 func scanChannel(s channelScanner) (*models.Channel, error) {
 	c := &models.Channel{}
-	var logoID, groupID sql.NullString
+	var logoID, groupID, profileID sql.NullString
 	if err := s.Scan(
 		&c.ID, &c.UserID, &c.Name, &logoID, &c.Logo, &c.LogoCached, &c.TvgID,
-		&groupID, &c.FailCount, &c.IsEnabled, &c.CreatedAt, &c.UpdatedAt,
+		&groupID, &profileID, &c.FailCount, &c.IsEnabled, &c.CreatedAt, &c.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -33,6 +33,9 @@ func scanChannel(s channelScanner) (*models.Channel, error) {
 	}
 	if groupID.Valid {
 		c.ChannelGroupID = &groupID.String
+	}
+	if profileID.Valid {
+		c.StreamProfileID = &profileID.String
 	}
 	return c, nil
 }
@@ -49,10 +52,10 @@ func (r *ChannelRepository) Create(ctx context.Context, channel *models.Channel)
 	now := time.Now()
 	channel.ID = uuid.New().String()
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO channels (id, user_id, name, logo_id, tvg_id, channel_group_id, is_enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO channels (id, user_id, name, logo_id, tvg_id, channel_group_id, stream_profile_id, is_enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		channel.ID, channel.UserID, channel.Name, channel.LogoID, channel.TvgID,
-		channel.ChannelGroupID, channel.IsEnabled, now, now,
+		channel.ChannelGroupID, channel.StreamProfileID, channel.IsEnabled, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("creating channel: %w", err)
@@ -105,10 +108,10 @@ func (r *ChannelRepository) ListByUserID(ctx context.Context, userID string) ([]
 func (r *ChannelRepository) Update(ctx context.Context, channel *models.Channel) error {
 	now := time.Now()
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE channels SET name = ?, logo_id = ?, tvg_id = ?, channel_group_id = ?, is_enabled = ?, updated_at = ?
+		`UPDATE channels SET name = ?, logo_id = ?, tvg_id = ?, channel_group_id = ?, stream_profile_id = ?, is_enabled = ?, updated_at = ?
 		WHERE id = ?`,
 		channel.Name, channel.LogoID, channel.TvgID,
-		channel.ChannelGroupID, channel.IsEnabled, now, channel.ID,
+		channel.ChannelGroupID, channel.StreamProfileID, channel.IsEnabled, now, channel.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating channel: %w", err)
@@ -120,10 +123,10 @@ func (r *ChannelRepository) Update(ctx context.Context, channel *models.Channel)
 func (r *ChannelRepository) UpdateForUser(ctx context.Context, channel *models.Channel, userID string) error {
 	now := time.Now()
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE channels SET name = ?, logo_id = ?, tvg_id = ?, channel_group_id = ?, is_enabled = ?, updated_at = ?
+		`UPDATE channels SET name = ?, logo_id = ?, tvg_id = ?, channel_group_id = ?, stream_profile_id = ?, is_enabled = ?, updated_at = ?
 		WHERE id = ? AND user_id = ?`,
 		channel.Name, channel.LogoID, channel.TvgID,
-		channel.ChannelGroupID, channel.IsEnabled, now, channel.ID, userID,
+		channel.ChannelGroupID, channel.StreamProfileID, channel.IsEnabled, now, channel.ID, userID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating channel for user: %w", err)

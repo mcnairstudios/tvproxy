@@ -248,4 +248,24 @@ var migrations = []migration{
 			return seedRecordingProfile(ctx, db)
 		},
 	},
+	{
+		name: "add_user_channel_groups",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			_, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS user_channel_groups (
+				user_id TEXT NOT NULL,
+				channel_group_id TEXT NOT NULL,
+				PRIMARY KEY (user_id, channel_group_id),
+				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+				FOREIGN KEY (channel_group_id) REFERENCES channel_groups(id) ON DELETE CASCADE
+			)`)
+			return err
+		},
+	},
+	{
+		name: "add_channel_stream_profile",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			_, err := db.ExecContext(ctx, `ALTER TABLE channels ADD COLUMN stream_profile_id TEXT`)
+			return err
+		},
+	},
 }

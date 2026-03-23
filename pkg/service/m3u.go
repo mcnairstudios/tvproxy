@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -53,10 +52,8 @@ func NewM3UService(
 	}
 }
 
-// Log returns the service logger for use by handlers.
 func (s *M3UService) Log() *zerolog.Logger { return &s.log }
 
-// CreateAccount creates a new M3U account.
 func (s *M3UService) CreateAccount(ctx context.Context, account *models.M3UAccount) error {
 	if err := s.m3uAccountRepo.Create(ctx, account); err != nil {
 		return fmt.Errorf("creating m3u account: %w", err)
@@ -64,7 +61,6 @@ func (s *M3UService) CreateAccount(ctx context.Context, account *models.M3UAccou
 	return nil
 }
 
-// GetAccount returns an M3U account by ID.
 func (s *M3UService) GetAccount(ctx context.Context, id string) (*models.M3UAccount, error) {
 	account, err := s.m3uAccountRepo.GetByID(ctx, id)
 	if err != nil {
@@ -73,7 +69,6 @@ func (s *M3UService) GetAccount(ctx context.Context, id string) (*models.M3UAcco
 	return account, nil
 }
 
-// ListAccounts returns all M3U accounts.
 func (s *M3UService) ListAccounts(ctx context.Context) ([]models.M3UAccount, error) {
 	accounts, err := s.m3uAccountRepo.List(ctx)
 	if err != nil {
@@ -82,7 +77,6 @@ func (s *M3UService) ListAccounts(ctx context.Context) ([]models.M3UAccount, err
 	return accounts, nil
 }
 
-// UpdateAccount updates an existing M3U account.
 func (s *M3UService) UpdateAccount(ctx context.Context, account *models.M3UAccount) error {
 	if err := s.m3uAccountRepo.Update(ctx, account); err != nil {
 		return fmt.Errorf("updating m3u account: %w", err)
@@ -90,7 +84,6 @@ func (s *M3UService) UpdateAccount(ctx context.Context, account *models.M3UAccou
 	return nil
 }
 
-// DeleteAccount deletes an M3U account and its associated streams.
 func (s *M3UService) DeleteAccount(ctx context.Context, id string) error {
 	if err := s.streamStore.DeleteByAccountID(ctx, id); err != nil {
 		return fmt.Errorf("deleting streams for account: %w", err)
@@ -104,9 +97,6 @@ func (s *M3UService) DeleteAccount(ctx context.Context, id string) error {
 	return nil
 }
 
-// RefreshAccount fetches the M3U URL for the given account, parses streams,
-// and upserts them by matching on content hash. It also updates the account's
-// last refresh time and stream count.
 func (s *M3UService) RefreshAccount(ctx context.Context, accountID string) error {
 	account, err := s.m3uAccountRepo.GetByID(ctx, accountID)
 	if err != nil {
@@ -133,7 +123,7 @@ func (s *M3UService) refreshXtreamAccount(ctx context.Context, account *models.M
 	s.log.Info().Str("account_id", account.ID).Str("name", account.Name).Msg("refreshing xtream account")
 
 	xtreamTimeout := s.config.Settings.Network.XtreamAPITimeout
-	client := xtream.NewClient(account.URL, account.Username, account.Password, s.config.UserAgent, xtreamTimeout, s.httpClient.Transport)
+	client := xtream.NewClient(account.URL, account.Username, account.Password, s.config.UserAgent, s.config.BypassHeader, s.config.BypassSecret, xtreamTimeout, s.httpClient.Transport)
 
 	if _, err := client.Authenticate(ctx); err != nil {
 		return fmt.Errorf("xtream authentication failed: %w", err)
@@ -176,7 +166,7 @@ func (s *M3UService) refreshXtreamAccount(ctx context.Context, account *models.M
 func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UAccount) error {
 	s.log.Info().Str("account_id", account.ID).Str("name", account.Name).Msg("refreshing m3u account")
 
-	body, err := s.fetchURL(ctx, account.URL)
+	body, err := httputil.FetchAndDecompress(ctx, s.httpClient, s.config, account.URL, s.log)
 	if err != nil {
 		return fmt.Errorf("fetching m3u url: %w", err)
 	}
@@ -258,7 +248,6 @@ func (s *M3UService) upsertAndFinalize(ctx context.Context, account *models.M3UA
 	return nil
 }
 
-// RefreshAllAccounts refreshes all enabled M3U accounts.
 func (s *M3UService) RefreshAllAccounts(ctx context.Context) error {
 	accounts, err := s.m3uAccountRepo.List(ctx)
 	if err != nil {
@@ -282,27 +271,6 @@ func (s *M3UService) RefreshAllAccounts(ctx context.Context) error {
 	return nil
 }
 
-// fetchURL retrieves the content from the given URL using the default user agent.
-func (s *M3UService) fetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-
-	req.Header.Set("User-Agent", s.config.UserAgent)
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("executing request: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	return httputil.DecompressReader(resp.Body, url)
-}
 
 var streamNamespace = uuid.MustParse("f47ac10b-58cc-4372-a567-0e02b2c3d479")
 

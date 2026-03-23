@@ -347,30 +347,14 @@
     storageKey: 'streams',
   });
 
-  function getNowPlaying(guide) {
-    var now = Date.now();
-    var result = {};
-    var progs = guide.programs || {};
-    Object.keys(progs).forEach(function(chId) {
-      for (var i = 0; i < progs[chId].length; i++) {
-        var p = progs[chId][i];
-        if (new Date(p.start).getTime() <= now && new Date(p.stop).getTime() > now) {
-          result[chId] = p.title;
-          break;
-        }
-      }
-    });
-    return result;
-  }
 
   const channelsCache = new DataCache({
     label: 'Channels',
     loader: async () => {
-      const [channels, guide] = await Promise.all([
+      const [channels, nowMap] = await Promise.all([
         api.get('/api/channels'),
-        api.get('/api/epg/guide?hours=1').catch(() => ({})),
+        api.get('/api/epg/now-playing').catch(() => ({})),
       ]);
-      var nowMap = getNowPlaying(guide);
       channels.forEach(ch => {
         ch._now_playing = (ch.tvg_id && nowMap[ch.tvg_id]) || '';
       });
@@ -382,6 +366,12 @@
   const channelGroupsCache = new DataCache({
     label: 'Groups',
     loader: () => api.get('/api/channel-groups'),
+    searchKeys: ['name'],
+  });
+
+  const streamProfilesCache = new DataCache({
+    label: 'Profiles',
+    loader: () => api.get('/api/stream-profiles'),
     searchKeys: ['name'],
   });
 
@@ -3103,6 +3093,10 @@
             epgMarker.style.display = 'none';
           }
         } catch(e) {
+          if (e.name === 'AbortError' || playerCtx.signal.aborted) {
+            clearDvrIntervals();
+            return;
+          }
           pollFailures++;
           if (pollFailures >= 3) {
             clearDvrIntervals();
@@ -3509,8 +3503,8 @@
         ],
       },
       columns: [
-        { key: 'logo', label: '', thStyle: 'width:30px;padding-right:0;text-align:center', tdStyle: 'padding-right:0;text-align:center', render: item =>
-          item.logo ? h('img', { src: item.logo, style: 'height:24px;width:24px;object-fit:contain;border-radius:2px;' }) : null
+        { key: 'logo', label: '', thStyle: 'width:110px;padding-right:0;text-align:center', tdStyle: 'padding-right:0;text-align:center', render: item =>
+          item.logo ? h('img', { src: item.logo, style: 'max-width:100px;max-height:40px;object-fit:contain;border-radius:2px;vertical-align:middle;' }) : null
         },
         { key: 'name', label: 'Name', render: item => {
           const span = h('span', null, item.name);
@@ -3562,6 +3556,13 @@
             apiPath: '/api/channel-groups',
             onCreated: () => channelGroupsCache.invalidate(),
           },
+        },
+        {
+          key: 'stream_profile_id', label: 'Stream Profile Override', type: 'async-select',
+          emptyLabel: '-- Auto (Client Detection) --',
+          loadOptions: () => streamProfilesCache.getAll(),
+          valueKey: 'id', displayKey: 'name',
+          help: 'Override the stream profile for this channel. Leave empty to use automatic client detection.',
         },
         {
           key: '_stream', label: 'Stream', type: 'autocomplete',
@@ -3699,6 +3700,7 @@
               try {
                 await api.post('/api/epg/sources/' + item.id + '/refresh');
                 epgCache.invalidate();
+                channelsCache.invalidate();
                 toast.success('EPG refresh started for ' + item.name);
                 setTimeout(reload, 2000);
               } catch (err) {
@@ -4316,33 +4318,6 @@
           ),
         ));
 
-        const logosDisabled = (Array.isArray(settings) ? settings : []).some(s => s.key === 'logos_enabled' && s.value === 'false');
-        const logosToggle = h('input', { type: 'checkbox', id: 'setting-logos-disabled' });
-        logosToggle.checked = logosDisabled;
-        logosToggle.onchange = async function() {
-          logosToggle.disabled = true;
-          try {
-            await api.put('/api/settings', { logos_enabled: logosToggle.checked ? 'false' : 'true' });
-            toast.success('Setting saved');
-          } catch (err) {
-            toast.error(err.message);
-            logosToggle.checked = !logosToggle.checked;
-          }
-          logosToggle.disabled = false;
-        };
-
-        container.appendChild(h('div', { className: 'table-container', style: 'margin-top: 24px' },
-          h('div', { className: 'table-header' }, h('h3', null, 'Logo Caching')),
-          h('div', { style: 'padding: 16px; font-size: 15px' },
-            h('div', { style: 'display:flex;align-items:center;gap:10px' },
-              logosToggle,
-              h('label', { for: 'setting-logos-disabled', style: 'cursor:pointer;margin:0' }, 'Disable local logo caching'),
-            ),
-            h('p', { style: 'color: var(--text-muted); margin-top: 8px; font-size: 13px' },
-              'Logo caching is on by default. Channel and stream logos are downloaded and served locally, improving performance for DLNA clients. Check this box to disable caching and use external logo URLs directly.'),
-          ),
-        ));
-
         const debugEnabled = (Array.isArray(settings) ? settings : []).some(s => s.key === 'debug_enabled' && s.value === 'true');
         const debugToggle = h('input', { type: 'checkbox', id: 'setting-debug-enabled' });
         debugToggle.checked = debugEnabled;
@@ -4684,6 +4659,30 @@
           doConnect();
         });
         form.appendChild(saveBtn);
+
+        var reconnectBtn = h('button', { className: 'btn btn-secondary', style: 'margin-left:8px;display:none' }, 'Reconnect');
+        reconnectBtn.addEventListener('click', async function() {
+          reconnectBtn.disabled = true;
+          reconnectBtn.textContent = 'Reconnecting...';
+          try {
+            var resp = await fetch('/api/wireguard/reconnect', {
+              method: 'POST',
+              headers: { 'Authorization': 'Bearer ' + state.accessToken },
+            });
+            var data = await resp.json();
+            if (!resp.ok) { toast.error(data.error || 'Reconnect failed'); return; }
+            updateStatus(data);
+            toast.success('WireGuard reconnected');
+          } catch (err) { toast.error(err.message); }
+          finally { reconnectBtn.disabled = false; reconnectBtn.textContent = 'Reconnect'; }
+        });
+        form.appendChild(reconnectBtn);
+
+        var origUpdateStatus = updateStatus;
+        updateStatus = function(status) {
+          origUpdateStatus(status);
+          reconnectBtn.style.display = (status.state === 'connected' || status.state === 'error') ? 'inline-block' : 'none';
+        };
 
         return form;
       }

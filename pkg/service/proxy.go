@@ -15,6 +15,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
+	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
@@ -85,7 +87,7 @@ func NewProxyService(
 	}
 }
 
-func contentTypeForProfile(mode string, profile *models.StreamProfile) string {
+func ContentTypeForProfile(mode string, profile *models.StreamProfile) string {
 	if profile != nil && mode == "ffmpeg" {
 		switch profile.Container {
 		case "mp4":
@@ -124,7 +126,7 @@ func (s *ProxyService) ProxyStream(ctx context.Context, w http.ResponseWriter, r
 	}
 
 	mode, streamProfile, dedicated, clientName := s.resolveProfile(ctx, r, channel, profileOverride)
-	contentType := contentTypeForProfile(mode, streamProfile)
+	contentType := ContentTypeForProfile(mode, streamProfile)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -140,7 +142,7 @@ func (s *ProxyService) ProxyStream(ctx context.Context, w http.ResponseWriter, r
 			ClientName:  clientName,
 			UserAgent:   r.UserAgent(),
 			RemoteAddr:  r.RemoteAddr,
-			Type:    "channel",
+			Type:        "channel",
 		})
 	}
 
@@ -178,6 +180,15 @@ func (s *ProxyService) resolveProfile(ctx context.Context, r *http.Request, chan
 		}
 	}
 
+	if channel.StreamProfileID != nil {
+		sp, err := s.streamProfileRepo.GetByID(ctx, *channel.StreamProfileID)
+		if err == nil {
+			s.log.Info().Str("channel_id", channel.ID).Str("profile", sp.Name).Str("mode", sp.StreamMode).Msg("using channel stream profile")
+			return sp.StreamMode, sp, true, ""
+		}
+		s.log.Warn().Err(err).Str("channel_id", channel.ID).Str("profile_id", *channel.StreamProfileID).Msg("channel stream profile not found, falling through")
+	}
+
 	if s.clientService != nil {
 		matched, clientName, err := s.clientService.MatchClient(ctx, r)
 		if err != nil {
@@ -189,6 +200,15 @@ func (s *ProxyService) resolveProfile(ctx context.Context, r *http.Request, chan
 	}
 
 	return "proxy", nil, false, ""
+}
+
+func (s *ProxyService) ResolveContentType(ctx context.Context, r *http.Request, channelID string, profileOverride string) string {
+	channel, err := s.channelRepo.GetByID(ctx, channelID)
+	if err != nil {
+		return "video/mp2t"
+	}
+	mode, profile, _, _ := s.resolveProfile(ctx, r, channel, profileOverride)
+	return ContentTypeForProfile(mode, profile)
 }
 
 func (s *ProxyService) tryJoinExisting(channelID string, c *streamClient, r *http.Request) bool {
@@ -258,6 +278,10 @@ func (s *ProxyService) startUpstream(ctx context.Context, r *http.Request, chann
 			continue
 		}
 
+		if err := s.channelRepo.ResetFailCount(ctx, channelID); err != nil {
+			s.log.Warn().Err(err).Str("channel_id", channelID).Msg("failed to reset fail count on stream start")
+		}
+
 		go s.proxyLoop(channelID, reader, cancel)
 
 		select {
@@ -292,17 +316,13 @@ func (s *ProxyService) openUpstream(ctx context.Context, channelID string, strea
 func (s *ProxyService) startHTTPPassthrough(ctx context.Context, channelID string, stream *models.Stream) (io.ReadCloser, error) {
 	s.log.Info().Str("channel_id", channelID).Str("stream_id", stream.ID).Str("url", stream.URL).Msg("starting HTTP passthrough")
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stream.URL, nil)
+	resp, err := httputil.Fetch(ctx, s.httpClient, s.config, stream.URL)
 	if err != nil {
-		return nil, fmt.Errorf("creating upstream request: %w", err)
-	}
-	req.Header.Set("User-Agent", s.config.UserAgent)
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
+		s.log.Error().Err(err).Str("channel_id", channelID).Str("url", stream.URL).Msg("passthrough upstream connection failed")
 		return nil, fmt.Errorf("upstream connection failed: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
+		httputil.LogUpstreamFailure(s.log, resp, stream.URL)
 		resp.Body.Close()
 		return nil, fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
@@ -310,110 +330,9 @@ func (s *ProxyService) startHTTPPassthrough(ctx context.Context, channelID strin
 	return resp.Body, nil
 }
 
-func ShellSplit(s string) []string {
-	var args []string
-	var current strings.Builder
-	inDouble, inSingle := false, false
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '"' && !inSingle:
-			inDouble = !inDouble
-		case c == '\'' && !inDouble:
-			inSingle = !inSingle
-		case c == ' ' && !inDouble && !inSingle:
-			if current.Len() > 0 {
-				args = append(args, current.String())
-				current.Reset()
-			}
-		default:
-			current.WriteByte(c)
-		}
-	}
-	if current.Len() > 0 {
-		args = append(args, current.String())
-	}
-	return args
-}
-
-func InjectReconnect(args []string, inputURL string, delayMax, rwTimeout int) []string {
-	if !strings.HasPrefix(inputURL, "http://") && !strings.HasPrefix(inputURL, "https://") {
-		return args
-	}
-	for _, arg := range args {
-		if arg == "-reconnect" {
-			return args
-		}
-	}
-	if delayMax <= 0 {
-		delayMax = 30
-	}
-	if rwTimeout <= 0 {
-		rwTimeout = 30000000
-	}
-	for i, arg := range args {
-		if arg == "-i" {
-			reconnectArgs := []string{
-				"-reconnect", "1",
-				"-reconnect_streamed", "1",
-				"-reconnect_delay_max", fmt.Sprintf("%d", delayMax),
-				"-reconnect_on_network_error", "1",
-				"-rw_timeout", fmt.Sprintf("%d", rwTimeout),
-			}
-			newArgs := make([]string, 0, len(args)+len(reconnectArgs))
-			newArgs = append(newArgs, args[:i]...)
-			newArgs = append(newArgs, reconnectArgs...)
-			newArgs = append(newArgs, args[i:]...)
-			return newArgs
-		}
-	}
-	return args
-}
-
-func ReplaceAudioMap(args []string, audioIndex int) []string {
-	if audioIndex <= 0 {
-		return args
-	}
-	target := fmt.Sprintf("0:a:%d", audioIndex)
-	for i, arg := range args {
-		if arg == "0:a:0" {
-			result := make([]string, len(args))
-			copy(result, args)
-			result[i] = target
-			return result
-		}
-	}
-	return args
-}
-
-func InjectUserAgent(args []string, userAgent string) []string {
-	for _, arg := range args {
-		if arg == "-user_agent" {
-			return args
-		}
-	}
-	for i, arg := range args {
-		if arg == "-i" {
-			newArgs := make([]string, 0, len(args)+2)
-			newArgs = append(newArgs, args[:i]...)
-			newArgs = append(newArgs, "-user_agent", userAgent)
-			newArgs = append(newArgs, args[i:]...)
-			return newArgs
-		}
-	}
-	return args
-}
-
 func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream *models.Stream, profile *models.StreamProfile) (io.ReadCloser, error) {
-	argsStr := strings.Replace(profile.Args, "{input}", stream.URL, 1)
-	args := InjectUserAgent(ShellSplit(argsStr), s.config.UserAgent)
-	delayMax, rwTimeout := 30, 30000000
-	if s.config.Settings != nil {
-		delayMax = s.config.Settings.Network.ReconnectDelayMax
-		rwTimeout = s.config.Settings.Network.ReconnectRWTimeout
-	}
-	args = InjectReconnect(args, stream.URL, delayMax, rwTimeout)
+	argsStr := strings.Replace(profile.Args, "{input}", "pipe:0", 1)
+	args := ffmpeg.ShellSplit(argsStr)
 
 	s.log.Info().
 		Str("channel_id", channelID).
@@ -423,30 +342,48 @@ func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream
 		Strs("args", args).
 		Msg("starting transcoding")
 
+	resp, err := httputil.Fetch(ctx, s.httpClient, s.config, stream.URL)
+	if err != nil {
+		s.log.Error().Err(err).Str("channel_id", channelID).Str("url", stream.URL).Msg("ffmpeg upstream connection failed")
+		return nil, fmt.Errorf("upstream connection failed: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		httputil.LogUpstreamFailure(s.log, resp, stream.URL)
+		resp.Body.Close()
+		return nil, fmt.Errorf("upstream returned %d", resp.StatusCode)
+	}
+
 	cmd := exec.CommandContext(ctx, profile.Command, args...)
+	cmd.Stdin = resp.Body
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		resp.Body.Close()
 		return nil, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		resp.Body.Close()
 		return nil, fmt.Errorf("creating stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
+		resp.Body.Close()
 		return nil, fmt.Errorf("starting ffmpeg: %w", err)
 	}
 
 	go s.logFFmpegStderr(channelID, stderr)
-	go s.waitFFmpeg(ctx, channelID, cmd)
+	go s.waitFFmpeg(ctx, channelID, cmd, resp.Body)
 
 	return stdout, nil
 }
 
-func (s *ProxyService) waitFFmpeg(ctx context.Context, channelID string, cmd *exec.Cmd) {
+func (s *ProxyService) waitFFmpeg(ctx context.Context, channelID string, cmd *exec.Cmd, stdinBody io.Closer) {
 	waitErr := cmd.Wait()
+	if stdinBody != nil {
+		stdinBody.Close()
+	}
 	if waitErr == nil {
 		s.log.Info().Str("channel_id", channelID).Msg("proxy ffmpeg finished (stream ended)")
 		return
@@ -467,7 +404,7 @@ func (s *ProxyService) logFFmpegStderr(channelID string, stderr io.ReadCloser) {
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if isFFmpegNoise(line) {
+		if ffmpeg.IsFFmpegNoise(line) {
 			continue
 		}
 		s.log.Warn().Str("channel_id", channelID).Str("ffmpeg", line).Msg("ffmpeg output")
@@ -606,7 +543,7 @@ func (s *ProxyService) ProxyRawStream(ctx context.Context, w http.ResponseWriter
 			ProfileName:  profileDisplayName(profile),
 			UserAgent:    r.UserAgent(),
 			RemoteAddr:   r.RemoteAddr,
-			Type:     "stream",
+			Type:         "stream",
 		})
 		defer s.activity.Remove(viewerID)
 	}
@@ -634,7 +571,7 @@ func (s *ProxyService) proxyRawStreamFFmpeg(ctx context.Context, w http.Response
 
 	s.log.Info().Str("stream_id", stream.ID).Str("profile", profile.Name).Msg("raw stream ffmpeg started")
 
-	writeStreamHeaders(w, contentTypeForProfile("ffmpeg", profile))
+	writeStreamHeaders(w, ContentTypeForProfile("ffmpeg", profile))
 	flusher.Flush()
 
 	s.copyToClient(reader, w, flusher, stream.ID, viewerID)
@@ -647,13 +584,7 @@ func (s *ProxyService) proxyRawStreamPassthrough(ctx context.Context, w http.Res
 		return fmt.Errorf("streaming not supported")
 	}
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, stream.URL, nil)
-	if err != nil {
-		return fmt.Errorf("creating upstream request: %w", err)
-	}
-	req.Header.Set("User-Agent", s.config.UserAgent)
-
-	resp, err := s.httpClient.Do(req)
+	resp, err := httputil.Fetch(r.Context(), s.httpClient, s.config, stream.URL)
 	if err != nil {
 		return fmt.Errorf("upstream connection failed: %w", err)
 	}

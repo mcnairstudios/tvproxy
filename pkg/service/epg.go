@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -117,7 +116,7 @@ func (s *EPGService) RefreshSource(ctx context.Context, sourceID string) error {
 func (s *EPGService) refreshSource(ctx context.Context, source *models.EPGSource) error {
 	s.log.Info().Str("source_id", source.ID).Str("name", source.Name).Msg("refreshing epg source")
 
-	body, err := s.fetchURL(ctx, source.URL)
+	body, err := httputil.FetchAndDecompress(ctx, s.httpClient, s.config, source.URL, s.log)
 	if err != nil {
 		return fmt.Errorf("fetching xmltv url: %w", err)
 	}
@@ -255,23 +254,3 @@ func (s *EPGService) RefreshAllSources(ctx context.Context) error {
 	return nil
 }
 
-func (s *EPGService) fetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-
-	req.Header.Set("User-Agent", s.config.UserAgent)
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("executing request: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	return httputil.DecompressReader(resp.Body, url)
-}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/xmlutil"
 )
 
 var ErrNoHDHRDevice = errors.New("no enabled HDHR device configured")
@@ -155,7 +156,7 @@ func (s *HDHRService) GetDiscoverDataForDevice(ctx context.Context, device *mode
 func (s *HDHRService) GetLineupForDevice(ctx context.Context, device *models.HDHRDevice, baseURL string) ([]LineupEntry, error) {
 	var groupSet map[string]bool
 	if len(device.ChannelGroupIDs) > 0 {
-		groupSet = toStringSet(device.ChannelGroupIDs)
+		groupSet = xmlutil.ToStringSet(device.ChannelGroupIDs)
 	}
 	return s.buildLineup(ctx, baseURL, groupSet)
 }

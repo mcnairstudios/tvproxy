@@ -12,6 +12,7 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
+	"github.com/gavinmcnair/tvproxy/pkg/xmlutil"
 )
 
 type OutputService struct {
@@ -40,8 +41,6 @@ func NewOutputService(
 		log:              log.With().Str("service", "output").Logger(),
 	}
 }
-
-const placeholderLogo = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Crect width='200' height='200' rx='20' fill='%23374151'/%3E%3Ctext x='100' y='115' font-family='sans-serif' font-size='80' fill='%239CA3AF' text-anchor='middle'%3ETV%3C/text%3E%3C/svg%3E`
 
 func channelEPGID(ch models.Channel) string {
 	if ch.TvgID != "" {
@@ -74,7 +73,7 @@ func (s *OutputService) GenerateM3UForGroups(ctx context.Context, groupIDs []str
 	if len(groupIDs) == 0 {
 		return s.GenerateM3U(ctx)
 	}
-	return s.generateM3U(ctx, toStringSet(groupIDs), baseURL, "")
+	return s.generateM3U(ctx, xmlutil.ToStringSet(groupIDs), baseURL, "")
 }
 
 func (s *OutputService) GenerateEPG(ctx context.Context) (string, error) {
@@ -85,15 +84,7 @@ func (s *OutputService) GenerateEPGForGroups(ctx context.Context, groupIDs []str
 	if len(groupIDs) == 0 {
 		return s.GenerateEPG(ctx)
 	}
-	return s.generateEPG(ctx, toStringSet(groupIDs))
-}
-
-func toStringSet(ids []string) map[string]bool {
-	m := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		m[id] = true
-	}
-	return m
+	return s.generateEPG(ctx, xmlutil.ToStringSet(groupIDs))
 }
 
 func (s *OutputService) generateM3U(ctx context.Context, groupFilter map[string]bool, baseURL string, urlSuffix string) (string, error) {
@@ -212,12 +203,12 @@ func (s *OutputService) generateEPG(ctx context.Context, groupFilter map[string]
 }
 
 func (s *OutputService) writeXMLChannel(b *strings.Builder, id, name, icon string) {
-	b.WriteString(fmt.Sprintf(`  <channel id="%s">`, xmlEscape(id)))
+	b.WriteString(fmt.Sprintf(`  <channel id="%s">`, xmlutil.XmlEscape(id)))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf(`    <display-name>%s</display-name>`, xmlEscape(name)))
+	b.WriteString(fmt.Sprintf(`    <display-name>%s</display-name>`, xmlutil.XmlEscape(name)))
 	b.WriteString("\n")
 	if icon != "" {
-		b.WriteString(fmt.Sprintf(`    <icon src="%s" />`, xmlEscape(icon)))
+		b.WriteString(fmt.Sprintf(`    <icon src="%s" />`, xmlutil.XmlEscape(icon)))
 		b.WriteString("\n")
 	}
 	b.WriteString("  </channel>\n")
@@ -228,41 +219,41 @@ func (s *OutputService) writeXMLProgramme(b *strings.Builder, channelID string, 
 	stop := prog.Stop.Format("20060102150405 -0700")
 
 	b.WriteString(fmt.Sprintf(`  <programme start="%s" stop="%s" channel="%s">`,
-		start, stop, xmlEscape(channelID)))
+		start, stop, xmlutil.XmlEscape(channelID)))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf(`    <title>%s</title>`, xmlEscape(prog.Title)))
+	b.WriteString(fmt.Sprintf(`    <title>%s</title>`, xmlutil.XmlEscape(prog.Title)))
 	b.WriteString("\n")
 
 	if prog.Subtitle != "" {
-		b.WriteString(fmt.Sprintf(`    <sub-title>%s</sub-title>`, xmlEscape(prog.Subtitle)))
+		b.WriteString(fmt.Sprintf(`    <sub-title>%s</sub-title>`, xmlutil.XmlEscape(prog.Subtitle)))
 		b.WriteString("\n")
 	}
 	if prog.Description != "" {
-		b.WriteString(fmt.Sprintf(`    <desc>%s</desc>`, xmlEscape(prog.Description)))
+		b.WriteString(fmt.Sprintf(`    <desc>%s</desc>`, xmlutil.XmlEscape(prog.Description)))
 		b.WriteString("\n")
 	}
 	if prog.Date != "" {
-		b.WriteString(fmt.Sprintf(`    <date>%s</date>`, xmlEscape(prog.Date)))
+		b.WriteString(fmt.Sprintf(`    <date>%s</date>`, xmlutil.XmlEscape(prog.Date)))
 		b.WriteString("\n")
 	}
 	if prog.Credits != "" {
 		s.writeXMLCredits(b, prog.Credits)
 	}
 	if prog.Category != "" {
-		b.WriteString(fmt.Sprintf(`    <category>%s</category>`, xmlEscape(prog.Category)))
+		b.WriteString(fmt.Sprintf(`    <category>%s</category>`, xmlutil.XmlEscape(prog.Category)))
 		b.WriteString("\n")
 	}
 	if prog.SubCategories != "" {
 		var extras []string
 		if json.Unmarshal([]byte(prog.SubCategories), &extras) == nil {
 			for _, cat := range extras {
-				b.WriteString(fmt.Sprintf(`    <category>%s</category>`, xmlEscape(cat)))
+				b.WriteString(fmt.Sprintf(`    <category>%s</category>`, xmlutil.XmlEscape(cat)))
 				b.WriteString("\n")
 			}
 		}
 	}
 	if prog.Language != "" {
-		b.WriteString(fmt.Sprintf(`    <language>%s</language>`, xmlEscape(prog.Language)))
+		b.WriteString(fmt.Sprintf(`    <language>%s</language>`, xmlutil.XmlEscape(prog.Language)))
 		b.WriteString("\n")
 	}
 	if prog.EpisodeNum != "" {
@@ -270,26 +261,26 @@ func (s *OutputService) writeXMLProgramme(b *strings.Builder, channelID string, 
 		if system == "" {
 			system = "onscreen"
 		}
-		b.WriteString(fmt.Sprintf(`    <episode-num system="%s">%s</episode-num>`, xmlEscape(system), xmlEscape(prog.EpisodeNum)))
+		b.WriteString(fmt.Sprintf(`    <episode-num system="%s">%s</episode-num>`, xmlutil.XmlEscape(system), xmlutil.XmlEscape(prog.EpisodeNum)))
 		b.WriteString("\n")
 	}
 	if prog.Icon != "" {
-		b.WriteString(fmt.Sprintf(`    <icon src="%s" />`, xmlEscape(prog.Icon)))
+		b.WriteString(fmt.Sprintf(`    <icon src="%s" />`, xmlutil.XmlEscape(prog.Icon)))
 		b.WriteString("\n")
 	}
 	if prog.Rating != "" {
 		b.WriteString(`    <rating>` + "\n")
-		b.WriteString(fmt.Sprintf(`      <value>%s</value>`, xmlEscape(prog.Rating)))
+		b.WriteString(fmt.Sprintf(`      <value>%s</value>`, xmlutil.XmlEscape(prog.Rating)))
 		b.WriteString("\n")
 		if prog.RatingIcon != "" {
-			b.WriteString(fmt.Sprintf(`      <icon src="%s" />`, xmlEscape(prog.RatingIcon)))
+			b.WriteString(fmt.Sprintf(`      <icon src="%s" />`, xmlutil.XmlEscape(prog.RatingIcon)))
 			b.WriteString("\n")
 		}
 		b.WriteString(`    </rating>` + "\n")
 	}
 	if prog.StarRating != "" {
 		b.WriteString(`    <star-rating>` + "\n")
-		b.WriteString(fmt.Sprintf(`      <value>%s</value>`, xmlEscape(prog.StarRating)))
+		b.WriteString(fmt.Sprintf(`      <value>%s</value>`, xmlutil.XmlEscape(prog.StarRating)))
 		b.WriteString("\n")
 		b.WriteString(`    </star-rating>` + "\n")
 	}
@@ -317,25 +308,16 @@ func (s *OutputService) writeXMLCredits(b *strings.Builder, creditsJSON string) 
 	}
 	b.WriteString(`    <credits>` + "\n")
 	for _, d := range creds.Directors {
-		b.WriteString(fmt.Sprintf(`      <director>%s</director>`, xmlEscape(d)))
+		b.WriteString(fmt.Sprintf(`      <director>%s</director>`, xmlutil.XmlEscape(d)))
 		b.WriteString("\n")
 	}
 	for _, a := range creds.Actors {
-		b.WriteString(fmt.Sprintf(`      <actor>%s</actor>`, xmlEscape(a)))
+		b.WriteString(fmt.Sprintf(`      <actor>%s</actor>`, xmlutil.XmlEscape(a)))
 		b.WriteString("\n")
 	}
 	for _, w := range creds.Writers {
-		b.WriteString(fmt.Sprintf(`      <writer>%s</writer>`, xmlEscape(w)))
+		b.WriteString(fmt.Sprintf(`      <writer>%s</writer>`, xmlutil.XmlEscape(w)))
 		b.WriteString("\n")
 	}
 	b.WriteString(`    </credits>` + "\n")
-}
-
-func xmlEscape(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	s = strings.ReplaceAll(s, "\"", "&quot;")
-	s = strings.ReplaceAll(s, "'", "&apos;")
-	return s
 }

@@ -33,7 +33,9 @@ type Config struct {
 	BaseURL string
 
 	// Upstream HTTP
-	UserAgent string
+	UserAgent    string
+	BypassHeader string
+	BypassSecret string
 
 	// Workers
 	M3URefreshInterval time.Duration
@@ -63,6 +65,8 @@ func Load() *Config {
 		APIKey:             envStr("TVPROXY_API_KEY", ""),
 		BaseURL:            envStr("TVPROXY_BASE_URL", ""),
 		UserAgent:          envStr("TVPROXY_USER_AGENT", "TVProxy"),
+		BypassHeader:       envStr("TVPROXY_BYPASS_HEADER", ""),
+		BypassSecret:       envStr("TVPROXY_BYPASS_SECRET", ""),
 		LogLevel:           envStr("TVPROXY_LOG_LEVEL", "info"),
 		LogJSON:            envBool("TVPROXY_LOG_JSON", false),
 		M3URefreshInterval: envDuration("TVPROXY_M3U_REFRESH_INTERVAL", 24*time.Hour),

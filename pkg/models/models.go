@@ -46,18 +46,19 @@ type Stream struct {
 }
 
 type Channel struct {
-	ID             string    `json:"id"`
-	UserID         string    `json:"user_id"`
-	Name           string    `json:"name"`
-	LogoID         *string   `json:"logo_id,omitempty"`
-	Logo           string    `json:"logo,omitempty"`
-	LogoCached     string    `json:"logo_cached,omitempty"`
-	TvgID          string    `json:"tvg_id,omitempty"`
-	ChannelGroupID *string   `json:"channel_group_id,omitempty"`
-	FailCount      int       `json:"fail_count"`
-	IsEnabled      bool      `json:"is_enabled"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	UserID          string    `json:"user_id"`
+	Name            string    `json:"name"`
+	LogoID          *string   `json:"logo_id,omitempty"`
+	Logo            string    `json:"logo,omitempty"`
+	LogoCached      string    `json:"logo_cached,omitempty"`
+	TvgID           string    `json:"tvg_id,omitempty"`
+	ChannelGroupID  *string   `json:"channel_group_id,omitempty"`
+	StreamProfileID *string   `json:"stream_profile_id,omitempty"`
+	FailCount       int       `json:"fail_count"`
+	IsEnabled       bool      `json:"is_enabled"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type ChannelStream struct {

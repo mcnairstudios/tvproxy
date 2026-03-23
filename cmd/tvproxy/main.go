@@ -120,9 +120,8 @@ func main() {
 	}
 
 	wgHTTPClient := wgService.HTTPClient()
-	wgTransport := wgService.Transport()
 
-	logoService := service.NewLogoService(logoRepo, settingsService, cfg, wgTransport, log)
+	logoService := service.NewLogoService(logoRepo, cfg, log)
 	logoService.EnsureDir()
 	go logoService.CacheAll(context.Background())
 
@@ -134,11 +133,11 @@ func main() {
 	proxyService := service.NewProxyService(channelRepo, streamStore, streamProfileRepo, clientService, activityService, cfg, wgHTTPClient, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgStore, logoService, cfg, log)
-	ffmpegMgr := service.NewFFmpegManager(cfg, log)
+	ffmpegMgr := service.NewFFmpegManager(cfg, wgHTTPClient, log)
 	vodService := service.NewVODService(channelRepo, streamStore, streamProfileRepo, ffmpegMgr, activityService, cfg, log)
 	vodService.RecoverRecordings(ctx)
 	schedulerService := service.NewSchedulerService(scheduledRecRepo, channelRepo, vodService, cfg, log)
-	dlnaService := service.NewDLNAService(channelRepo, channelGroupRepo, settingsService, logoService, cfg, log)
+	dlnaService := service.NewDLNAService(channelRepo, channelGroupRepo, userRepo, settingsService, logoService, cfg, log)
 
 	authMW := middleware.NewAuthMiddleware(authService, cfg.APIKey, adminUserID)
 
@@ -160,7 +159,7 @@ func main() {
 	settingsHandler := handler.NewSettingsHandler(settingsService, db, authService, streamStore, epgStore)
 	clientHandler := handler.NewClientHandler(clientService)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerService, log)
-	dlnaHandler := handler.NewDLNAHandler(dlnaService, settingsService, cfg, log)
+	dlnaHandler := handler.NewDLNAHandler(dlnaService, authService, settingsService, cfg, log)
 	wgHandler := handler.NewWireGuardHandler(wgService, log)
 
 	r := chi.NewRouter()

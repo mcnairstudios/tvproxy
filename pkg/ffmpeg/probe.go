@@ -3,10 +3,13 @@ package ffmpeg
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"math"
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/gavinmcnair/tvproxy/pkg/defaults"
 )
 
 type VideoInfo struct {
@@ -90,14 +93,7 @@ func Probe(ctx context.Context, url, userAgent string) (*ProbeResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.ProbeTimeout)
 	defer cancel()
 
-	args := []string{
-		"-v", "quiet",
-		"-analyzeduration", strconv.Itoa(s.AnalyzeDuration),
-		"-probesize", strconv.Itoa(s.ProbeSize),
-		"-print_format", "json",
-		"-show_format",
-		"-show_streams",
-	}
+	args := probeArgs(s)
 	if userAgent != "" {
 		args = append(args, "-user_agent", userAgent)
 	}
@@ -109,6 +105,39 @@ func Probe(ctx context.Context, url, userAgent string) (*ProbeResult, error) {
 		return &ProbeResult{IsVOD: false}, nil
 	}
 
+	return parseProbeOutput(out)
+}
+
+func ProbeReader(ctx context.Context, reader io.Reader) (*ProbeResult, error) {
+	s := settings()
+	ctx, cancel := context.WithTimeout(ctx, s.ProbeTimeout)
+	defer cancel()
+
+	args := probeArgs(s)
+	args = append(args, "pipe:0")
+
+	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	cmd.Stdin = reader
+	out, err := cmd.Output()
+	if err != nil {
+		return &ProbeResult{IsVOD: false}, nil
+	}
+
+	return parseProbeOutput(out)
+}
+
+func probeArgs(s *defaults.FFmpegSettings) []string {
+	return []string{
+		"-v", "quiet",
+		"-analyzeduration", strconv.Itoa(s.AnalyzeDuration),
+		"-probesize", strconv.Itoa(s.ProbeSize),
+		"-print_format", "json",
+		"-show_format",
+		"-show_streams",
+	}
+}
+
+func parseProbeOutput(out []byte) (*ProbeResult, error) {
 	var probe ffprobeOutput
 	if err := json.Unmarshal(out, &probe); err != nil {
 		return &ProbeResult{IsVOD: false}, nil
