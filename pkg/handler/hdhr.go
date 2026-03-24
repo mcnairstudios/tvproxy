@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -15,24 +14,16 @@ import (
 )
 
 type HDHRHandler struct {
-	hdhrService    *service.HDHRService
-	hdhrDeviceRepo interface {
-		NextAvailablePort(ctx context.Context) (int, error)
-		SetChannelGroups(ctx context.Context, deviceID string, groupIDs []string) error
-	}
+	hdhrService  *service.HDHRService
 	proxyService *service.ProxyService
 	cfg          *config.Config
 }
 
-func NewHDHRHandler(hdhrService *service.HDHRService, hdhrDeviceRepo interface {
-	NextAvailablePort(ctx context.Context) (int, error)
-	SetChannelGroups(ctx context.Context, deviceID string, groupIDs []string) error
-}, proxyService *service.ProxyService, cfg *config.Config) *HDHRHandler {
+func NewHDHRHandler(hdhrService *service.HDHRService, proxyService *service.ProxyService, cfg *config.Config) *HDHRHandler {
 	return &HDHRHandler{
-		hdhrService:    hdhrService,
-		hdhrDeviceRepo: hdhrDeviceRepo,
-		proxyService:   proxyService,
-		cfg:            cfg,
+		hdhrService:  hdhrService,
+		proxyService: proxyService,
+		cfg:          cfg,
 	}
 }
 
@@ -139,7 +130,7 @@ func (h *HDHRHandler) CreateDevice(w http.ResponseWriter, r *http.Request) {
 
 	port := req.Port
 	if port == 0 {
-		nextPort, err := h.hdhrDeviceRepo.NextAvailablePort(r.Context())
+		nextPort, err := h.hdhrService.NextAvailablePort(r.Context())
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to assign port")
 			return
@@ -163,7 +154,7 @@ func (h *HDHRHandler) CreateDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(req.ChannelGroupIDs) > 0 {
-		if err := h.hdhrDeviceRepo.SetChannelGroups(r.Context(), device.ID, req.ChannelGroupIDs); err != nil {
+		if err := h.hdhrService.SetChannelGroups(r.Context(), device.ID, req.ChannelGroupIDs); err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to set channel groups")
 			return
 		}
@@ -219,7 +210,7 @@ func (h *HDHRHandler) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.hdhrDeviceRepo.SetChannelGroups(r.Context(), device.ID, req.ChannelGroupIDs); err != nil {
+	if err := h.hdhrService.SetChannelGroups(r.Context(), device.ID, req.ChannelGroupIDs); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to set channel groups")
 		return
 	}

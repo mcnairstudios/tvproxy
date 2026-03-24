@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,11 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/xtream"
 )
 
+type RefreshStatus struct {
+	State   string `json:"state"`
+	Message string `json:"message,omitempty"`
+}
+
 type M3UService struct {
 	m3uAccountRepo *repository.M3UAccountRepository
 	streamStore    store.StreamStore
@@ -27,6 +33,9 @@ type M3UService struct {
 	config         *config.Config
 	httpClient     *http.Client
 	log            zerolog.Logger
+
+	statusMu sync.RWMutex
+	statuses map[string]RefreshStatus
 }
 
 func NewM3UService(
@@ -49,6 +58,7 @@ func NewM3UService(
 		config:         cfg,
 		httpClient:     httpClient,
 		log:            log.With().Str("service", "m3u").Logger(),
+		statuses:       make(map[string]RefreshStatus),
 	}
 }
 
@@ -97,18 +107,35 @@ func (s *M3UService) DeleteAccount(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *M3UService) setStatus(id string, st RefreshStatus) {
+	s.statusMu.Lock()
+	s.statuses[id] = st
+	s.statusMu.Unlock()
+}
+
+func (s *M3UService) GetStatus(id string) RefreshStatus {
+	s.statusMu.RLock()
+	st := s.statuses[id]
+	s.statusMu.RUnlock()
+	return st
+}
+
 func (s *M3UService) RefreshAccount(ctx context.Context, accountID string) error {
 	account, err := s.m3uAccountRepo.GetByID(ctx, accountID)
 	if err != nil {
 		return fmt.Errorf("getting account: %w", err)
 	}
 
+	s.setStatus(accountID, RefreshStatus{State: "running", Message: "Refreshing..."})
+
 	if err := s.refreshAccount(ctx, account); err != nil {
 		s.m3uAccountRepo.UpdateLastError(ctx, account.ID, err.Error())
+		s.setStatus(accountID, RefreshStatus{State: "error", Message: err.Error()})
 		return err
 	}
 
 	s.m3uAccountRepo.UpdateLastError(ctx, account.ID, "")
+	s.setStatus(accountID, RefreshStatus{State: "done", Message: "Refresh complete"})
 	return nil
 }
 

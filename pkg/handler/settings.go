@@ -13,6 +13,7 @@ type storeClearer interface {
 
 type SettingsHandler struct {
 	settingsService *service.SettingsService
+	exportService   *service.ExportService
 	db              *database.DB
 	authService     *service.AuthService
 	streamClearer   storeClearer
@@ -21,6 +22,7 @@ type SettingsHandler struct {
 
 func NewSettingsHandler(
 	settingsService *service.SettingsService,
+	exportService *service.ExportService,
 	db *database.DB,
 	authService *service.AuthService,
 	streamClearer storeClearer,
@@ -28,6 +30,7 @@ func NewSettingsHandler(
 ) *SettingsHandler {
 	return &SettingsHandler{
 		settingsService: settingsService,
+		exportService:   exportService,
 		db:              db,
 		authService:     authService,
 		streamClearer:   streamClearer,
@@ -84,4 +87,39 @@ func (h *SettingsHandler) HardReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"message": "hard reset complete"})
+}
+
+func (h *SettingsHandler) Export(w http.ResponseWriter, r *http.Request) {
+	scope := r.URL.Query().Get("scope")
+	if scope == "" {
+		scope = "channels"
+	}
+
+	data, err := h.exportService.Export(r.Context(), scope)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "export failed: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Disposition", "attachment; filename=tvproxy-export.json")
+	respondJSON(w, http.StatusOK, data)
+}
+
+func (h *SettingsHandler) Import(w http.ResponseWriter, r *http.Request) {
+	var data service.ExportData
+	if err := decodeJSON(r, &data); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid import data")
+		return
+	}
+
+	imported, err := h.exportService.Import(r.Context(), &data)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"message":  "import complete",
+		"imported": imported,
+	})
 }

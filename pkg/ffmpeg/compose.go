@@ -37,14 +37,14 @@ var defaultFFmpegSettings = &defaults.FFmpegSettings{
 		},
 		"h265": {
 			Software:     defaults.EncoderHWSettings{Preset: "fast"},
-			QSV:          defaults.EncoderHWSettings{Preset: "veryslow", GlobalQuality: 22, PixFmt: "p010le"},
+			QSV:          defaults.EncoderHWSettings{Preset: "veryslow", GlobalQuality: 22},
 			NVENC:        defaults.EncoderHWSettings{Preset: "p4"},
 			VAAPI:        defaults.EncoderHWSettings{},
 			VideoToolbox: defaults.EncoderHWSettings{},
 		},
 		"av1": {
 			Software: defaults.EncoderHWSettings{Preset: "6", CRF: 24, PixFmt: "yuv420p10le"},
-			QSV:      defaults.EncoderHWSettings{Preset: "veryslow", GlobalQuality: 25, LookAhead: 1, PixFmt: "p010le"},
+			QSV:      defaults.EncoderHWSettings{Preset: "veryslow", GlobalQuality: 25},
 			NVENC:    defaults.EncoderHWSettings{Preset: "p4", CQ: 24, PixFmt: "p010le"},
 			VAAPI:    defaults.EncoderHWSettings{RCMode: "ICQ", GlobalQuality: 25},
 		},
@@ -72,11 +72,7 @@ func ComposeStreamProfileArgs(opts ComposeOptions) string {
 
 	switch opts.HWAccel {
 	case "qsv":
-		if opts.VideoCodec == "av1" {
-			parts = append(parts, "-init_hw_device", "qsv=qs:hw,child_device_type=vaapi", "-hwaccel", "qsv")
-		} else {
-			parts = append(parts, "-hwaccel", "qsv")
-		}
+		parts = append(parts, "-init_hw_device", "vaapi=va:/dev/dri/renderD128", "-init_hw_device", "qsv=qs@va", "-hwaccel", "qsv", "-hwaccel_output_format", "qsv")
 	case "nvenc":
 		parts = append(parts, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
 	case "vaapi":
@@ -171,6 +167,10 @@ func buildVFChain(opts ComposeOptions) []string {
 	needsHWDownload := opts.HWAccel == "videotoolbox" && !isVideoToolboxEncoder(opts.VideoCodec)
 
 	switch {
+	case opts.HWAccel == "qsv" && needsDeinterlace:
+		filters = append(filters, "vpp_qsv=deinterlace_mode=advanced")
+	case opts.HWAccel == "nvenc" && needsDeinterlace:
+		filters = append(filters, "yadif_cuda")
 	case needsHWDownload && needsDeinterlace:
 		filters = append(filters, "hwdownload", "format=nv12", "yadif")
 	case needsHWDownload:

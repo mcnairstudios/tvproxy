@@ -19,7 +19,7 @@ func ShellSplit(s string) []string {
 			inDouble = !inDouble
 		case c == '\'' && !inDouble:
 			inSingle = !inSingle
-		case c == ' ' && !inDouble && !inSingle:
+		case (c == ' ' || c == '\n' || c == '\r' || c == '\t') && !inDouble && !inSingle:
 			if current.Len() > 0 {
 				args = append(args, current.String())
 				current.Reset()

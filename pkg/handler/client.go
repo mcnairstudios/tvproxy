@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -56,8 +57,8 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "at least one match rule is required")
 		return
 	}
-	if err := validateRules(req.Rules); err != "" {
-		respondError(w, http.StatusBadRequest, err)
+	if err := validateRules(req.Rules); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -118,8 +119,8 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadRequest, "at least one match rule is required")
 			return
 		}
-		if errMsg := validateRules(req.Rules); errMsg != "" {
-			respondError(w, http.StatusBadRequest, errMsg)
+		if err := validateRules(req.Rules); err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -169,19 +170,19 @@ func (h *ClientHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func validateRules(rules []clientMatchRuleRequest) string {
+func validateRules(rules []clientMatchRuleRequest) error {
 	for _, rule := range rules {
 		if rule.HeaderName == "" {
-			return "header_name is required on each rule"
+			return errors.New("header_name is required on each rule")
 		}
 		if !validMatchTypes[rule.MatchType] {
-			return "match_type must be one of: exists, contains, equals, prefix"
+			return errors.New("match_type must be one of: exists, contains, equals, prefix")
 		}
 		if rule.MatchType != "exists" && rule.MatchValue == "" {
-			return "match_value is required unless match_type is exists"
+			return errors.New("match_value is required unless match_type is exists")
 		}
 	}
-	return ""
+	return nil
 }
 
 func toMatchRules(clientID string, reqs []clientMatchRuleRequest) []models.ClientMatchRule {

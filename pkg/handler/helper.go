@@ -4,12 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
-
-	"github.com/go-chi/chi/v5"
 )
 
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {
-	// Ensure nil slices are marshaled as [] instead of null
 	if data != nil {
 		v := reflect.ValueOf(data)
 		if v.Kind() == reflect.Slice && v.IsNil() {
@@ -21,17 +18,12 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-// RespondJSONPublic is a public version of respondJSON for use by other packages.
 func RespondJSONPublic(w http.ResponseWriter, status int, data interface{}) {
 	respondJSON(w, status, data)
 }
 
 func respondError(w http.ResponseWriter, status int, message string) {
 	respondJSON(w, status, map[string]string{"error": message})
-}
-
-func urlParamString(r *http.Request, key string) string {
-	return chi.URLParam(r, key)
 }
 
 func decodeJSON(r *http.Request, v interface{}) error {

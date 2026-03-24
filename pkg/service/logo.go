@@ -33,6 +33,9 @@ type LogoService struct {
 
 	streamLogoMu    sync.RWMutex
 	streamLogoCache map[string]string
+
+	resolveMu    sync.RWMutex
+	resolveCache map[string]string
 }
 
 func NewLogoService(
@@ -53,6 +56,7 @@ func NewLogoService(
 		streamLogosDir:  filepath.Join(staticRoot, "streams", "logoscache"),
 		log:             log.With().Str("service", "logo").Logger(),
 		streamLogoCache: make(map[string]string),
+		resolveCache:    make(map[string]string),
 	}
 }
 
@@ -180,10 +184,6 @@ func (s *LogoService) downloadLogo(ctx context.Context, id, url string) {
 	}
 }
 
-func (s *LogoService) BaseURL() string {
-	return fmt.Sprintf("%s:%d", s.config.BaseURL, s.config.Port)
-}
-
 func isDisplayableURL(u string) bool {
 	return strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") ||
 		strings.HasPrefix(u, "/") || strings.HasPrefix(u, "data:")
@@ -193,9 +193,24 @@ func (s *LogoService) Resolve(url string) string {
 	if url == "" {
 		return placeholderLogo
 	}
-	baseURL := s.BaseURL()
+	s.resolveMu.RLock()
+	if cached, ok := s.resolveCache[url]; ok {
+		s.resolveMu.RUnlock()
+		return cached
+	}
+	s.resolveMu.RUnlock()
+
+	result := s.resolveUncached(url)
+
+	s.resolveMu.Lock()
+	s.resolveCache[url] = result
+	s.resolveMu.Unlock()
+	return result
+}
+
+func (s *LogoService) resolveUncached(url string) string {
 	if cached := s.StreamLogoFilename(url); cached != "" {
-		return baseURL + "/static/" + cached
+		return "/static/" + cached
 	}
 	if isDisplayableURL(url) {
 		return url
@@ -205,7 +220,7 @@ func (s *LogoService) Resolve(url string) string {
 
 func (s *LogoService) ResolveChannel(ch models.Channel) string {
 	if ch.LogoCached != "" {
-		return s.BaseURL() + "/static/logos/" + ch.LogoCached
+		return "/static/logos/" + ch.LogoCached
 	}
 	if ch.Logo != "" && isDisplayableURL(ch.Logo) {
 		return ch.Logo
@@ -278,6 +293,10 @@ func (s *LogoService) downloadStreamLogo(ctx context.Context, url, hash string) 
 	s.streamLogoMu.Lock()
 	s.streamLogoCache[hash] = filename
 	s.streamLogoMu.Unlock()
+
+	s.resolveMu.Lock()
+	delete(s.resolveCache, url)
+	s.resolveMu.Unlock()
 }
 
 func detectExtension(contentType, url string) string {

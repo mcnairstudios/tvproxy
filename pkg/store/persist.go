@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bufio"
 	"encoding/gob"
 	"fmt"
 	"os"
@@ -42,5 +43,5 @@ func loadGob(path string, dest any) error {
 		return err
 	}
 	defer f.Close()
-	return gob.NewDecoder(f).Decode(dest)
+	return gob.NewDecoder(bufio.NewReaderSize(f, 256*1024)).Decode(dest)
 }

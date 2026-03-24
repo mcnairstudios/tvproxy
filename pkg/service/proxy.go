@@ -117,7 +117,7 @@ func writeStreamHeaders(w http.ResponseWriter, contentType string) {
 }
 
 func (s *ProxyService) ProxyStream(ctx context.Context, w http.ResponseWriter, r *http.Request, channelID string, profileOverride string) error {
-	channel, err := s.channelRepo.GetByID(ctx, channelID)
+	channel, err := s.channelRepo.GetByIDLite(ctx, channelID)
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrChannelNotFound, channelID)
 	}
@@ -203,7 +203,7 @@ func (s *ProxyService) resolveProfile(ctx context.Context, r *http.Request, chan
 }
 
 func (s *ProxyService) ResolveContentType(ctx context.Context, r *http.Request, channelID string, profileOverride string) string {
-	channel, err := s.channelRepo.GetByID(ctx, channelID)
+	channel, err := s.channelRepo.GetByIDLite(ctx, channelID)
 	if err != nil {
 		return "video/mp2t"
 	}

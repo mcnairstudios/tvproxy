@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,12 +81,8 @@ func (r *ClientRepository) List(ctx context.Context) ([]models.Client, error) {
 		return nil, fmt.Errorf("iterating clients: %w", err)
 	}
 
-	for i := range clients {
-		rules, err := r.getMatchRules(ctx, clients[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		clients[i].MatchRules = rules
+	if err := r.batchLoadMatchRules(ctx, clients); err != nil {
+		return nil, err
 	}
 
 	return clients, nil
@@ -153,12 +150,8 @@ func (r *ClientRepository) ListEnabledWithRules(ctx context.Context) ([]models.C
 		return nil, fmt.Errorf("iterating clients: %w", err)
 	}
 
-	for i := range clients {
-		rules, err := r.getMatchRules(ctx, clients[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		clients[i].MatchRules = rules
+	if err := r.batchLoadMatchRules(ctx, clients); err != nil {
+		return nil, err
 	}
 
 	return clients, nil
@@ -173,6 +166,39 @@ func (r *ClientRepository) IsStreamProfileReferenced(ctx context.Context, profil
 		return false, fmt.Errorf("checking profile references: %w", err)
 	}
 	return count > 0, nil
+}
+
+func (r *ClientRepository) batchLoadMatchRules(ctx context.Context, clients []models.Client) error {
+	if len(clients) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(clients))
+	args := make([]any, len(clients))
+	idIndex := make(map[string]int, len(clients))
+	for i, c := range clients {
+		placeholders[i] = "?"
+		args[i] = c.ID
+		idIndex[c.ID] = i
+	}
+	query := fmt.Sprintf(
+		`SELECT id, client_id, header_name, match_type, match_value FROM client_match_rules WHERE client_id IN (%s) ORDER BY client_id, header_name`,
+		strings.Join(placeholders, ","),
+	)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("batch loading match rules: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rule models.ClientMatchRule
+		if err := rows.Scan(&rule.ID, &rule.ClientID, &rule.HeaderName, &rule.MatchType, &rule.MatchValue); err != nil {
+			return fmt.Errorf("scanning match rule: %w", err)
+		}
+		if idx, ok := idIndex[rule.ClientID]; ok {
+			clients[idx].MatchRules = append(clients[idx].MatchRules, rule)
+		}
+	}
+	return rows.Err()
 }
 
 func (r *ClientRepository) getMatchRules(ctx context.Context, clientID string) ([]models.ClientMatchRule, error) {

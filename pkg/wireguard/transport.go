@@ -72,10 +72,14 @@ func chromeTLSDialer(dialCtx func(ctx context.Context, network, address string) 
 func (t *RoutingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	host := req.URL.Hostname()
 	if t.shouldRoute(host) {
-		t.log.Debug().Str("host", host).Str("path", "tunnel").Msg("routing request")
+		if e := t.log.Debug(); e.Enabled() {
+			e.Str("host", host).Str("path", "tunnel").Msg("routing request")
+		}
 		return t.tunnelRT.RoundTrip(req)
 	}
-	t.log.Debug().Str("host", host).Str("path", "direct").Msg("routing request")
+	if e := t.log.Debug(); e.Enabled() {
+		e.Str("host", host).Str("path", "direct").Msg("routing request")
+	}
 	return t.direct.RoundTrip(req)
 }
 

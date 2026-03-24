@@ -127,3 +127,8 @@ func (h *EPGSourceHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusAccepted, map[string]string{"message": "refresh started"})
 }
+
+func (h *EPGSourceHandler) RefreshStatus(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	respondJSON(w, http.StatusOK, h.epgService.GetStatus(id))
+}

@@ -1,12 +1,55 @@
 openapi: "3.0.3"
 info:
   title: TVProxy API
-  description: IPTV stream management and proxy server
+  description: IPTV stream management and proxy server. Manages channels, streams (M3U and SAT>IP), EPG data, and emulates HDHomeRun devices for Plex/Emby/Jellyfin.
   version: "1.0.0"
 servers:
   - url: http://localhost:8080
 
+tags:
+  - name: Auth
+    description: Authentication and session management
+  - name: Users
+    description: User management (admin only)
+  - name: M3U
+    description: M3U account management
+  - name: Streams
+    description: Stream data from M3U accounts
+  - name: Channels
+    description: Channel management
+  - name: ChannelGroups
+    description: Channel group management
+  - name: Logos
+    description: Logo management (admin only)
+  - name: StreamProfiles
+    description: Stream profile management (admin only)
+  - name: EPG
+    description: EPG source and data management
+  - name: HDHR
+    description: HDHomeRun device management
+  - name: Settings
+    description: Application settings, export/import, reset (admin only)
+  - name: Clients
+    description: Client detection rule management (admin only)
+  - name: Recordings
+    description: Active and completed recordings
+  - name: Scheduler
+    description: Scheduled recording management
+  - name: Activity
+    description: Active viewer tracking (admin only)
+  - name: WireGuard
+    description: WireGuard VPN management (admin only)
+  - name: Output
+    description: Generated M3U playlist and EPG output
+  - name: Proxy
+    description: Channel and raw stream proxying
+  - name: VOD
+    description: VOD session management (probe, create, seek, stream)
+  - name: DLNA
+    description: DLNA MediaServer endpoints
+
 paths:
+  # ── Auth ────────────────────────────────────────────────────────────
   /api/auth/login:
     post:
       summary: Login
@@ -19,8 +62,10 @@ paths:
               type: object
               required: [username, password]
               properties:
-                username: { type: string }
-                password: { type: string }
+                username:
+                  type: string
+                password:
+                  type: string
       responses:
         "200":
           description: Login successful
@@ -29,10 +74,18 @@ paths:
               schema:
                 type: object
                 properties:
-                  access_token: { type: string }
-                  refresh_token: { type: string }
+                  access_token:
+                    type: string
+                  refresh_token:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /api/auth/refresh:
     post:
@@ -46,12 +99,75 @@ paths:
               type: object
               required: [refresh_token]
               properties:
-                refresh_token: { type: string }
+                refresh_token:
+                  type: string
       responses:
         "200":
           description: Token refreshed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           description: Invalid refresh token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/auth/invite/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Accept an invitation and set password
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Account activated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/auth/logout:
+    post:
+      summary: Logout
+      tags: [Auth]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
 
   /api/auth/me:
     get:
@@ -61,7 +177,132 @@ paths:
       responses:
         "200":
           description: Current user info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
+  # ── Users ───────────────────────────────────────────────────────────
+  /api/users:
+    get:
+      summary: List users
+      tags: [Users]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+    post:
+      summary: Create user
+      tags: [Users]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                is_admin:
+                  type: boolean
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/users/invite:
+    post:
+      summary: Create invite for a new user
+      tags: [Users]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username:
+                  type: string
+      responses:
+        "201":
+          description: Invite created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      summary: Get user
+      tags: [Users]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      summary: Update user
+      tags: [Users]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                is_admin:
+                  type: boolean
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete user
+      tags: [Users]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: User deleted
+
+  # ── M3U Accounts ────────────────────────────────────────────────────
   /api/m3u/accounts:
     get:
       summary: List M3U accounts
@@ -70,25 +311,35 @@ paths:
       responses:
         "200":
           description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/M3UAccount"
     post:
-      summary: Create M3U account
+      summary: Create M3U account (admin only)
       tags: [M3U]
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/M3UAccount" }
+            schema:
+              $ref: "#/components/schemas/M3UAccountInput"
       responses:
         "201":
           description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/M3UAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
 
   /api/m3u/accounts/{id}:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: integer }
+      - $ref: "#/components/parameters/id"
     get:
       summary: Get M3U account
       tags: [M3U]
@@ -96,15 +347,33 @@ paths:
       responses:
         "200":
           description: Account details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/M3UAccount"
+        "404":
+          $ref: "#/components/responses/NotFound"
     put:
-      summary: Update M3U account
+      summary: Update M3U account (admin only)
       tags: [M3U]
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/M3UAccountInput"
       responses:
         "200":
           description: Account updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/M3UAccount"
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
-      summary: Delete M3U account
+      summary: Delete M3U account (admin only)
       tags: [M3U]
       security: [{ bearerAuth: [] }]
       responses:
@@ -113,18 +382,95 @@ paths:
 
   /api/m3u/accounts/{id}/refresh:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: integer }
+      - $ref: "#/components/parameters/id"
     post:
-      summary: Refresh M3U account streams
+      summary: Refresh M3U account streams (async, admin only)
+      tags: [M3U]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "202":
+          description: Refresh started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /api/m3u/accounts/{id}/status:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      summary: Get M3U account refresh status
       tags: [M3U]
       security: [{ bearerAuth: [] }]
       responses:
         "200":
-          description: Refresh started
+          description: Refresh status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshStatus"
 
+  # ── Streams ─────────────────────────────────────────────────────────
+  /api/streams:
+    get:
+      summary: List streams
+      description: Returns summaries by default. Use ?full=true for all fields. Use ?account_id={id} to filter by M3U account.
+      tags: [Streams]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: full
+          in: query
+          schema:
+            type: string
+            enum: ["true"]
+          description: If "true", returns full stream objects instead of summaries
+        - name: account_id
+          in: query
+          schema:
+            type: string
+          description: Filter by M3U account ID
+      responses:
+        "200":
+          description: List of streams or stream summaries
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/Stream"
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/StreamSummary"
+
+  /api/streams/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      summary: Get stream
+      tags: [Streams]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Stream details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stream"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete stream (admin only)
+      tags: [Streams]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Stream deleted
+
+  # ── Channels ────────────────────────────────────────────────────────
   /api/channels:
     get:
       summary: List channels
@@ -133,20 +479,35 @@ paths:
       responses:
         "200":
           description: List of channels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Channel"
     post:
       summary: Create channel
       tags: [Channels]
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelInput"
       responses:
         "201":
           description: Channel created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "400":
+          $ref: "#/components/responses/BadRequest"
 
   /api/channels/{id}:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: integer }
+      - $ref: "#/components/parameters/id"
     get:
       summary: Get channel
       tags: [Channels]
@@ -154,13 +515,31 @@ paths:
       responses:
         "200":
           description: Channel details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "404":
+          $ref: "#/components/responses/NotFound"
     put:
       summary: Update channel
       tags: [Channels]
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelInput"
       responses:
         "200":
           description: Channel updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
       summary: Delete channel
       tags: [Channels]
@@ -171,10 +550,20 @@ paths:
 
   /api/channels/{id}/streams:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: integer }
+      - $ref: "#/components/parameters/id"
+    get:
+      summary: Get streams assigned to channel
+      tags: [Channels]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of channel stream assignments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChannelStream"
     post:
       summary: Assign streams to channel
       tags: [Channels]
@@ -188,11 +577,313 @@ paths:
               properties:
                 stream_ids:
                   type: array
-                  items: { type: integer }
+                  items:
+                    type: string
       responses:
         "200":
           description: Streams assigned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
 
+  /api/channels/{id}/fail:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    post:
+      summary: Increment channel fail count
+      tags: [Channels]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Updated channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+    delete:
+      summary: Reset channel fail count
+      tags: [Channels]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Fail count reset
+
+  # ── Channel Groups ──────────────────────────────────────────────────
+  /api/channel-groups:
+    get:
+      summary: List channel groups
+      tags: [ChannelGroups]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of channel groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChannelGroup"
+    post:
+      summary: Create channel group
+      tags: [ChannelGroups]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelGroupInput"
+      responses:
+        "201":
+          description: Channel group created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelGroup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/channel-groups/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      summary: Get channel group
+      tags: [ChannelGroups]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Channel group details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelGroup"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      summary: Update channel group
+      tags: [ChannelGroups]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelGroupInput"
+      responses:
+        "200":
+          description: Channel group updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelGroup"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete channel group
+      tags: [ChannelGroups]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Channel group deleted
+
+  # ── Logos ────────────────────────────────────────────────────────────
+  /api/logos:
+    get:
+      summary: List logos
+      tags: [Logos]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of logos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Logo"
+    post:
+      summary: Create logo
+      tags: [Logos]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, url]
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+      responses:
+        "201":
+          description: Logo created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Logo"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/logos/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      summary: Get logo
+      tags: [Logos]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Logo details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Logo"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      summary: Update logo
+      tags: [Logos]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+      responses:
+        "200":
+          description: Logo updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Logo"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete logo
+      tags: [Logos]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Logo deleted
+
+  # ── Stream Profiles ─────────────────────────────────────────────────
+  /api/stream-profiles:
+    get:
+      summary: List stream profiles
+      tags: [StreamProfiles]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of stream profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StreamProfile"
+    post:
+      summary: Create stream profile
+      tags: [StreamProfiles]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StreamProfileInput"
+      responses:
+        "201":
+          description: Stream profile created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Profile name already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/stream-profiles/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      summary: Get stream profile
+      tags: [StreamProfiles]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Stream profile details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamProfile"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      summary: Update stream profile
+      tags: [StreamProfiles]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StreamProfileInput"
+      responses:
+        "200":
+          description: Stream profile updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StreamProfile"
+        "403":
+          description: Cannot edit system profile or rename client profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Profile name already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      summary: Delete stream profile
+      tags: [StreamProfiles]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Stream profile deleted
+        "403":
+          description: Cannot delete system or client profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── EPG Sources ─────────────────────────────────────────────────────
   /api/epg/sources:
     get:
       summary: List EPG sources
@@ -201,32 +892,805 @@ paths:
       responses:
         "200":
           description: List of EPG sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EPGSource"
     post:
-      summary: Create EPG source
+      summary: Create EPG source (admin only)
       tags: [EPG]
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, url]
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+                is_enabled:
+                  type: boolean
       responses:
         "201":
           description: EPG source created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EPGSource"
+        "400":
+          $ref: "#/components/responses/BadRequest"
 
-  /api/epg/data:
+  /api/epg/sources/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
     get:
-      summary: List EPG data
+      summary: Get EPG source
       tags: [EPG]
       security: [{ bearerAuth: [] }]
       responses:
         "200":
-          description: EPG data
+          description: EPG source details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EPGSource"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      summary: Update EPG source (admin only)
+      tags: [EPG]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+                is_enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: EPG source updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EPGSource"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete EPG source (admin only)
+      tags: [EPG]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: EPG source deleted
 
+  /api/epg/sources/{id}/refresh:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    post:
+      summary: Refresh EPG source (async, admin only)
+      tags: [EPG]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "202":
+          description: Refresh started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /api/epg/sources/{id}/status:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      summary: Get EPG source refresh status
+      tags: [EPG]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Refresh status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshStatus"
+
+  # ── EPG Data ────────────────────────────────────────────────────────
+  /api/epg/data:
+    get:
+      summary: List EPG data
+      description: Returns EPG channel data. Use ?source_id to filter by source. Use ?programs=true to include program data.
+      tags: [EPG]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: source_id
+          in: query
+          schema:
+            type: string
+          description: Filter by EPG source ID
+        - name: programs
+          in: query
+          schema:
+            type: string
+            enum: ["true"]
+          description: Include program data in response
+      responses:
+        "200":
+          description: EPG data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EPGData"
+
+  /api/epg/now:
+    get:
+      summary: Get currently playing programs
+      description: Returns the currently playing program per EPG channel. Use ?channel_id to get a single channel.
+      tags: [EPG]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: channel_id
+          in: query
+          schema:
+            type: string
+          description: EPG channel ID to query (returns single program if set)
+      responses:
+        "200":
+          description: Now playing data
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/ProgramData"
+
+  /api/epg/guide:
+    get:
+      summary: Get EPG guide data
+      description: Returns programs grouped by EPG channel ID for a time window.
+      tags: [EPG]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: hours
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 48
+            default: 6
+          description: Number of hours to include
+        - name: start
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Start time in RFC3339 format (defaults to now)
+      responses:
+        "200":
+          description: Guide data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  start:
+                    type: string
+                    format: date-time
+                  stop:
+                    type: string
+                    format: date-time
+                  programs:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/GuideProgram"
+
+  # ── HDHR Devices (API) ──────────────────────────────────────────────
+  /api/hdhr/devices:
+    get:
+      summary: List HDHR devices
+      tags: [HDHR]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of HDHR devices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HDHRDevice"
+    post:
+      summary: Create HDHR device
+      tags: [HDHR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HDHRDeviceInput"
+      responses:
+        "201":
+          description: HDHR device created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HDHRDevice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/hdhr/devices/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      summary: Get HDHR device
+      tags: [HDHR]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: HDHR device details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HDHRDevice"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      summary: Update HDHR device
+      tags: [HDHR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HDHRDeviceInput"
+      responses:
+        "200":
+          description: HDHR device updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HDHRDevice"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete HDHR device
+      tags: [HDHR]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: HDHR device deleted
+
+  # ── Settings ────────────────────────────────────────────────────────
+  /api/settings:
+    get:
+      summary: List all settings
+      tags: [Settings]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of settings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CoreSetting"
+    put:
+      summary: Update settings
+      tags: [Settings]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+              description: Key-value pairs of settings to update
+      responses:
+        "200":
+          description: Settings updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /api/settings/export:
+    get:
+      summary: Export configuration
+      description: "Export channels, groups, and optionally full configuration. Use ?scope=full for complete export."
+      tags: [Settings]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [channels, full]
+            default: channels
+          description: Export scope
+      responses:
+        "200":
+          description: Export data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportData"
+
+  /api/settings/import:
+    post:
+      summary: Import configuration
+      tags: [Settings]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExportData"
+      responses:
+        "200":
+          description: Import complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  imported:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/settings/soft-reset:
+    post:
+      summary: Soft reset (clears user data, keeps system config)
+      tags: [Settings]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Soft reset complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /api/settings/hard-reset:
+    post:
+      summary: Hard reset (full database reset, recreates default admin)
+      tags: [Settings]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Hard reset complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  # ── Clients ─────────────────────────────────────────────────────────
+  /api/clients:
+    get:
+      summary: List clients
+      tags: [Clients]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of clients
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Client"
+    post:
+      summary: Create client
+      tags: [Clients]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientInput"
+      responses:
+        "201":
+          description: Client created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/clients/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      summary: Get client
+      tags: [Clients]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Client details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      summary: Update client
+      tags: [Clients]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientUpdateInput"
+      responses:
+        "200":
+          description: Client updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete client
+      tags: [Clients]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Client deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Recordings ──────────────────────────────────────────────────────
+  /api/recordings:
+    get:
+      summary: List active recordings
+      tags: [Recordings]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of active recordings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RecordingInfo"
+
+  /api/recordings/completed:
+    get:
+      summary: List completed recordings
+      tags: [Recordings]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of completed recordings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompletedRecording"
+
+  /api/recordings/completed/{filename}/stream:
+    parameters:
+      - name: filename
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Stream a completed recording
+      tags: [Recordings]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: user_id
+          in: query
+          schema:
+            type: string
+          description: Target user ID (admin only)
+      responses:
+        "200":
+          description: Recording file stream
+          content:
+            video/mp4: {}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/recordings/completed/{filename}:
+    parameters:
+      - name: filename
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      summary: Delete a completed recording
+      tags: [Recordings]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: user_id
+          in: query
+          schema:
+            type: string
+          description: Target user ID (admin only)
+      responses:
+        "204":
+          description: Recording deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Scheduler ───────────────────────────────────────────────────────
+  /api/recordings/schedule:
+    get:
+      summary: List scheduled recordings
+      tags: [Scheduler]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of scheduled recordings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ScheduledRecording"
+    post:
+      summary: Schedule a recording
+      tags: [Scheduler]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel_id, start_at, stop_at]
+              properties:
+                channel_id:
+                  type: string
+                channel_name:
+                  type: string
+                program_title:
+                  type: string
+                start_at:
+                  type: string
+                  format: date-time
+                stop_at:
+                  type: string
+                  format: date-time
+      responses:
+        "201":
+          description: Recording scheduled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduledRecording"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Overlapping recording already scheduled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/recordings/schedule/{id}:
+    parameters:
+      - $ref: "#/components/parameters/id"
+    get:
+      summary: Get scheduled recording
+      tags: [Scheduler]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Scheduled recording details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduledRecording"
+        "403":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete scheduled recording
+      tags: [Scheduler]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Scheduled recording deleted
+        "403":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── Activity ────────────────────────────────────────────────────────
+  /api/activity:
+    get:
+      summary: List active viewers
+      tags: [Activity]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of active viewers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActiveViewer"
+
+  # ── WireGuard ───────────────────────────────────────────────────────
+  /api/wireguard/status:
+    get:
+      summary: Get WireGuard VPN status
+      tags: [WireGuard]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: WireGuard status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /api/wireguard/reconnect:
+    post:
+      summary: Reconnect WireGuard tunnel
+      tags: [WireGuard]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Reconnected successfully, returns updated status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "500":
+          description: Reconnect failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/wireguard/connect:
+    post:
+      summary: Connect WireGuard tunnel with provided configuration
+      tags: [WireGuard]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WireGuardConnectRequest"
+      responses:
+        "200":
+          description: Connected, returns status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "422":
+          description: Validation errors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors:
+                    type: object
+                    additionalProperties:
+                      type: string
+        "500":
+          description: Connect failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/wireguard/disconnect:
+    post:
+      summary: Disconnect WireGuard tunnel
+      tags: [WireGuard]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Disconnected, returns status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  # ── Output ──────────────────────────────────────────────────────────
   /output/m3u:
     get:
       summary: Generated M3U playlist
       tags: [Output]
       responses:
         "200":
-          description: M3U playlist
+          description: M3U playlist file
           content:
-            audio/x-mpegurl: {}
+            audio/x-mpegurl:
+              schema:
+                type: string
+
+  /channels.m3u:
+    get:
+      summary: Generated M3U playlist (alias)
+      tags: [Output]
+      responses:
+        "200":
+          description: M3U playlist file
+          content:
+            audio/x-mpegurl:
+              schema:
+                type: string
+
+  /channels.m3u8:
+    get:
+      summary: Generated M3U8 playlist (mp4 extension URLs)
+      tags: [Output]
+      responses:
+        "200":
+          description: M3U8 playlist file
+          content:
+            application/vnd.apple.mpegurl:
+              schema:
+                type: string
 
   /output/epg:
     get:
@@ -236,36 +1700,660 @@ paths:
         "200":
           description: XMLTV EPG data
           content:
-            application/xml: {}
+            application/xml:
+              schema:
+                type: string
 
-  /hdhr/discover.json:
-    get:
-      summary: HDHomeRun device discovery
-      tags: [HDHomeRun]
-      responses:
-        "200":
-          description: Discovery response
-
-  /hdhr/lineup.json:
-    get:
-      summary: HDHomeRun channel lineup
-      tags: [HDHomeRun]
-      responses:
-        "200":
-          description: Channel lineup
-
-  /proxy/stream/{channelID}:
+  # ── Proxy ───────────────────────────────────────────────────────────
+  /channel/{channelID}:
     parameters:
       - name: channelID
         in: path
         required: true
-        schema: { type: integer }
+        schema:
+          type: string
+        description: Channel ID (UUID). May include a file extension like .ts or .mp4 which is stripped.
     get:
       summary: Proxy stream for channel
       tags: [Proxy]
+      parameters:
+        - name: profile
+          in: query
+          schema:
+            type: string
+          description: Stream profile name override
       responses:
         "200":
           description: Stream data
+          content:
+            video/mp2t: {}
+        "403":
+          description: Channel is disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    head:
+      summary: HEAD request for channel stream (returns content-type and DLNA headers)
+      tags: [Proxy]
+      parameters:
+        - name: profile
+          in: query
+          schema:
+            type: string
+          description: Stream profile name override
+      responses:
+        "200":
+          description: Stream headers
+
+  /stream/{streamID}:
+    parameters:
+      - name: streamID
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Stream ID (UUID). May include a file extension which is stripped.
+    get:
+      summary: Proxy raw stream directly
+      tags: [Proxy]
+      parameters:
+        - name: profile
+          in: query
+          schema:
+            type: string
+          description: Stream profile name override
+      responses:
+        "200":
+          description: Stream data
+          content:
+            video/mp2t: {}
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── VOD ─────────────────────────────────────────────────────────────
+  /stream/{streamID}/probe:
+    parameters:
+      - name: streamID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Probe a stream to determine if it is live or VOD
+      tags: [VOD]
+      responses:
+        "200":
+          description: Probe result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    enum: [live, vod]
+                  duration:
+                    type: number
+                    description: Duration in seconds (VOD only)
+                  width:
+                    type: integer
+                    description: Video width (VOD only)
+                  height:
+                    type: integer
+                    description: Video height (VOD only)
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /stream/{streamID}/vod:
+    parameters:
+      - name: streamID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Create VOD session from stream
+      tags: [VOD]
+      parameters:
+        - name: profile
+          in: query
+          schema:
+            type: string
+          description: Stream profile name
+        - name: audio
+          in: query
+          schema:
+            type: integer
+          description: Audio track index
+      responses:
+        "200":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                  duration:
+                    type: number
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /channel/{channelID}/vod:
+    parameters:
+      - name: channelID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Create VOD session from channel
+      tags: [VOD]
+      parameters:
+        - name: profile
+          in: query
+          schema:
+            type: string
+          description: Stream profile name
+        - name: audio
+          in: query
+          schema:
+            type: integer
+          description: Audio track index
+      responses:
+        "200":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                  duration:
+                    type: number
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /vod/{sessionID}/status:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get VOD session status
+      tags: [VOD]
+      responses:
+        "200":
+          description: Session status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  buffered:
+                    type: number
+                  duration:
+                    type: number
+                  ready:
+                    type: boolean
+                  error:
+                    type: string
+                  recording:
+                    type: boolean
+                  segments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SegmentInfo"
+                  audio_index:
+                    type: integer
+                  profile:
+                    type: string
+                  video:
+                    type: object
+                    description: Video info (if available)
+                  audio_tracks:
+                    type: array
+                    items:
+                      type: object
+                    description: Audio track info (if available)
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /vod/{sessionID}/seek:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Seek and stream from offset
+      tags: [VOD]
+      parameters:
+        - name: t
+          in: query
+          required: true
+          schema:
+            type: number
+          description: Time offset in seconds
+      responses:
+        "200":
+          description: Stream from offset
+          content:
+            video/mp4: {}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /vod/{sessionID}/stream:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Stream VOD session
+      tags: [VOD]
+      responses:
+        "200":
+          description: Video stream
+          content:
+            video/mp4: {}
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /vod/{sessionID}:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      summary: Delete VOD session
+      tags: [VOD]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Session deleted
+
+  /vod/{sessionID}/record:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Mark VOD session for recording (create segment)
+      tags: [VOD]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordRequest"
+      responses:
+        "200":
+          description: Recording started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  segment:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      start_offset:
+                        type: number
+                      end_offset:
+                        type: number
+                      status:
+                        type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Active segment already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /vod/{sessionID}/record/{segmentID}:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: segmentID
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      summary: Update recording segment offsets
+      tags: [VOD]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                start_offset:
+                  type: number
+                  nullable: true
+                end_offset:
+                  type: number
+                  nullable: true
+      responses:
+        "204":
+          description: Segment updated
+        "403":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete recording segment
+      tags: [VOD]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Segment deleted
+        "403":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /vod/{sessionID}/stop:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Stop recording on a VOD session
+      tags: [VOD]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: extract
+          in: query
+          schema:
+            type: string
+            enum: ["true"]
+          description: If "true", close and extract the segment immediately
+      responses:
+        "204":
+          description: Recording stopped
+        "403":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /vod/{sessionID}/cancel:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Cancel recording on a VOD session
+      tags: [VOD]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Recording cancelled
+        "403":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /channel/{channelID}/record:
+    parameters:
+      - name: channelID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Create a headless recording session for a channel
+      tags: [VOD]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordRequest"
+      responses:
+        "200":
+          description: Recording session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                  status:
+                    type: string
+                  segment:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      start_offset:
+                        type: number
+                      status:
+                        type: string
+
+  # ── HDHR Emulation (public) ─────────────────────────────────────────
+  /discover.json:
+    get:
+      summary: HDHomeRun device discovery
+      tags: [HDHR]
+      responses:
+        "200":
+          description: Discovery response
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: No HDHR device configured
+
+  /lineup_status.json:
+    get:
+      summary: HDHomeRun lineup status
+      tags: [HDHR]
+      responses:
+        "200":
+          description: Lineup status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ScanInProgress:
+                    type: integer
+                  ScanPossible:
+                    type: integer
+                  Source:
+                    type: string
+                  SourceList:
+                    type: array
+                    items:
+                      type: string
+
+  /lineup.json:
+    get:
+      summary: HDHomeRun channel lineup
+      tags: [HDHR]
+      responses:
+        "200":
+          description: Channel lineup
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /device.xml:
+    get:
+      summary: HDHomeRun device XML description
+      tags: [HDHR]
+      responses:
+        "200":
+          description: Device XML
+          content:
+            application/xml:
+              schema:
+                type: object
+        "404":
+          description: No HDHR device configured
+
+  /capability:
+    get:
+      summary: HDHomeRun capability (alias for device.xml)
+      tags: [HDHR]
+      responses:
+        "200":
+          description: Device XML
+          content:
+            application/xml:
+              schema:
+                type: object
+
+  # ── DLNA ────────────────────────────────────────────────────────────
+  /dlna/device.xml:
+    get:
+      summary: DLNA device description XML
+      tags: [DLNA]
+      responses:
+        "200":
+          description: Device description
+          content:
+            text/xml:
+              schema:
+                type: string
+        "404":
+          description: DLNA not enabled
+
+  /dlna/ContentDirectory.xml:
+    get:
+      summary: DLNA ContentDirectory service description
+      tags: [DLNA]
+      responses:
+        "200":
+          description: SCPD XML
+          content:
+            text/xml:
+              schema:
+                type: string
+        "404":
+          description: DLNA not enabled
+
+  /dlna/ConnectionManager.xml:
+    get:
+      summary: DLNA ConnectionManager service description
+      tags: [DLNA]
+      responses:
+        "200":
+          description: SCPD XML
+          content:
+            text/xml:
+              schema:
+                type: string
+        "404":
+          description: DLNA not enabled
+
+  /dlna/control/ContentDirectory:
+    post:
+      summary: DLNA ContentDirectory SOAP control
+      tags: [DLNA]
+      requestBody:
+        required: true
+        content:
+          text/xml:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: SOAP response
+          content:
+            text/xml:
+              schema:
+                type: string
+        "404":
+          description: DLNA not enabled
+
+  /dlna/control/ConnectionManager:
+    post:
+      summary: DLNA ConnectionManager SOAP control
+      tags: [DLNA]
+      requestBody:
+        required: true
+        content:
+          text/xml:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: SOAP response
+          content:
+            text/xml:
+              schema:
+                type: string
+        "404":
+          description: DLNA not enabled
+
+  # ── OpenAPI Spec ────────────────────────────────────────────────────
+  /api/openapi.yaml:
+    get:
+      summary: OpenAPI specification
+      tags: [Settings]
+      responses:
+        "200":
+          description: OpenAPI YAML spec
+          content:
+            application/x-yaml:
+              schema:
+                type: string
 
 components:
   securitySchemes:
@@ -278,39 +2366,896 @@ components:
       in: header
       name: X-API-Key
 
+  parameters:
+    id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Not authenticated
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
   schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        is_admin:
+          type: boolean
+        invite_token:
+          type: string
+          nullable: true
+        invite_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
     M3UAccount:
       type: object
       properties:
-        id: { type: integer }
-        name: { type: string }
-        url: { type: string }
-        type: { type: string, enum: [m3u, xtream] }
-        username: { type: string }
-        password: { type: string }
-        max_streams: { type: integer }
-        is_enabled: { type: boolean }
-        stream_count: { type: integer }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+        type:
+          type: string
+          enum: [m3u, xtream]
+        username:
+          type: string
+        password:
+          type: string
+        max_streams:
+          type: integer
+        is_enabled:
+          type: boolean
+        last_refreshed:
+          type: string
+          format: date-time
+          nullable: true
+        stream_count:
+          type: integer
+        refresh_interval:
+          type: integer
+          description: Seconds, 0 = use default
+        last_error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    M3UAccountInput:
+      type: object
+      required: [name, url]
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+        type:
+          type: string
+          enum: [m3u, xtream]
+        username:
+          type: string
+        password:
+          type: string
+        max_streams:
+          type: integer
+        is_enabled:
+          type: boolean
+        refresh_interval:
+          type: integer
+          description: Seconds, 0 = use default
+
+    Stream:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        m3u_account_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+        group:
+          type: string
+        logo:
+          type: string
+        tvg_id:
+          type: string
+        tvg_name:
+          type: string
+        content_hash:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    StreamSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        m3u_account_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        group:
+          type: string
+        logo:
+          type: string
 
     Channel:
       type: object
       properties:
-        id: { type: integer }
-        channel_number: { type: integer }
-        name: { type: string }
-        logo: { type: string }
-        tvg_id: { type: string }
-        channel_group_id: { type: integer, nullable: true }
-        is_enabled: { type: boolean }
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        logo_id:
+          type: string
+          format: uuid
+          nullable: true
+        logo:
+          type: string
+        logo_cached:
+          type: string
+        tvg_id:
+          type: string
+        channel_group_id:
+          type: string
+          format: uuid
+          nullable: true
+        stream_profile_id:
+          type: string
+          format: uuid
+          nullable: true
+        fail_count:
+          type: integer
+        is_enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ChannelInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        logo:
+          type: string
+          description: Logo URL (creates logo record if needed)
+        logo_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Existing logo ID
+        tvg_id:
+          type: string
+        channel_group_id:
+          type: string
+          format: uuid
+          nullable: true
+        stream_profile_id:
+          type: string
+          format: uuid
+          nullable: true
+        is_enabled:
+          type: boolean
+
+    ChannelStream:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+          format: uuid
+        stream_id:
+          type: string
+          format: uuid
+        priority:
+          type: integer
+
+    ChannelGroup:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        is_enabled:
+          type: boolean
+        sort_order:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ChannelGroupInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        is_enabled:
+          type: boolean
+        sort_order:
+          type: integer
+
+    Logo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+        cached_filename:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    StreamProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        stream_mode:
+          type: string
+          enum: [direct, proxy, ffmpeg]
+        source_type:
+          type: string
+          enum: [satip, m3u]
+        hwaccel:
+          type: string
+          enum: [none, qsv, nvenc, vaapi, videotoolbox]
+        video_codec:
+          type: string
+          enum: [copy, h264, h265, av1]
+        container:
+          type: string
+          enum: [mpegts, matroska, mp4, webm]
+        deinterlace:
+          type: boolean
+        fps_mode:
+          type: string
+          enum: [auto, cfr]
+        use_custom_args:
+          type: boolean
+        custom_args:
+          type: string
+        command:
+          type: string
+        args:
+          type: string
+        is_default:
+          type: boolean
+        is_system:
+          type: boolean
+        is_client:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    StreamProfileInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        stream_mode:
+          type: string
+          enum: [direct, proxy, ffmpeg]
+        source_type:
+          type: string
+          enum: [satip, m3u]
+        hwaccel:
+          type: string
+          enum: [none, qsv, nvenc, vaapi, videotoolbox]
+        video_codec:
+          type: string
+          enum: [copy, h264, h265, av1]
+        container:
+          type: string
+          enum: [mpegts, matroska, mp4, webm]
+        deinterlace:
+          type: boolean
+        fps_mode:
+          type: string
+          enum: [auto, cfr]
+        use_custom_args:
+          type: boolean
+        custom_args:
+          type: string
+        is_default:
+          type: boolean
 
     EPGSource:
       type: object
       properties:
-        id: { type: integer }
-        name: { type: string }
-        url: { type: string }
-        is_enabled: { type: boolean }
-        channel_count: { type: integer }
-        program_count: { type: integer }
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+        is_enabled:
+          type: boolean
+        last_refreshed:
+          type: string
+          format: date-time
+          nullable: true
+        channel_count:
+          type: integer
+        program_count:
+          type: integer
+        last_error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    EPGData:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        epg_source_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+        name:
+          type: string
+        icon:
+          type: string
+        programs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProgramData"
+          description: Only included when ?programs=true
+
+    ProgramData:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        epg_data_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        start:
+          type: string
+          format: date-time
+        stop:
+          type: string
+          format: date-time
+        category:
+          type: string
+        episode_num:
+          type: string
+        icon:
+          type: string
+        subtitle:
+          type: string
+        date:
+          type: string
+        language:
+          type: string
+        is_new:
+          type: boolean
+        is_previously_shown:
+          type: boolean
+        credits:
+          type: string
+        rating:
+          type: string
+        rating_icon:
+          type: string
+        star_rating:
+          type: string
+        sub_categories:
+          type: string
+        episode_num_system:
+          type: string
+
+    GuideProgram:
+      type: object
+      properties:
+        channel_id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        start:
+          type: string
+          format: date-time
+        stop:
+          type: string
+          format: date-time
+        category:
+          type: string
+
+    HDHRDevice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        device_id:
+          type: string
+        device_auth:
+          type: string
+        firmware_version:
+          type: string
+        tuner_count:
+          type: integer
+        port:
+          type: integer
+        channel_group_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        is_enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    HDHRDeviceInput:
+      type: object
+      required: [name, device_id]
+      properties:
+        name:
+          type: string
+        device_id:
+          type: string
+        device_auth:
+          type: string
+        firmware_version:
+          type: string
+        tuner_count:
+          type: integer
+        port:
+          type: integer
+          description: Auto-assigned if not provided
+        channel_group_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        is_enabled:
+          type: boolean
+
+    CoreSetting:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+
+    Client:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        priority:
+          type: integer
+        stream_profile_id:
+          type: string
+          format: uuid
+        is_enabled:
+          type: boolean
+        match_rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClientMatchRule"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ClientMatchRule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+          format: uuid
+        header_name:
+          type: string
+        match_type:
+          type: string
+          enum: [exists, contains, equals, prefix]
+        match_value:
+          type: string
+
+    ClientInput:
+      type: object
+      required: [name, match_rules]
+      properties:
+        name:
+          type: string
+        priority:
+          type: integer
+        is_enabled:
+          type: boolean
+        match_rules:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [header_name, match_type]
+            properties:
+              header_name:
+                type: string
+              match_type:
+                type: string
+                enum: [exists, contains, equals, prefix]
+              match_value:
+                type: string
+
+    ClientUpdateInput:
+      type: object
+      properties:
+        name:
+          type: string
+        priority:
+          type: integer
+          nullable: true
+        stream_profile_id:
+          type: string
+          format: uuid
+          nullable: true
+        is_enabled:
+          type: boolean
+          nullable: true
+        match_rules:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [header_name, match_type]
+            properties:
+              header_name:
+                type: string
+              match_type:
+                type: string
+                enum: [exists, contains, equals, prefix]
+              match_value:
+                type: string
+
+    ActiveViewer:
+      type: object
+      properties:
+        id:
+          type: string
+        channel_id:
+          type: string
+        channel_name:
+          type: string
+        stream_id:
+          type: string
+        stream_name:
+          type: string
+        m3u_account_id:
+          type: string
+        profile_name:
+          type: string
+        user_agent:
+          type: string
+        client_name:
+          type: string
+        remote_addr:
+          type: string
+        started_at:
+          type: string
+        last_active:
+          type: string
+        idle_secs:
+          type: number
+        type:
+          type: string
+
+    RefreshStatus:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [idle, refreshing, done, error]
+        message:
+          type: string
+
+    SegmentInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        start_offset:
+          type: number
+        end_offset:
+          type: number
+          nullable: true
+        status:
+          type: string
+        title:
+          type: string
+
+    RecordingInfo:
+      type: object
+      properties:
+        session_id:
+          type: string
+        channel_name:
+          type: string
+        program_title:
+          type: string
+        buffered_secs:
+          type: number
+        stop_at:
+          type: string
+        user_id:
+          type: string
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/SegmentInfo"
+
+    CompletedRecording:
+      type: object
+      properties:
+        filename:
+          type: string
+        size:
+          type: integer
+          format: int64
+        mod_time:
+          type: string
+        user_id:
+          type: string
+
+    RecordRequest:
+      type: object
+      properties:
+        program_title:
+          type: string
+        channel_name:
+          type: string
+        stop_at:
+          type: string
+          format: date-time
+          description: RFC3339 timestamp for when to stop recording
+        start_offset:
+          type: number
+        end_offset:
+          type: number
+
+    ScheduledRecording:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+          format: uuid
+        channel_name:
+          type: string
+        program_title:
+          type: string
+        start_at:
+          type: string
+          format: date-time
+        stop_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, recording, completed, failed, cancelled]
+        session_id:
+          type: string
+        segment_id:
+          type: string
+        file_path:
+          type: string
+        last_error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ExportData:
+      type: object
+      properties:
+        version:
+          type: integer
+        scope:
+          type: string
+          enum: [channels, full]
+        exported_at:
+          type: string
+          format: date-time
+        channel_groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChannelGroup"
+        channels:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              tvg_id:
+                type: string
+              group_name:
+                type: string
+              profile_name:
+                type: string
+              is_enabled:
+                type: boolean
+              stream_ids:
+                type: array
+                items:
+                  type: string
+        stream_profiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/StreamProfile"
+        clients:
+          type: array
+          items:
+            $ref: "#/components/schemas/Client"
+        settings:
+          type: array
+          items:
+            $ref: "#/components/schemas/CoreSetting"
+        users:
+          type: array
+          items:
+            type: object
+            properties:
+              username:
+                type: string
+              is_admin:
+                type: boolean
+        m3u_accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/M3UAccount"
+        epg_sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/EPGSource"
+
+    WireGuardConnectRequest:
+      type: object
+      required: [private_key, address, dns, peer_public_key, peer_endpoint]
+      properties:
+        private_key:
+          type: string
+          description: Base64-encoded WireGuard private key
+        address:
+          type: string
+          description: Interface address with CIDR (e.g. 10.20.30.40/24)
+        dns:
+          type: string
+          description: Comma-separated DNS addresses
+        peer_public_key:
+          type: string
+          description: Base64-encoded peer public key
+        peer_endpoint:
+          type: string
+          description: Peer endpoint (host:port)
+        route_hosts:
+          type: string
+          description: Comma-separated hostnames to route through the tunnel

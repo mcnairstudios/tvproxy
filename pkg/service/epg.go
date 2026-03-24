@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -22,6 +23,9 @@ type EPGService struct {
 	config        *config.Config
 	httpClient    *http.Client
 	log           zerolog.Logger
+
+	statusMu sync.RWMutex
+	statuses map[string]RefreshStatus
 }
 
 func NewEPGService(
@@ -40,6 +44,7 @@ func NewEPGService(
 		config:        cfg,
 		httpClient:    httpClient,
 		log:           log.With().Str("service", "epg").Logger(),
+		statuses:      make(map[string]RefreshStatus),
 	}
 }
 
@@ -98,18 +103,35 @@ func (s *EPGService) DeleteSource(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *EPGService) setStatus(id string, st RefreshStatus) {
+	s.statusMu.Lock()
+	s.statuses[id] = st
+	s.statusMu.Unlock()
+}
+
+func (s *EPGService) GetStatus(id string) RefreshStatus {
+	s.statusMu.RLock()
+	st := s.statuses[id]
+	s.statusMu.RUnlock()
+	return st
+}
+
 func (s *EPGService) RefreshSource(ctx context.Context, sourceID string) error {
 	source, err := s.epgSourceRepo.GetByID(ctx, sourceID)
 	if err != nil {
 		return fmt.Errorf("getting source: %w", err)
 	}
 
+	s.setStatus(sourceID, RefreshStatus{State: "running", Message: "Refreshing..."})
+
 	if err := s.refreshSource(ctx, source); err != nil {
 		s.epgSourceRepo.UpdateLastError(ctx, source.ID, err.Error())
+		s.setStatus(sourceID, RefreshStatus{State: "error", Message: err.Error()})
 		return err
 	}
 
 	s.epgSourceRepo.UpdateLastError(ctx, source.ID, "")
+	s.setStatus(sourceID, RefreshStatus{State: "done", Message: "Refresh complete"})
 	return nil
 }
 

@@ -151,6 +151,24 @@ func (r *ChannelRepository) DeleteForUser(ctx context.Context, id, userID string
 	return nil
 }
 
+func (r *ChannelRepository) GetByIDLite(ctx context.Context, id string) (*models.Channel, error) {
+	c := &models.Channel{}
+	var profileID sql.NullString
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, name, is_enabled, stream_profile_id FROM channels WHERE id = ?`, id,
+	).Scan(&c.ID, &c.Name, &c.IsEnabled, &profileID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("channel not found: %w", err)
+		}
+		return nil, fmt.Errorf("getting channel by id (lite): %w", err)
+	}
+	if profileID.Valid {
+		c.StreamProfileID = &profileID.String
+	}
+	return c, nil
+}
+
 func (r *ChannelRepository) AssignStreams(ctx context.Context, channelID string, streamIDs []string, priorities []int) error {
 	if len(streamIDs) != len(priorities) {
 		return fmt.Errorf("streamIDs and priorities must have the same length")

@@ -208,15 +208,7 @@ func (w *HDHRDiscoverWorker) handleDiscoverRequest(ctx context.Context, conn *ne
 		reply := w.buildDiscoverReply(deviceID, device.TunerCount, device.DeviceAuth, deviceBaseURL)
 		if _, err := conn.WriteToUDP(reply, remoteAddr); err != nil {
 			w.log.Warn().Err(err).Str("remote", remoteAddr.String()).Msg("failed to send discover reply")
-		} else {
-			w.log.Debug().
-				Str("remote", remoteAddr.String()).
-				Str("device", device.Name).
-				Str("device_id", device.DeviceID).
-				Int("port", device.Port).
-				Msg("responded to HDHomeRun discover request")
 		}
-		// Respond for ALL matching enabled devices (not just first)
 	}
 }
 

@@ -41,6 +41,7 @@ type EPGReader interface {
 	ListNowPlaying(ctx context.Context, now time.Time) (map[string]string, error)
 	ListForGuide(ctx context.Context, start, end time.Time) ([]models.GuideProgram, error)
 	ListPrograms(ctx context.Context, epgDataID string) ([]models.ProgramData, error)
+	ListProgramsByEPGDataIDs(ctx context.Context, ids []string) (map[string][]models.ProgramData, error)
 }
 
 type EPGWriter interface {

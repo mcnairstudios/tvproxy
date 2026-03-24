@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -262,7 +261,7 @@ func (h *VODHandler) MarkRecording(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req recordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -313,7 +312,7 @@ func (h *VODHandler) CreateRecording(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req recordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -469,7 +468,7 @@ func (h *VODHandler) UpdateSegment(w http.ResponseWriter, r *http.Request) {
 		StartOffset *float64 `json:"start_offset"`
 		EndOffset   *float64 `json:"end_offset"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

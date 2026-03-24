@@ -388,6 +388,8 @@
     return true;
   }
 
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
   function h(tag, attrs, ...children) {
     const el = document.createElement(tag);
     if (attrs) {
@@ -710,8 +712,6 @@
       var totalWidth = windowMinutes * PX_PER_MIN;
       var programs = guideData.programs || {};
       var now = Date.now();
-
-      function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
       function formatTime(d) {
         var dt = new Date(d);
@@ -1061,11 +1061,9 @@
 
       let searchTerm = '';
       let searchTimer = null;
-      const rendered = Object.create(null); // tracks which groups have had their table built
+      const rendered = Object.create(null);
 
-      function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-
-      const summaryEl = h('h3', null, '');
+      const summaryEl = h('h3', null, 'Loading streams...');
       const groupsContainer = h('div', null);
 
       const searchInput = h('input', {
@@ -1089,9 +1087,7 @@
         rendered[gIdx] = true;
         let streams = groups[sortedGroups[gIdx]];
         if (searchTerm) {
-          if (!matchesSearch(groupSearch[gIdx], searchTerm)) {
-            streams = streams.filter(function(s) { return matchesSearch(s.name.toLowerCase(), searchTerm); });
-          }
+          streams = streams.filter(function(s) { return matchesSearch(s.name.toLowerCase(), searchTerm); });
         }
         const tableEl = document.createElement('table');
         tableEl.className = 'stream-group-table';
@@ -1134,11 +1130,8 @@
         for (let i = 0; i < sortedGroups.length; i++) {
           let streams = groups[sortedGroups[i]];
           if (searchTerm) {
-            if (matchesSearch(groupSearch[i], searchTerm)) {
-            } else {
-              streams = streams.filter(function(s) { return matchesSearch(s.name.toLowerCase(), searchTerm); });
-              if (streams.length === 0) continue;
-            }
+            streams = streams.filter(function(s) { return matchesSearch(s.name.toLowerCase(), searchTerm); });
+            if (streams.length === 0) continue;
           }
           filteredGroups[i] = streams;
           totalVisible += streams.length;
@@ -1169,6 +1162,35 @@
       ));
 
       renderGroups();
+
+      var cacheListener = DataCache.onChange(function() {
+        if (state.currentPage !== 'streams-' + accountId) {
+          DataCache.offChange(cacheListener);
+          return;
+        }
+        var cached = streamsCache._data;
+        if (!cached) return;
+        var allStreams = cached.filter(function(s) { return s.m3u_account_id === accountId; });
+        groups = Object.create(null);
+        for (var i = 0; i < allStreams.length; i++) {
+          var g = allStreams[i].group || '';
+          if (!groups[g]) groups[g] = [];
+          groups[g].push(allStreams[i]);
+        }
+        sortedGroups = Object.keys(groups).sort(function(a, b) {
+          if (!a) return 1;
+          if (!b) return -1;
+          return a.localeCompare(b);
+        });
+        groupDisplay = new Array(sortedGroups.length);
+        groupSearch = new Array(sortedGroups.length);
+        for (var i = 0; i < sortedGroups.length; i++) {
+          groupDisplay[i] = sortedGroups[i] || '(No Group)';
+          groupSearch[i] = groupDisplay[i].toLowerCase();
+        }
+        streamGroupsCache[accountId] = { groups: groups, sortedGroups: sortedGroups, groupDisplay: groupDisplay, groupSearch: groupSearch };
+        renderGroups();
+      });
     };
   }
 
@@ -1484,7 +1506,7 @@
           actionsTd.appendChild(editBtn);
         }
         if (config.rowActions) {
-          const actions = config.rowActions(item, reloadData);
+          const actions = config.rowActions(item, reloadData, openForm);
           for (let a = 0; a < actions.length; a++) {
             const btn = document.createElement('button');
             if (actions[a].icon) {
@@ -1917,8 +1939,8 @@
       const reloadHandler = () => { if (container.isConnected) reloadData(); else document.removeEventListener('tvproxy-reload-page', reloadHandler); };
       document.addEventListener('tvproxy-reload-page', reloadHandler);
 
-      function openForm(item) {
-        const isEdit = item !== null;
+      function openForm(item, isDuplicate) {
+        const isEdit = item !== null && !isDuplicate;
         const formEl = h('div');
         const fields = config.fields || [];
         const inputs = {};
@@ -3470,7 +3492,19 @@
               for (var k in streamGroupsCache) delete streamGroupsCache[k];
               rebuildStreamNav();
               toast.success('Refresh started for ' + item.name);
-              setTimeout(reload, 2000);
+              var pollCount = 0;
+              var pollTimer = setInterval(async () => {
+                try {
+                  var status = await api.get('/api/m3u/accounts/' + item.id + '/status');
+                  if (status.state === 'done' || status.state === 'error') {
+                    clearInterval(pollTimer);
+                    reload();
+                    if (status.state === 'done') toast.success(item.name + ': ' + status.message);
+                    else toast.error(item.name + ': ' + status.message);
+                  }
+                } catch (e) {}
+                if (++pollCount > 60) clearInterval(pollTimer);
+              }, 2000);
             } catch (err) {
               toast.error(err.message);
             }
@@ -3579,8 +3613,19 @@
         },
         { key: 'is_enabled', label: 'Enabled', type: 'checkbox', default: true },
       ],
-      rowActions: (item) => [
+      rowActions: (item, reload, openFormFn) => [
         { label: 'Play', icon: '\u25B6', handler: () => playChannelWithDVR(item.id, item.name, item.tvg_id || undefined) },
+        { label: 'Duplicate', icon: '\u2398', handler: () => {
+          var dup = {};
+          for (var k in item) dup[k] = item[k];
+          dup.name = item.name + ' (copy)';
+          delete dup.id;
+          delete dup.created_at;
+          delete dup.updated_at;
+          delete dup.fail_count;
+          delete dup._now_playing;
+          openFormFn(dup, true);
+        }},
       ],
       postFormSetup: (inputs, isEdit, item) => {
         if (isEdit && inputs._stream && item.id) {
@@ -3702,7 +3747,19 @@
                 epgCache.invalidate();
                 channelsCache.invalidate();
                 toast.success('EPG refresh started for ' + item.name);
-                setTimeout(reload, 2000);
+                var pollCount = 0;
+                var pollTimer = setInterval(async () => {
+                  try {
+                    var status = await api.get('/api/epg/sources/' + item.id + '/status');
+                    if (status.state === 'done' || status.state === 'error') {
+                      clearInterval(pollTimer);
+                      reload();
+                      if (status.state === 'done') toast.success(item.name + ': ' + status.message);
+                      else toast.error(item.name + ': ' + status.message);
+                    }
+                  } catch (e) {}
+                  if (++pollCount > 60) clearInterval(pollTimer);
+                }, 2000);
               } catch (err) {
                 toast.error(err.message);
               }
@@ -4371,6 +4428,72 @@
           }
         }}, 'Hard Reset');
 
+        var exportChannelsBtn = h('button', { className: 'btn btn-secondary', onClick: async () => {
+          exportChannelsBtn.disabled = true;
+          try {
+            var resp = await fetch('/api/settings/export?scope=channels', { headers: { 'Authorization': 'Bearer ' + state.accessToken } });
+            var blob = await resp.blob();
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'tvproxy-channels.json';
+            a.click();
+            URL.revokeObjectURL(a.href);
+          } catch (err) { toast.error(err.message); }
+          exportChannelsBtn.disabled = false;
+        }}, 'Export Channels');
+
+        var exportFullBtn = h('button', { className: 'btn btn-secondary', style: 'margin-left: 8px', onClick: async () => {
+          exportFullBtn.disabled = true;
+          try {
+            var resp = await fetch('/api/settings/export?scope=full', { headers: { 'Authorization': 'Bearer ' + state.accessToken } });
+            var blob = await resp.blob();
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'tvproxy-full.json';
+            a.click();
+            URL.revokeObjectURL(a.href);
+          } catch (err) { toast.error(err.message); }
+          exportFullBtn.disabled = false;
+        }}, 'Export Full');
+
+        var importFileInput = h('input', { type: 'file', accept: '.json', style: 'display:none' });
+        importFileInput.addEventListener('change', async () => {
+          var file = importFileInput.files[0];
+          if (!file) return;
+          try {
+            var text = await file.text();
+            var data = JSON.parse(text);
+            var summary = [];
+            if (data.channels) summary.push(data.channels.length + ' channels');
+            if (data.channel_groups) summary.push(data.channel_groups.length + ' groups');
+            if (data.stream_profiles) summary.push(data.stream_profiles.length + ' profiles');
+            if (data.m3u_accounts) summary.push(data.m3u_accounts.length + ' accounts');
+            if (data.epg_sources) summary.push(data.epg_sources.length + ' EPG sources');
+            if (data.settings) summary.push(data.settings.length + ' settings');
+            if (!confirm('Import ' + (summary.join(', ') || 'data') + '?\n\nExisting items with the same name will be skipped.')) {
+              importFileInput.value = '';
+              return;
+            }
+            var result = await api.post('/api/settings/import', data);
+            toast.success('Import complete: ' + (result.imported || 0) + ' items imported');
+            channelsCache.invalidate();
+            channelGroupsCache.invalidate();
+            streamsCache.invalidate();
+            navigate('settings');
+          } catch (err) { toast.error('Import failed: ' + err.message); }
+          importFileInput.value = '';
+        });
+        var importBtn = h('button', { className: 'btn btn-primary', style: 'margin-left: 8px', onClick: () => importFileInput.click() }, 'Import');
+
+        container.appendChild(h('div', { className: 'table-container', style: 'margin-top: 24px' },
+          h('div', { className: 'table-header' }, h('h3', null, 'Import / Export')),
+          h('div', { style: 'padding: 16px' },
+            h('p', { style: 'color: var(--text-muted); margin-bottom: 16px' },
+              'Export your configuration as JSON. "Channels" exports channels, groups, and stream assignments. "Full" includes everything (profiles, clients, settings, accounts, EPG sources). Import merges with existing data — duplicates are skipped.'),
+            h('div', null, exportChannelsBtn, exportFullBtn, importBtn, importFileInput),
+          ),
+        ));
+
         container.appendChild(h('div', { className: 'table-container', style: 'margin-top: 24px' },
           h('div', { className: 'table-header' }, h('h3', null, 'Database Management')),
           h('div', { style: 'padding: 16px' },
@@ -4941,6 +5064,29 @@
       channelGroupsCache.getAll();
     }
   }
+
+  document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      var searchEl = document.querySelector('.table-header input[type="text"]');
+      if (searchEl) { searchEl.focus(); searchEl.select(); }
+      return;
+    }
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      var active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
+      e.preventDefault();
+      var searchEl = document.querySelector('.table-header input[type="text"]');
+      if (searchEl) { searchEl.focus(); searchEl.select(); }
+      return;
+    }
+    if (e.key === 'Escape') {
+      var overlay = document.querySelector('.modal-overlay');
+      if (overlay) { overlay.remove(); return; }
+      var active = document.activeElement;
+      if (active && active.tagName === 'INPUT') { active.value = ''; active.dispatchEvent(new Event('input')); active.blur(); }
+    }
+  });
 
   // Test exports
   if (typeof window !== 'undefined') {

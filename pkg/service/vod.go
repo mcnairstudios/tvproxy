@@ -455,32 +455,33 @@ func (s *VODService) probeLocalFile(session *VODSession) {
 	ctx, cancel := context.WithTimeout(session.ctx, probeDur)
 	defer cancel()
 
-	probe, err := ffmpeg.Probe(ctx, session.FilePath, "")
-	if err != nil {
-		return
-	}
+	localProbe, _ := ffmpeg.Probe(ctx, session.FilePath, "")
 
-	if !probe.IsVOD {
-		upstreamProbe, err := s.ffmpegMgr.ProbeURL(ctx, session.StreamURL)
-		if err == nil && upstreamProbe.IsVOD {
-			probe.Duration = upstreamProbe.Duration
-			probe.IsVOD = true
-		}
-	}
+	upstreamProbe, upstreamErr := s.ffmpegMgr.ProbeURL(ctx, session.StreamURL)
 
 	session.mu.Lock()
-	if probe.IsVOD {
-		session.Duration = probe.Duration
+	if upstreamErr == nil && upstreamProbe.IsVOD {
+		session.Duration = upstreamProbe.Duration
 	}
-	if probe.Video != nil {
-		session.Video = probe.Video
+	if localProbe != nil && localProbe.Video != nil {
+		session.Video = localProbe.Video
+	} else if upstreamErr == nil && upstreamProbe.Video != nil {
+		session.Video = upstreamProbe.Video
 	}
-	if len(probe.AudioTracks) > 0 {
-		session.AudioTracks = probe.AudioTracks
+	if upstreamErr == nil && len(upstreamProbe.AudioTracks) > 0 {
+		session.AudioTracks = upstreamProbe.AudioTracks
+	} else if localProbe != nil && len(localProbe.AudioTracks) > 0 {
+		session.AudioTracks = localProbe.AudioTracks
 	}
 	session.mu.Unlock()
 
-	s.log.Info().Str("session_id", session.ID).Float64("duration", probe.Duration).Int("audio_tracks", len(probe.AudioTracks)).Msg("probe complete")
+	var dur float64
+	var tracks int
+	if upstreamErr == nil {
+		dur = upstreamProbe.Duration
+		tracks = len(upstreamProbe.AudioTracks)
+	}
+	s.log.Info().Str("session_id", session.ID).Float64("duration", dur).Int("audio_tracks", tracks).Msg("probe complete")
 }
 
 func (s *VODService) StreamSeek(ctx context.Context, session *VODSession, offsetSecs float64) (io.ReadCloser, error) {
@@ -554,7 +555,10 @@ func (s *VODService) StreamFile(ctx context.Context, session *VODSession) (io.Re
 		}
 	}
 	if f == nil {
-		return nil, fmt.Errorf("timed out waiting for VOD file")
+		if procErr := s.ffmpegMgr.GetError(session.ProcessID); procErr != nil {
+			return nil, fmt.Errorf("ffmpeg failed: %w", procErr)
+		}
+		return nil, fmt.Errorf("timed out waiting for VOD file after %d retries", retryCount)
 	}
 
 	isLive := session.Duration == 0

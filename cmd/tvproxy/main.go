@@ -71,13 +71,18 @@ func main() {
 	}
 
 	streamStore := store.NewStreamStore(filepath.Join(dataDir, "streams.gob"), log)
-	if err := streamStore.Load(); err != nil {
-		log.Fatal().Err(err).Msg("failed to load stream store")
-	}
-
 	epgStore := store.NewEPGStore(filepath.Join(dataDir, "epg.gob"), log)
-	if err := epgStore.Load(); err != nil {
-		log.Fatal().Err(err).Msg("failed to load epg store")
+	{
+		streamErr := make(chan error, 1)
+		epgErr := make(chan error, 1)
+		go func() { streamErr <- streamStore.Load() }()
+		go func() { epgErr <- epgStore.Load() }()
+		if err := <-streamErr; err != nil {
+			log.Fatal().Err(err).Msg("failed to load stream store")
+		}
+		if err := <-epgErr; err != nil {
+			log.Fatal().Err(err).Msg("failed to load epg store")
+		}
 	}
 
 	userRepo := repository.NewUserRepository(db)
@@ -151,12 +156,13 @@ func main() {
 	streamProfileHandler := handler.NewStreamProfileHandler(streamProfileRepo)
 	epgSourceHandler := handler.NewEPGSourceHandler(epgService)
 	epgDataHandler := handler.NewEPGDataHandler(epgStore)
-	hdhrHandler := handler.NewHDHRHandler(hdhrService, hdhrDeviceRepo, proxyService, cfg)
+	hdhrHandler := handler.NewHDHRHandler(hdhrService, proxyService, cfg)
 	outputHandler := handler.NewOutputHandler(outputService)
 	proxyHandler := handler.NewProxyHandler(proxyService, settingsService, log)
 	vodHandler := handler.NewVODHandler(vodService, log)
 	activityHandler := handler.NewActivityHandler(activityService)
-	settingsHandler := handler.NewSettingsHandler(settingsService, db, authService, streamStore, epgStore)
+	exportService := service.NewExportService(channelRepo, channelGroupRepo, streamProfileRepo, clientRepo, m3uAccountRepo, epgSourceRepo, settingsService, authService)
+	settingsHandler := handler.NewSettingsHandler(settingsService, exportService, db, authService, streamStore, epgStore)
 	clientHandler := handler.NewClientHandler(clientService)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerService, log)
 	dlnaHandler := handler.NewDLNAHandler(dlnaService, authService, settingsService, cfg, log)
@@ -167,14 +173,24 @@ func main() {
 	r.Use(chimw.RealIP)
 	r.Use(middleware.RequestLogger(log, settingsService.IsDebug))
 	r.Use(middleware.Recovery(log))
-	r.Use(cors.Handler(cors.Options{
+	corsMiddleware := cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-API-Key"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,
 		MaxAge:           300,
-	}))
+	})
+	r.Use(func(next http.Handler) http.Handler {
+		withCORS := corsMiddleware(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if strings.HasPrefix(req.URL.Path, "/api/") {
+				withCORS.ServeHTTP(w, req)
+				return
+			}
+			next.ServeHTTP(w, req)
+		})
+	})
 	bodyLimit := cfg.Settings.Server.RequestBodyLimitBytes
 	if bodyLimit <= 0 {
 		bodyLimit = 1 << 20
@@ -189,6 +205,7 @@ func main() {
 	})
 
 	r.Get("/api/openapi.yaml", openapi.SpecHandler())
+	r.Get("/api/docs", openapi.SwaggerUIHandler("/api/openapi.yaml"))
 
 	r.Post("/api/auth/login", authHandler.Login)
 	r.Post("/api/auth/refresh", authHandler.Refresh)
@@ -249,6 +266,7 @@ func main() {
 		r.Route("/api/m3u/accounts", func(r chi.Router) {
 			r.Get("/", m3uAccountHandler.List)
 			r.Get("/{id}", m3uAccountHandler.Get)
+			r.Get("/{id}/status", m3uAccountHandler.RefreshStatus)
 			r.Group(func(r chi.Router) {
 				r.Use(authMW.RequireAdmin)
 				r.Post("/", m3uAccountHandler.Create)
@@ -308,6 +326,7 @@ func main() {
 		r.Route("/api/epg", func(r chi.Router) {
 			r.Get("/sources", epgSourceHandler.List)
 			r.Get("/sources/{id}", epgSourceHandler.Get)
+			r.Get("/sources/{id}/status", epgSourceHandler.RefreshStatus)
 			r.Get("/data", epgDataHandler.List)
 			r.Get("/now", epgDataHandler.NowPlaying)
 			r.Get("/guide", epgDataHandler.Guide)
@@ -333,6 +352,8 @@ func main() {
 			r.Use(authMW.RequireAdmin)
 			r.Get("/", settingsHandler.List)
 			r.Put("/", settingsHandler.Update)
+			r.Get("/export", settingsHandler.Export)
+			r.Post("/import", settingsHandler.Import)
 			r.Post("/soft-reset", settingsHandler.SoftReset)
 			r.Post("/hard-reset", settingsHandler.HardReset)
 		})
@@ -372,7 +393,11 @@ func main() {
 	})
 
 	staticRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "static")
-	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir(staticRoot))))
+	staticFileServer := http.FileServer(http.Dir(staticRoot))
+	r.Handle("/static/*", http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		staticFileServer.ServeHTTP(w, req)
+	})))
 
 	distFS, err := fs.Sub(web.Assets, "dist")
 	if err != nil {
@@ -391,6 +416,11 @@ func main() {
 		path := strings.TrimPrefix(req.URL.Path, "/")
 		if f, err := distFS.Open(path); err == nil {
 			f.Close()
+			if req.URL.RawQuery != "" && strings.Contains(req.URL.RawQuery, "v=") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				w.Header().Set("Cache-Control", "public, max-age=3600")
+			}
 			fileServer.ServeHTTP(w, req)
 			return
 		}

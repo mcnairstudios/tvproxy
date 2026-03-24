@@ -171,6 +171,26 @@ func (s *EPGStoreImpl) ListPrograms(_ context.Context, epgDataID string) ([]mode
 	return result, nil
 }
 
+func (s *EPGStoreImpl) ListProgramsByEPGDataIDs(_ context.Context, ids []string) (map[string][]models.ProgramData, error) {
+	s.mu.RLock()
+	result := make(map[string][]models.ProgramData, len(ids))
+	for _, epgID := range ids {
+		pids := s.programsByEPGID[epgID]
+		progs := make([]models.ProgramData, 0, len(pids))
+		for _, pid := range pids {
+			if p, ok := s.programs[pid]; ok {
+				progs = append(progs, p)
+			}
+		}
+		sort.Slice(progs, func(i, j int) bool {
+			return progs[i].Start.Before(progs[j].Start)
+		})
+		result[epgID] = progs
+	}
+	s.mu.RUnlock()
+	return result, nil
+}
+
 func (s *EPGStoreImpl) BulkCreateEPGData(_ context.Context, data []models.EPGData) error {
 	for i := range data {
 		if data[i].ID == "" {

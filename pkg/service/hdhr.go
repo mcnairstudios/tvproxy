@@ -72,6 +72,21 @@ func NewHDHRService(
 	}
 }
 
+func (s *HDHRService) NextAvailablePort(ctx context.Context) (int, error) {
+	port, err := s.hdhrDeviceRepo.NextAvailablePort(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("getting next available port: %w", err)
+	}
+	return port, nil
+}
+
+func (s *HDHRService) SetChannelGroups(ctx context.Context, deviceID string, groupIDs []string) error {
+	if err := s.hdhrDeviceRepo.SetChannelGroups(ctx, deviceID, groupIDs); err != nil {
+		return fmt.Errorf("setting channel groups: %w", err)
+	}
+	return nil
+}
+
 func (s *HDHRService) CreateDevice(ctx context.Context, device *models.HDHRDevice) error {
 	if err := s.hdhrDeviceRepo.Create(ctx, device); err != nil {
 		return fmt.Errorf("creating hdhr device: %w", err)

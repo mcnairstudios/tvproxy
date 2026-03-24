@@ -49,12 +49,21 @@ func (h *EPGDataHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ids := make([]string, len(data))
+	for i, d := range data {
+		ids[i] = d.ID
+	}
+	allPrograms, progErr := h.epgStore.ListProgramsByEPGDataIDs(r.Context(), ids)
+	if progErr != nil {
+		respondError(w, http.StatusInternalServerError, "failed to list program data")
+		return
+	}
+
 	results := make([]epgDataWithPrograms, 0, len(data))
 	for _, d := range data {
-		programs, progErr := h.epgStore.ListPrograms(r.Context(), d.ID)
-		if progErr != nil {
-			respondError(w, http.StatusInternalServerError, "failed to list program data")
-			return
+		progs := allPrograms[d.ID]
+		if progs == nil {
+			progs = []models.ProgramData{}
 		}
 		results = append(results, epgDataWithPrograms{
 			ID:          d.ID,
@@ -62,7 +71,7 @@ func (h *EPGDataHandler) List(w http.ResponseWriter, r *http.Request) {
 			ChannelID:   d.ChannelID,
 			Name:        d.Name,
 			Icon:        d.Icon,
-			Programs:    programs,
+			Programs:    progs,
 		})
 	}
 	respondJSON(w, http.StatusOK, results)
