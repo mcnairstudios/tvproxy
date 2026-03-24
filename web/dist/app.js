@@ -1234,7 +1234,7 @@
       }
       const el = h('div', {
         className: 'nav-item' + (state.currentPage === item.id ? ' active' : ''),
-        onClick: () => navigate(item.id),
+        onClick: () => { mobileNav.close(); navigate(item.id); },
       },
         h('span', { className: 'icon' }, item.icon),
         item.label,
@@ -2530,9 +2530,9 @@
     }
 
     const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:' + (window.innerWidth <= 768 ? 'flex-start' : 'center') + ';justify-content:center;' + (window.innerWidth <= 768 ? 'padding-top:env(safe-area-inset-top);' : '');
     const modal = document.createElement('div');
-    modal.style.cssText = 'background:var(--bg-card);border-radius:8px;padding:16px;max-width:800px;width:90%;position:relative;';
+    modal.style.cssText = 'background:var(--bg-card);border-radius:8px;padding:' + (window.innerWidth <= 768 ? '10px' : '16px') + ';max-width:800px;width:' + (window.innerWidth <= 768 ? '100%' : '90%') + ';position:relative;max-height:95vh;overflow-y:auto;' + (window.innerWidth <= 768 ? 'border-radius:0;margin:0;' : '');
 
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
@@ -2690,7 +2690,7 @@
     const videoWrap = document.createElement('div');
     videoWrap.style.cssText = 'position:relative;background:#000;border-radius:4px;overflow:hidden;';
     const video = document.createElement('video');
-    video.style.cssText = 'width:100%;max-height:450px;display:block;';
+    video.style.cssText = 'width:100%;max-height:' + (window.innerWidth <= 768 ? '35vh' : '450px') + ';display:block;';
     video.autoplay = true;
     video.volume = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
     video.addEventListener('volumechange', () => localStorage.setItem('tvproxy_volume', video.volume));
@@ -2779,7 +2779,7 @@
     const volSlider = document.createElement('input');
     volSlider.type = 'range'; volSlider.min = '0'; volSlider.max = '1'; volSlider.step = '0.05';
     volSlider.value = video.volume;
-    volSlider.style.cssText = 'width:60px;height:4px;accent-color:var(--accent);';
+    volSlider.style.cssText = 'width:' + (window.innerWidth <= 768 ? '80px' : '60px') + ';height:' + (window.innerWidth <= 768 ? '6px' : '4px') + ';accent-color:var(--accent);';
     volSlider.oninput = () => {
       video.volume = parseFloat(volSlider.value);
       volIcon.textContent = video.volume > 0 ? '\u{1F50A}' : '\u{1F507}';
@@ -2801,7 +2801,7 @@
         video.style.maxHeight = '100vh';
         videoWrap.style.borderRadius = '0';
       } else {
-        video.style.maxHeight = '450px';
+        video.style.maxHeight = window.innerWidth <= 768 ? '35vh' : '450px';
         videoWrap.style.borderRadius = '4px';
       }
     }
@@ -3485,6 +3485,7 @@
       rowActions: (item, reload) => [
         {
           label: 'Refresh',
+          icon: '\u21BB',
           handler: async () => {
             try {
               await api.post('/api/m3u/accounts/' + item.id + '/refresh');
@@ -3741,6 +3742,7 @@
         rowActions: isAdmin ? (item, reload) => [
           {
             label: 'Refresh',
+            icon: '\u21BB',
             handler: async () => {
               try {
                 await api.post('/api/epg/sources/' + item.id + '/refresh');
@@ -4920,7 +4922,7 @@
           return;
         }
 
-        var grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:16px' });
+        var grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(min(380px,100%),1fr));gap:16px' });
         viewers.forEach(function(v) {
           var isRecording = v.type === 'recording';
           var cardBorder = isRecording ? 'border-left:3px solid var(--danger);' : '';
@@ -5004,6 +5006,79 @@
     },
   };
 
+  var mobileNav = {
+    _sidebar: null,
+    _overlay: null,
+    _open: false,
+    _touchStartX: 0,
+    _touchStartY: 0,
+    _touchStartTime: 0,
+    _swiping: false,
+
+    open: function() {
+      if (!mobileNav._sidebar) return;
+      mobileNav._open = true;
+      mobileNav._sidebar.classList.add('open');
+      mobileNav._overlay.classList.add('open');
+      document.body.style.overflow = 'hidden';
+    },
+
+    close: function() {
+      if (!mobileNav._sidebar) return;
+      mobileNav._open = false;
+      mobileNav._sidebar.classList.remove('open');
+      mobileNav._overlay.classList.remove('open');
+      document.body.style.overflow = '';
+    },
+
+    toggle: function() {
+      if (mobileNav._open) mobileNav.close();
+      else mobileNav.open();
+    },
+
+    isMobile: function() {
+      return window.innerWidth <= 768;
+    },
+  };
+
+  window.addEventListener('resize', function() {
+    if (!mobileNav.isMobile() && mobileNav._open) {
+      mobileNav.close();
+    }
+  });
+
+  document.addEventListener('touchstart', function(e) {
+    if (!mobileNav.isMobile()) return;
+    var touch = e.touches[0];
+    mobileNav._touchStartX = touch.clientX;
+    mobileNav._touchStartY = touch.clientY;
+    mobileNav._touchStartTime = Date.now();
+    mobileNav._swiping = false;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', function(e) {
+    if (!mobileNav.isMobile()) return;
+    var touch = e.touches[0];
+    var dx = touch.clientX - mobileNav._touchStartX;
+    var dy = touch.clientY - mobileNav._touchStartY;
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
+      mobileNav._swiping = true;
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchend', function(e) {
+    if (!mobileNav.isMobile() || !mobileNav._swiping) return;
+    var touch = e.changedTouches[0];
+    var dx = touch.clientX - mobileNav._touchStartX;
+    var elapsed = Date.now() - mobileNav._touchStartTime;
+    if (elapsed > 500) return;
+    if (!mobileNav._open && dx > 60 && mobileNav._touchStartX < 40) {
+      mobileNav.open();
+    } else if (mobileNav._open && dx < -60) {
+      mobileNav.close();
+    }
+  }, { passive: true });
+
   function render() {
     if (!auth.isLoggedIn()) {
       if (state.currentPage === 'invite') {
@@ -5026,11 +5101,25 @@
     const pageTitle = navItems.find(n => n.id === state.currentPage);
     const contentArea = h('div', { className: 'page-content' });
 
+    var sidebar = renderSidebar();
+    var overlay = h('div', { className: 'sidebar-overlay', onClick: function() { mobileNav.close(); } });
+    mobileNav._sidebar = sidebar;
+    mobileNav._overlay = overlay;
+    mobileNav._open = false;
+
+    var hamburger = h('button', {
+      className: 'hamburger',
+      onClick: function() { mobileNav.toggle(); },
+      'aria-label': 'Menu',
+    }, '\u2630');
+
+    app.appendChild(overlay);
     app.appendChild(
       h('div', { className: 'layout' },
-        renderSidebar(),
+        sidebar,
         h('div', { className: 'main-content' },
           h('div', { className: 'topbar' },
+            hamburger,
             h('h1', null, pageTitle ? pageTitle.label : 'Dashboard'),
           ),
           contentArea,
@@ -5081,6 +5170,7 @@
       return;
     }
     if (e.key === 'Escape') {
+      if (mobileNav._open) { mobileNav.close(); return; }
       var overlay = document.querySelector('.modal-overlay');
       if (overlay) { overlay.remove(); return; }
       var active = document.activeElement;

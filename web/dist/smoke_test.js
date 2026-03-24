@@ -46,7 +46,7 @@ global.document = {
   body: { appendChild() {} },
 };
 
-global.window = { location: { hostname: 'localhost', hash: '', origin: 'http://localhost' }, _testPages: null };
+global.window = { location: { hostname: 'localhost', hash: '', origin: 'http://localhost' }, _testPages: null, innerWidth: 1024, addEventListener() {}, removeEventListener() {} };
 global.localStorage = { getItem() { return null; }, setItem() {}, removeItem() {} };
 const realSetTimeout = setTimeout;
 global.setTimeout = (fn, ms) => realSetTimeout(fn, ms || 0);
