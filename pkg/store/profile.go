@@ -233,3 +233,10 @@ func (s *ProfileStoreImpl) Count() int {
 	defer s.mu.RUnlock()
 	return len(s.profiles)
 }
+
+func (s *ProfileStoreImpl) ClearAndSave() error {
+	s.mu.Lock()
+	s.profiles = nil
+	s.mu.Unlock()
+	return s.Save()
+}

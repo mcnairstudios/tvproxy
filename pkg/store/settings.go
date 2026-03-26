@@ -89,3 +89,10 @@ func (s *SettingsStoreImpl) Delete(_ context.Context, key string) error {
 	delete(s.data, key)
 	return s.save()
 }
+
+func (s *SettingsStoreImpl) ClearAndSave() error {
+	s.mu.Lock()
+	s.data = make(map[string]string)
+	s.mu.Unlock()
+	return s.save()
+}

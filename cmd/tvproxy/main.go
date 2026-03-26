@@ -77,10 +77,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to load client defaults")
 	}
-	db.SetClientDefaults(clientDefs)
-	db.SetProfileStore(profileStore)
-	db.SetClientStore(clientStore)
-	if err := database.SeedClientDefaults(ctx, clientDefs, profileStore, clientStore); err != nil {
+	if err := service.SeedClientDefaults(ctx, clientDefs, profileStore, clientStore); err != nil {
 		log.Fatal().Err(err).Msg("failed to seed client defaults")
 	}
 
@@ -204,7 +201,15 @@ func main() {
 	vodHandler := handler.NewVODHandler(vodService, clientService, hlsManager, log)
 	activityHandler := handler.NewActivityHandler(activityService)
 	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
-	settingsHandler := handler.NewSettingsHandler(settingsService, exportService, db, authService, streamStore, epgStore)
+	dataResetter := service.NewDataResetter(
+		profileStore, settingsStore, clientStore, logoStore, m3uAccountStore,
+		epgSourceStore, hdhrStore, userStore, channelStore, channelGroupStore,
+		scheduledRecStore, clientDefs, func() {
+			service.SeedClientDefaults(ctx, clientDefs, profileStore, clientStore)
+			settingsService.RecomposeDefaultProfiles(ctx)
+		},
+	)
+	settingsHandler := handler.NewSettingsHandler(settingsService, exportService, dataResetter, authService, streamStore, epgStore)
 	clientHandler := handler.NewClientHandler(clientService)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerService, log)
 	dlnaHandler := handler.NewDLNAHandler(dlnaService, authService, settingsService, cfg, log)

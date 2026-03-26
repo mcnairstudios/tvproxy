@@ -193,3 +193,10 @@ func (s *ScheduledRecordingStoreImpl) Delete(_ context.Context, id string) error
 	}
 	return nil
 }
+
+func (s *ScheduledRecordingStoreImpl) ClearAndSave() error {
+	s.mu.Lock()
+	s.recordings = nil
+	s.mu.Unlock()
+	return s.save()
+}

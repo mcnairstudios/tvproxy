@@ -57,7 +57,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	db.SetClientDefaults(clientDefs)
 	db.SetProfileStore(profileStore)
 	db.SetClientStore(clientStore)
-	err = database.SeedClientDefaults(context.Background(), clientDefs, profileStore, clientStore)
+	err = service.SeedClientDefaults(context.Background(), clientDefs, profileStore, clientStore)
 	require.NoError(t, err)
 
 	tuningSettings, err := defaults.LoadSettings(filepath.Join(dir, "settings.json"))
@@ -132,7 +132,14 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	vodHandler := NewVODHandler(vodService, clientService, nil, log)
 	activityHandler := NewActivityHandler(activityService)
 	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
-	settingsHandler := NewSettingsHandler(settingsService, exportService, db, authService, streamStore, epgStore)
+	dataResetter := service.NewDataResetter(
+		profileStore, settingsStore, clientStore, logoStore, m3uAccountStore,
+		epgSourceStore, hdhrStore, userStore, channelStore, channelGroupStore,
+		scheduledRecStore, clientDefs, func() {
+			service.SeedClientDefaults(context.Background(), clientDefs, profileStore, clientStore)
+		},
+	)
+	settingsHandler := NewSettingsHandler(settingsService, exportService, dataResetter, authService, streamStore, epgStore)
 	clientHandler := NewClientHandler(clientService)
 	schedulerHandler := NewSchedulerHandler(schedulerService, log)
 	dlnaService := service.NewDLNAService(channelStore, channelGroupStore, userStore, settingsService, logoService, vodService, cfg, log)
@@ -2403,7 +2410,6 @@ func TestIntegration_SoftReset(t *testing.T) {
 }
 
 func TestIntegration_HardReset(t *testing.T) {
-	t.Skip("hard reset needs redesign for JSON stores")
 	env := setupFullEnv(t)
 
 	t.Run("non-admin denied", func(t *testing.T) {
@@ -2876,7 +2882,7 @@ func TestIntegration_ClientSyncSurvival(t *testing.T) {
 		}, env.adminToken)
 		require.Equal(t, http.StatusCreated, rec.Code)
 
-		err := database.SeedClientDefaults(context.Background(), env.clientDefs, env.profileStore, env.clientStore)
+		err := service.SeedClientDefaults(context.Background(), env.clientDefs, env.profileStore, env.clientStore)
 		require.NoError(t, err)
 
 		rec = doRequest(t, env, "GET", "/api/stream-profiles/", nil, env.adminToken)

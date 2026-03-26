@@ -131,3 +131,10 @@ func (s *LogoStoreImpl) Delete(_ context.Context, id string) error {
 	}
 	return nil
 }
+
+func (s *LogoStoreImpl) ClearAndSave() error {
+	s.mu.Lock()
+	s.logos = nil
+	s.mu.Unlock()
+	return s.save()
+}

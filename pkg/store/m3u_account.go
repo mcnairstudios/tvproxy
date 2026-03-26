@@ -152,3 +152,10 @@ func (s *M3UAccountStoreImpl) UpdateStreamCount(_ context.Context, id string, co
 	}
 	return fmt.Errorf("m3u account not found")
 }
+
+func (s *M3UAccountStoreImpl) ClearAndSave() error {
+	s.mu.Lock()
+	s.accounts = nil
+	s.mu.Unlock()
+	return s.save()
+}

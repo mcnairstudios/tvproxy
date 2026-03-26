@@ -186,3 +186,10 @@ func (s *UserStoreImpl) SetGroupIDsForUser(_ context.Context, userID string, gro
 	}
 	return fmt.Errorf("user not found")
 }
+
+func (s *UserStoreImpl) ClearAndSave() error {
+	s.mu.Lock()
+	s.users = nil
+	s.mu.Unlock()
+	return s.save()
+}

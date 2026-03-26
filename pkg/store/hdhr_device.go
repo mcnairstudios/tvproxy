@@ -161,3 +161,10 @@ func (s *HDHRDeviceStoreImpl) GetChannelGroups(_ context.Context, deviceID strin
 	}
 	return nil, fmt.Errorf("hdhr device not found")
 }
+
+func (s *HDHRDeviceStoreImpl) ClearAndSave() error {
+	s.mu.Lock()
+	s.devices = nil
+	s.mu.Unlock()
+	return s.save()
+}

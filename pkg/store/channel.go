@@ -286,3 +286,10 @@ func (s *ChannelStoreImpl) RemoveStreamMappings(_ context.Context, streamIDs []s
 	}
 	return nil
 }
+
+func (s *ChannelStoreImpl) ClearAndSave() error {
+	s.mu.Lock()
+	s.channels = nil
+	s.mu.Unlock()
+	return s.save()
+}

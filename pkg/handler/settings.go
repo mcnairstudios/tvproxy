@@ -3,7 +3,6 @@ package handler
 import (
 	"net/http"
 
-	"github.com/gavinmcnair/tvproxy/pkg/database"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
 
@@ -11,10 +10,15 @@ type storeClearer interface {
 	Clear() error
 }
 
+type Resetter interface {
+	HardReset() error
+	SoftReset() error
+}
+
 type SettingsHandler struct {
 	settingsService *service.SettingsService
 	exportService   *service.ExportService
-	db              *database.DB
+	resetter        Resetter
 	authService     *service.AuthService
 	streamClearer   storeClearer
 	epgClearer      storeClearer
@@ -23,7 +27,7 @@ type SettingsHandler struct {
 func NewSettingsHandler(
 	settingsService *service.SettingsService,
 	exportService *service.ExportService,
-	db *database.DB,
+	resetter Resetter,
 	authService *service.AuthService,
 	streamClearer storeClearer,
 	epgClearer storeClearer,
@@ -31,7 +35,7 @@ func NewSettingsHandler(
 	return &SettingsHandler{
 		settingsService: settingsService,
 		exportService:   exportService,
-		db:              db,
+		resetter:        resetter,
 		authService:     authService,
 		streamClearer:   streamClearer,
 		epgClearer:      epgClearer,
@@ -44,18 +48,17 @@ func (h *SettingsHandler) List(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to list settings")
 		return
 	}
-
 	respondJSON(w, http.StatusOK, settings)
 }
 
 func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
-	var req map[string]string
-	if err := decodeJSON(r, &req); err != nil {
+	var updates map[string]string
+	if err := decodeJSON(r, &updates); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	for key, value := range req {
+	for key, value := range updates {
 		if !service.IsAPISettable(key) {
 			respondError(w, http.StatusBadRequest, "unknown setting: "+key)
 			return
@@ -70,7 +73,7 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SettingsHandler) SoftReset(w http.ResponseWriter, r *http.Request) {
-	if err := h.db.SoftReset(r.Context()); err != nil {
+	if err := h.resetter.SoftReset(); err != nil {
 		respondError(w, http.StatusInternalServerError, "soft reset failed: "+err.Error())
 		return
 	}
@@ -80,7 +83,7 @@ func (h *SettingsHandler) SoftReset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SettingsHandler) HardReset(w http.ResponseWriter, r *http.Request) {
-	if err := h.db.HardReset(r.Context()); err != nil {
+	if err := h.resetter.HardReset(); err != nil {
 		respondError(w, http.StatusInternalServerError, "hard reset failed: "+err.Error())
 		return
 	}
@@ -105,7 +108,6 @@ func (h *SettingsHandler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Disposition", "attachment; filename=tvproxy-export.json")
 	respondJSON(w, http.StatusOK, data)
 }
 
@@ -118,7 +120,7 @@ func (h *SettingsHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 	imported, err := h.exportService.Import(r.Context(), &data)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+		respondError(w, http.StatusInternalServerError, "import failed: "+err.Error())
 		return
 	}
 

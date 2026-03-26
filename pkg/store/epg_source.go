@@ -153,3 +153,10 @@ func (s *EPGSourceStoreImpl) UpdateCounts(_ context.Context, id string, channelC
 	}
 	return fmt.Errorf("epg source not found")
 }
+
+func (s *EPGSourceStoreImpl) ClearAndSave() error {
+	s.mu.Lock()
+	s.sources = nil
+	s.mu.Unlock()
+	return s.save()
+}

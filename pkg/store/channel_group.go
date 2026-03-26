@@ -201,3 +201,10 @@ func (s *ChannelGroupStoreImpl) DeleteForUser(_ context.Context, id, userID stri
 	}
 	return nil
 }
+
+func (s *ChannelGroupStoreImpl) ClearAndSave() error {
+	s.mu.Lock()
+	s.groups = nil
+	s.mu.Unlock()
+	return s.save()
+}

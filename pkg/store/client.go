@@ -192,3 +192,10 @@ func (s *ClientStoreImpl) saveUnlocked() error {
 	}
 	return os.WriteFile(s.filePath, data, 0644)
 }
+
+func (s *ClientStoreImpl) ClearAndSave() error {
+	s.mu.Lock()
+	s.clients = nil
+	s.mu.Unlock()
+	return s.Save()
+}
