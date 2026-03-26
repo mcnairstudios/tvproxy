@@ -22,6 +22,7 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/handler"
 	"github.com/gavinmcnair/tvproxy/pkg/hls"
+	"github.com/gavinmcnair/tvproxy/pkg/logocache"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/openapi"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
@@ -163,9 +164,12 @@ func main() {
 
 	wgHTTPClient := wgService.HTTPClient()
 
-	logoService := service.NewLogoService(logoStore, cfg, log)
-	logoService.EnsureDir()
-	go logoService.CacheAll(context.Background())
+	logoTimeout := 10 * time.Second
+	if cfg.Settings != nil {
+		logoTimeout = cfg.Settings.Network.LogoDownloadTimeout
+	}
+	logoCache := logocache.New(filepath.Join(dataDir, "static", "logocache"), cfg, logoTimeout)
+	logoService := service.NewLogoService(logoStore, logoCache, log)
 
 	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, cfg, wgHTTPClient, log)
 	channelService := service.NewChannelService(channelStore, channelGroupStore, streamStore, log)

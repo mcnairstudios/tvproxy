@@ -247,9 +247,6 @@ func (s *M3UService) upsertAndFinalize(ctx context.Context, account *models.M3UA
 		Int("total", len(streams)).
 		Msg("account refresh complete")
 
-	if s.logoService != nil {
-		go s.logoService.CacheStreamLogos(context.Background(), streams)
-	}
 
 	return nil
 }

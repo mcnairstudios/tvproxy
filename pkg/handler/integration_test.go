@@ -20,6 +20,7 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/database"
 	"github.com/gavinmcnair/tvproxy/pkg/defaults"
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/logocache"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 	"github.com/gavinmcnair/tvproxy/pkg/session"
@@ -98,8 +99,8 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	adminUserID := adminUser.ID
 
 	settingsService := service.NewSettingsService(settingsStore, profileStore, log)
-	logoService := service.NewLogoService(logoStore, cfg, log)
-	logoService.EnsureDir()
+	testLogoCache := logocache.New(filepath.Join(dir, "static", "logocache"), cfg, 5*time.Second)
+	logoService := service.NewLogoService(logoStore, testLogoCache, log)
 
 	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, cfg, nil, log)
 	channelService := service.NewChannelService(channelStore, channelGroupStore, streamStore, log)
