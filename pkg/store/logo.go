@@ -18,7 +18,6 @@ type LogoStore interface {
 	GetByURL(ctx context.Context, url string) (*models.Logo, error)
 	List(ctx context.Context) ([]models.Logo, error)
 	Update(ctx context.Context, logo *models.Logo) error
-	UpdateCachedFilename(ctx context.Context, id, filename string) error
 	Delete(ctx context.Context, id string) error
 }
 
@@ -102,18 +101,6 @@ func (s *LogoStoreImpl) Update(_ context.Context, logo *models.Logo) error {
 		if s.logos[i].ID == logo.ID {
 			s.logos[i].Name = logo.Name
 			s.logos[i].URL = logo.URL
-			return s.save()
-		}
-	}
-	return fmt.Errorf("logo not found")
-}
-
-func (s *LogoStoreImpl) UpdateCachedFilename(_ context.Context, id, filename string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.logos {
-		if s.logos[i].ID == id {
-			s.logos[i].CachedFilename = filename
 			return s.save()
 		}
 	}

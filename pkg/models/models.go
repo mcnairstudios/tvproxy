@@ -51,7 +51,6 @@ type Channel struct {
 	Name            string    `json:"name"`
 	LogoID          *string   `json:"logo_id,omitempty"`
 	Logo            string    `json:"logo,omitempty"`
-	LogoCached      string    `json:"logo_cached,omitempty"`
 	TvgID           string    `json:"tvg_id,omitempty"`
 	ChannelGroupID  *string   `json:"channel_group_id,omitempty"`
 	StreamProfileID *string   `json:"stream_profile_id,omitempty"`
@@ -81,9 +80,8 @@ type ChannelGroup struct {
 type Logo struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
-	URL            string    `json:"url"`
-	CachedFilename string    `json:"cached_filename,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	URL       string    `json:"url"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type StreamProfile struct {

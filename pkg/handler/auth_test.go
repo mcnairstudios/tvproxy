@@ -6,32 +6,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gavinmcnair/tvproxy/pkg/database"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
-
-func setupTestDB(t *testing.T) *database.DB {
-	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
-	db, err := database.New(context.Background(), dbPath, log)
-	require.NoError(t, err)
-	t.Cleanup(func() { db.Close() })
-	return db
-}
 
 type testEnv struct {
 	router      *chi.Mux
@@ -40,9 +26,9 @@ type testEnv struct {
 
 func setupTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	db := setupTestDB(t)
-	userRepo := repository.NewUserRepository(db)
-	authService := service.NewAuthService(userRepo, "test-jwt-secret", 15*time.Minute, 7*24*time.Hour)
+	dir := t.TempDir()
+	userStore := store.NewUserStore(filepath.Join(dir, "users.json"))
+	authService := service.NewAuthService(userStore, "test-jwt-secret", 15*time.Minute, 7*24*time.Hour)
 
 	_, err := authService.CreateUser(context.Background(), "testuser", "password123", false)
 	require.NoError(t, err)
@@ -323,9 +309,9 @@ func TestLogoutHandler(t *testing.T) {
 }
 
 func TestAPIKeyAuthentication(t *testing.T) {
-	db := setupTestDB(t)
-	userRepo := repository.NewUserRepository(db)
-	authService := service.NewAuthService(userRepo, "test-jwt-secret", 15*time.Minute, 7*24*time.Hour)
+	dir := t.TempDir()
+	userStore := store.NewUserStore(filepath.Join(dir, "users.json"))
+	authService := service.NewAuthService(userStore, "test-jwt-secret", 15*time.Minute, 7*24*time.Hour)
 
 	authHandler := NewAuthHandler(authService)
 	authMW := middleware.NewAuthMiddleware(authService, "my-api-key", "")
@@ -352,9 +338,9 @@ func TestAPIKeyAuthentication(t *testing.T) {
 }
 
 func TestAPIKeyAuthenticationWrongKey(t *testing.T) {
-	db := setupTestDB(t)
-	userRepo := repository.NewUserRepository(db)
-	authService := service.NewAuthService(userRepo, "test-jwt-secret", 15*time.Minute, 7*24*time.Hour)
+	dir := t.TempDir()
+	userStore := store.NewUserStore(filepath.Join(dir, "users.json"))
+	authService := service.NewAuthService(userStore, "test-jwt-secret", 15*time.Minute, 7*24*time.Hour)
 
 	authHandler := NewAuthHandler(authService)
 	authMW := middleware.NewAuthMiddleware(authService, "my-api-key", "")
