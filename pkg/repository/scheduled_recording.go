@@ -144,7 +144,7 @@ func (r *ScheduledRecordingRepository) ListByChannelAndTimeRange(ctx context.Con
 }
 
 type scheduledRecordingScanner interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }
 
 func scanScheduledRecording(s scheduledRecordingScanner) (*models.ScheduledRecording, error) {

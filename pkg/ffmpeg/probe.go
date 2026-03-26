@@ -39,6 +39,7 @@ type ProbeResult struct {
 	IsVOD       bool         `json:"is_vod"`
 	Width       int          `json:"width"`
 	Height      int          `json:"height"`
+	FormatName  string       `json:"format_name,omitempty"`
 	Video       *VideoInfo   `json:"video,omitempty"`
 	AudioTracks []AudioTrack `json:"audio_tracks,omitempty"`
 }
@@ -49,7 +50,8 @@ type ffprobeOutput struct {
 }
 
 type ffprobeFormat struct {
-	Duration string `json:"duration"`
+	FormatName string `json:"format_name"`
+	Duration   string `json:"duration"`
 }
 
 type ffprobeStream struct {
@@ -69,6 +71,30 @@ type ffprobeStream struct {
 	Channels       int               `json:"channels"`
 	BitRate        string            `json:"bit_rate"`
 	Tags           map[string]string `json:"tags"`
+}
+
+func NormalizeVideoCodec(ffprobeCodec string) string {
+	switch ffprobeCodec {
+	case "hevc":
+		return "h265"
+	default:
+		return ffprobeCodec
+	}
+}
+
+func NormalizeContainer(formatName string) string {
+	switch {
+	case strings.Contains(formatName, "mp4") || strings.Contains(formatName, "mov"):
+		return "mp4"
+	case strings.Contains(formatName, "mpegts"):
+		return "mpegts"
+	case strings.Contains(formatName, "matroska"):
+		return "matroska"
+	case strings.Contains(formatName, "webm"):
+		return "webm"
+	default:
+		return formatName
+	}
 }
 
 func simplifyFrameRate(rate string) string {
@@ -143,7 +169,9 @@ func parseProbeOutput(out []byte) (*ProbeResult, error) {
 		return &ProbeResult{IsVOD: false}, nil
 	}
 
-	result := &ProbeResult{}
+	result := &ProbeResult{
+		FormatName: NormalizeContainer(probe.Format.FormatName),
+	}
 
 	if probe.Format.Duration != "" {
 		d, err := strconv.ParseFloat(probe.Format.Duration, 64)

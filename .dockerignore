@@ -3,4 +3,8 @@ wireguard/
 *.db-journal
 *.db-wal
 *.db-shm
+*.gob
 .git/
+static/
+tvproxy
+wgtest

@@ -13,8 +13,6 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
 )
 
-// SSDPWorker advertises HDHR devices via SSDP so Plex/Emby/Jellyfin
-// can auto-discover them on the local network.
 type SSDPWorker struct {
 	hdhrDeviceRepo   *repository.HDHRDeviceRepository
 	baseURL          string
@@ -30,7 +28,6 @@ type ssdpAdvertiser struct {
 	cancel context.CancelFunc
 }
 
-// NewSSDPWorker creates a new SSDP discovery worker.
 func NewSSDPWorker(hdhrDeviceRepo *repository.HDHRDeviceRepository, baseURL string, retryDelay, announceInterval time.Duration, log zerolog.Logger) *SSDPWorker {
 	if retryDelay <= 0 {
 		retryDelay = 2 * time.Second
@@ -48,7 +45,6 @@ func NewSSDPWorker(hdhrDeviceRepo *repository.HDHRDeviceRepository, baseURL stri
 	}
 }
 
-// Run starts SSDP advertisers for all enabled HDHR devices.
 func (w *SSDPWorker) Run(ctx context.Context) {
 	select {
 	case <-time.After(w.retryDelay):
@@ -79,7 +75,6 @@ func (w *SSDPWorker) syncAdvertisers(ctx context.Context) {
 		return
 	}
 
-	// Build desired set
 	desired := make(map[string]*models.HDHRDevice)
 	for i := range devices {
 		if devices[i].IsEnabled && devices[i].Port > 0 {
@@ -87,7 +82,6 @@ func (w *SSDPWorker) syncAdvertisers(ctx context.Context) {
 		}
 	}
 
-	// Stop advertisers for removed/disabled/port-changed devices
 	for id, adv := range w.advertisers {
 		dev, ok := desired[id]
 		if !ok || dev.Port != adv.port {
@@ -99,7 +93,6 @@ func (w *SSDPWorker) syncAdvertisers(ctx context.Context) {
 		}
 	}
 
-	// Start advertisers for new devices
 	for id, dev := range desired {
 		if _, exists := w.advertisers[id]; exists {
 			continue
@@ -107,7 +100,6 @@ func (w *SSDPWorker) syncAdvertisers(ctx context.Context) {
 		w.startAdvertiser(ctx, dev)
 	}
 
-	// Send alive for all active advertisers
 	for _, adv := range w.advertisers {
 		if err := adv.ad.Alive(); err != nil {
 			w.log.Warn().Err(err).Msg("SSDP alive failed")
@@ -145,7 +137,6 @@ func (w *SSDPWorker) startAdvertiser(ctx context.Context, device *models.HDHRDev
 		cancel: cancel,
 	}
 
-	// Monitor context for cleanup
 	go func() {
 		<-advCtx.Done()
 	}()

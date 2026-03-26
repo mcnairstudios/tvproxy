@@ -22,7 +22,11 @@ func NewStreamProfileRepository(db *database.DB) *StreamProfileRepository {
 	return &StreamProfileRepository{db: db}
 }
 
-func scanStreamProfile(row interface{ Scan(dest ...any) error }, p *models.StreamProfile) error {
+type streamProfileScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanStreamProfile(row streamProfileScanner, p *models.StreamProfile) error {
 	return row.Scan(&p.ID, &p.Name, &p.StreamMode, &p.SourceType, &p.HWAccel, &p.VideoCodec, &p.Container, &p.Deinterlace, &p.FPSMode, &p.UseCustomArgs, &p.CustomArgs, &p.Command, &p.Args, &p.IsDefault, &p.IsSystem, &p.IsClient, &p.CreatedAt, &p.UpdatedAt)
 }
 

@@ -3,7 +3,7 @@ IMAGE     := gavinmcnair/tvproxy
 TAG       := latest
 BUILDER   := mybuilder
 PLATFORMS := linux/amd64,linux/arm64
-VERSION   := $(shell git rev-parse --short HEAD)
+VERSION   := $(shell git rev-parse --short HEAD)$(shell git diff --quiet || echo -dirty-$(shell date +%s))
 
 .PHONY: build test docker-build docker-push clean
 

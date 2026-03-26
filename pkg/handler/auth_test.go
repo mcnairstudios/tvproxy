@@ -44,11 +44,9 @@ func setupTestEnv(t *testing.T) *testEnv {
 	userRepo := repository.NewUserRepository(db)
 	authService := service.NewAuthService(userRepo, "test-jwt-secret", 15*time.Minute, 7*24*time.Hour)
 
-	// Create a test user
 	_, err := authService.CreateUser(context.Background(), "testuser", "password123", false)
 	require.NoError(t, err)
 
-	// Create an admin user
 	_, err = authService.CreateUser(context.Background(), "admin", "adminpass", true)
 	require.NoError(t, err)
 
@@ -57,11 +55,9 @@ func setupTestEnv(t *testing.T) *testEnv {
 
 	r := chi.NewRouter()
 
-	// Public routes
 	r.Post("/api/auth/login", authHandler.Login)
 	r.Post("/api/auth/refresh", authHandler.Refresh)
 
-	// Authenticated routes
 	r.Group(func(r chi.Router) {
 		r.Use(authMW.Authenticate)
 		r.Get("/api/auth/me", authHandler.Me)
@@ -141,7 +137,6 @@ func TestLoginHandlerBadCredentials(t *testing.T) {
 func TestLoginHandlerMissingFields(t *testing.T) {
 	env := setupTestEnv(t)
 
-	// Missing password
 	body, _ := json.Marshal(map[string]string{
 		"username": "testuser",
 	})
@@ -152,7 +147,6 @@ func TestLoginHandlerMissingFields(t *testing.T) {
 	env.router.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
-	// Missing username
 	body, _ = json.Marshal(map[string]string{
 		"password": "password123",
 	})
@@ -194,10 +188,8 @@ func TestLoginHandlerNonExistentUser(t *testing.T) {
 func TestMeHandler(t *testing.T) {
 	env := setupTestEnv(t)
 
-	// Login first to get a token
 	accessToken, _ := loginTestUser(t, env, "testuser", "password123")
 
-	// Use the token to access /me
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	rec := httptest.NewRecorder()
@@ -206,7 +198,7 @@ func TestMeHandler(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.NewDecoder(rec.Body).Decode(&resp)
 	require.NoError(t, err)
 
@@ -227,7 +219,7 @@ func TestMeHandlerAdmin(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.NewDecoder(rec.Body).Decode(&resp)
 	require.NoError(t, err)
 
@@ -344,7 +336,6 @@ func TestAPIKeyAuthentication(t *testing.T) {
 		r.Get("/api/auth/me", authHandler.Me)
 	})
 
-	// Access with API key
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	req.Header.Set("X-API-Key", "my-api-key")
 	rec := httptest.NewRecorder()
@@ -353,7 +344,7 @@ func TestAPIKeyAuthentication(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	err := json.NewDecoder(rec.Body).Decode(&resp)
 	require.NoError(t, err)
 	assert.Equal(t, "api-key", resp["username"])

@@ -3,52 +3,26 @@
 
   function createDVRTracker(isLive, duration) {
     var buffered = 0;
-    var seekOffset = 0;
-    var seeking = false;
     var dur = duration || 0;
     var live = isLive;
 
     return {
       getPos: function(videoCurrentTime) {
-        return seekOffset + (videoCurrentTime || 0);
+        return videoCurrentTime || 0;
       },
 
       updateBuffered: function(b) { buffered = b; },
       getBuffered: function() { return buffered; },
-      isSeeking: function() { return seeking; },
-      getSeekOffset: function() { return seekOffset; },
-
-      startSeek: function(videoCurrentTime) {
-        if (seeking || buffered <= 0) return null;
-        var pos = seekOffset + (videoCurrentTime || 0);
-        var seekTime = Math.min(pos, buffered);
-        seeking = true;
-        seekOffset = seekTime;
-        return seekTime;
-      },
-
-      seekTo: function(seekTime) {
-        if (seeking) return null;
-        if (seekTime > buffered) return null;
-        seeking = true;
-        seekOffset = seekTime;
-        return seekTime;
-      },
-
-      completeSeek: function() { seeking = false; },
 
       setDuration: function(d) {
         if (d > 0) { dur = d; live = false; }
       },
       isLive: function() { return live; },
 
-      reset: function() {
-        seekOffset = 0;
-        seeking = false;
-      },
+      reset: function() {},
 
       getDisplay: function(videoCurrentTime) {
-        var pos = seekOffset + (videoCurrentTime || 0);
+        var pos = videoCurrentTime || 0;
         var total = live ? buffered : (dur || buffered);
         var pct = total > 0 ? Math.min(100, Math.max(0, (pos / total) * 100)) : 0;
         return { pos: pos, total: total, pct: pct };
@@ -64,12 +38,14 @@
   };
 
   const api = {
-    async request(method, path, body) {
+    _etags: {},
+
+    async request(method, path, body, fetchOpts) {
       const headers = { 'Content-Type': 'application/json' };
       if (state.accessToken) {
         headers['Authorization'] = 'Bearer ' + state.accessToken;
       }
-      const opts = { method, headers };
+      const opts = Object.assign({ method, headers }, fetchOpts);
       if (body) opts.body = JSON.stringify(body);
 
       let resp = await fetch(path, opts);
@@ -91,14 +67,37 @@
         throw new Error(err.error || 'Request failed');
       }
 
+      var responseEtag = resp.headers.get('ETag');
+      if (responseEtag && method === 'GET') api._etags[path] = responseEtag;
+
       const text = await resp.text();
       return text ? JSON.parse(text) : null;
     },
 
-    get(path) { return this.request('GET', path); },
+    get(path, fetchOpts) { return this.request('GET', path, null, fetchOpts); },
     post(path, body) { return this.request('POST', path, body); },
     put(path, body) { return this.request('PUT', path, body); },
     del(path) { return this.request('DELETE', path); },
+
+    async getConditional(path, etag) {
+      var headers = {};
+      if (state.accessToken) headers['Authorization'] = 'Bearer ' + state.accessToken;
+      if (etag) headers['If-None-Match'] = etag;
+      var resp = await fetch(path, { method: 'GET', headers: headers });
+      if (resp.status === 401 && state.refreshToken) {
+        var refreshed = await api.refreshToken();
+        if (refreshed) {
+          headers['Authorization'] = 'Bearer ' + state.accessToken;
+          resp = await fetch(path, { method: 'GET', headers: headers });
+        }
+      }
+      if (resp.status === 304) return { status: 304, data: null, etag: etag };
+      if (!resp.ok) return { status: resp.status, data: null, etag: null };
+      var newEtag = resp.headers.get('ETag');
+      if (newEtag) api._etags[path] = newEtag;
+      var text = await resp.text();
+      return { status: 200, data: text ? JSON.parse(text) : null, etag: newEtag || etag };
+    },
 
     async refreshToken() {
       try {
@@ -194,10 +193,12 @@
   };
 
   class DataCache {
-    constructor({ loader, searchKeys, label, storageKey }) {
+    constructor({ loader, searchKeys, label, storageKey, etagEndpoint }) {
       this._loader = loader;
       this._searchKeys = searchKeys;
       this._storageKey = storageKey ? 'tvproxy_' + storageKey : null;
+      this._etagEndpoint = etagEndpoint || null;
+      this._etag = null;
       this._data = null;
       this._index = null;
       this._promise = null;
@@ -213,6 +214,9 @@
         if (!raw) return false;
         this._data = JSON.parse(raw);
         this._buildIndex();
+        if (this._etagEndpoint) {
+          this._etag = localStorage.getItem(this._storageKey + '_etag') || null;
+        }
         this.state = 'ready';
         this.count = this._data.length;
         DataCache._notify();
@@ -222,7 +226,12 @@
 
     _saveToStorage() {
       if (!this._storageKey || !this._data) return;
-      try { localStorage.setItem(this._storageKey, JSON.stringify(this._data)); } catch {}
+      try {
+        localStorage.setItem(this._storageKey, JSON.stringify(this._data));
+        if (this._etagEndpoint && this._etag) {
+          localStorage.setItem(this._storageKey + '_etag', this._etag);
+        }
+      } catch {}
     }
 
     async getAll() {
@@ -237,6 +246,7 @@
       this._promise = (async () => {
         try { this._data = await this._loader(); } catch { this._data = []; }
         this._buildIndex();
+        if (this._etagEndpoint) this._etag = api._etags[this._etagEndpoint] || null;
         this._saveToStorage();
         this.state = 'ready';
         this.count = this._data.length;
@@ -250,9 +260,14 @@
     _refreshInBackground() {
       (async () => {
         try {
-          const fresh = await this._loader();
+          if (this._etagEndpoint && this._etag) {
+            var check = await api.getConditional(this._etagEndpoint, this._etag);
+            if (check.status === 304) return;
+          }
+          var fresh = await this._loader();
           this._data = fresh;
           this._buildIndex();
+          if (this._etagEndpoint) this._etag = api._etags[this._etagEndpoint] || null;
           this._saveToStorage();
           this.count = this._data.length;
           DataCache._notify();
@@ -294,10 +309,14 @@
       this._data = null;
       this._index = null;
       this._promise = null;
+      this._etag = null;
       this.state = 'idle';
       this.count = 0;
       if (this._storageKey) {
-        try { localStorage.removeItem(this._storageKey); } catch {}
+        try {
+          localStorage.removeItem(this._storageKey);
+          localStorage.removeItem(this._storageKey + '_etag');
+        } catch {}
       }
       DataCache._notify();
     }
@@ -321,6 +340,7 @@
     },
     searchKeys: ['_display_name', 'channel_id'],
     storageKey: 'epg',
+    etagEndpoint: '/api/epg/data',
   });
 
   const logosCache = new DataCache({
@@ -328,6 +348,7 @@
     loader: () => api.get('/api/logos'),
     searchKeys: ['name', 'url'],
     storageKey: 'logos',
+    etagEndpoint: '/api/logos',
   });
 
   const streamsCache = new DataCache({
@@ -345,6 +366,7 @@
     },
     searchKeys: ['_display_name', 'group'],
     storageKey: 'streams',
+    etagEndpoint: '/api/streams',
   });
 
 
@@ -352,8 +374,8 @@
     label: 'Channels',
     loader: async () => {
       const [channels, nowMap] = await Promise.all([
-        api.get('/api/channels'),
-        api.get('/api/epg/now-playing').catch(() => ({})),
+        api.get('/api/channels', { cache: 'no-store' }),
+        api.get('/api/epg/now').catch(() => ({})),
       ]);
       channels.forEach(ch => {
         ch._now_playing = (ch.tvg_id && nowMap[ch.tvg_id]) || '';
@@ -365,7 +387,7 @@
 
   const channelGroupsCache = new DataCache({
     label: 'Groups',
-    loader: () => api.get('/api/channel-groups'),
+    loader: () => api.get('/api/channel-groups', { cache: 'no-store' }),
     searchKeys: ['name'],
   });
 
@@ -415,11 +437,6 @@
   function fmtLocalDateTime(iso) {
     if (!iso) return '-';
     return new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
-  }
-
-  function fmtLocalTime(iso) {
-    if (!iso) return '-';
-    return new Date(iso).toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
   }
 
   function fmtUTC(iso) {
@@ -2422,7 +2439,7 @@
       try {
         const resp = await fetch('/stream/' + streamID + '/vod?profile=Browser', { method: 'POST' }).then(r => r.json());
         if (resp.session_id) {
-          session = { id: resp.session_id, duration: resp.duration };
+          session = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, request_headers: resp.request_headers };
         }
       } catch(e) {}
       openVideoPlayer(name, '/stream/' + streamID + '?profile=Browser', tvgId, session);
@@ -2442,7 +2459,7 @@
       try {
         const resp = await fetch('/channel/' + channelID + '/vod?profile=Browser', { method: 'POST' }).then(r => r.json());
         if (resp.session_id) {
-          session = { id: resp.session_id, duration: resp.duration };
+          session = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, request_headers: resp.request_headers };
         }
       } catch(e) {}
       openVideoPlayer(name, '/channel/' + channelID + '?profile=Browser', tvgId, session, channelID);
@@ -2452,7 +2469,7 @@
     }
   }
 
-  function openVideoPlayer(title, url, tvgId, dvr, channelID) {
+  function openVideoPlayer(title, url, tvgId, dvr, channelID, probeUrl) {
     if (activePlayerCleanup) { activePlayerCleanup(); activePlayerCleanup = null; }
     let mpegtsPlayer = null;
     let retryCount = 0;
@@ -2467,8 +2484,6 @@
     let currentCodec = '';
     let stallTimeout = null;
     let isRecording = false;
-    let activeSegmentID = null;
-    let dragState = null;
     let pollFailures = 0;
     let audioSelect = null;
     let currentAudioIndex = 0;
@@ -2476,8 +2491,8 @@
     let currentProfile = 'Browser';
     let probeData = null;
     const playerCtx = new AbortController();
-    let isLive = !dvr || !dvr.duration;
-    const dvrTracker = dvr ? createDVRTracker(isLive, dvr.duration) : null;
+    let isLive = !!channelID || !dvr || !dvr.duration;
+    const dvrTracker = dvr ? createDVRTracker(isLive, isLive ? 0 : dvr.duration) : null;
 
     function destroyPlayer() {
       if (mpegtsPlayer) {
@@ -2504,10 +2519,8 @@
       if (stallTimeout) { clearTimeout(stallTimeout); stallTimeout = null; }
       destroyPlayer();
       document.removeEventListener('fullscreenchange', onFullscreenChange);
-      document.removeEventListener('mousemove', onDocMouseMove);
-      document.removeEventListener('mouseup', onDocMouseUp);
       if (dvr && !isRecording) {
-        api.del('/vod/' + dvr.id).catch(() => {});
+        api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(() => {});
       }
       video.oncanplay = null;
       video.onerror = null;
@@ -2556,7 +2569,6 @@
     }
     function stopRecordingUI() {
       isRecording = false;
-      activeSegmentID = null;
       recDot.removeAttribute('fill');
       recordBtn.title = 'Record';
       if (recFlash) { recFlash.cancel(); recFlash = null; }
@@ -2568,11 +2580,12 @@
         return;
       }
       currentProfile = profileName;
+      isBrowserProfile = profileName === 'Browser';
       audioSelect = null;
       currentAudioIndex = 0;
       destroyPlayer();
       try {
-        await api.del('/vod/' + dvr.id).catch(function() {});
+        await api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(function() {});
         var resp;
         if (channelID) {
           resp = await fetch('/channel/' + channelID + '/vod?profile=' + encodeURIComponent(profileName), { method: 'POST' }).then(function(r) { return r.json(); });
@@ -2582,7 +2595,7 @@
           resp = await fetch('/stream/' + streamID + '/vod?profile=' + encodeURIComponent(profileName), { method: 'POST' }).then(function(r) { return r.json(); });
         }
         if (resp.session_id) {
-          dvr = { id: resp.session_id, duration: resp.duration };
+          dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
           if (dvrTracker) dvrTracker.reset();
         }
       } catch(e) {
@@ -2600,7 +2613,7 @@
       currentAudioIndex = trackIndex;
       destroyPlayer();
       try {
-        await api.del('/vod/' + dvr.id).catch(function() {});
+        await api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(function() {});
         var audioParam = trackIndex > 0 ? '&audio=' + trackIndex : '';
         var resp;
         if (channelID) {
@@ -2611,7 +2624,7 @@
           resp = await fetch('/stream/' + streamID + '/vod?profile=' + encodeURIComponent(currentProfile) + audioParam, { method: 'POST' }).then(function(r) { return r.json(); });
         }
         if (resp.session_id) {
-          dvr = { id: resp.session_id, duration: resp.duration };
+          dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
           if (dvrTracker) dvrTracker.reset();
         }
       } catch(e) {
@@ -2621,25 +2634,22 @@
     }
 
     recordBtn.onclick = async function() {
-      if (!dvr || !dvrTracker) return;
+      if (!channelID) return;
       if (isRecording) {
         try {
-          await api.post('/vod/' + dvr.id + '/stop');
+          await api.del('/api/vod/record/' + channelID);
           stopRecordingUI();
         } catch(e) { toast.error('Stop recording failed: ' + e.message); }
         return;
       }
       var body = { program_title: nowProgram ? nowProgram.title : title, channel_name: title };
       if (nowProgram && nowProgram.stop) body.stop_at = new Date(nowProgram.stop).toISOString();
-      body.start_offset = dvrTracker.getPos(video.currentTime);
-      body.end_offset = dvrTracker.getBuffered();
       try {
-        var resp = await api.post('/vod/' + dvr.id + '/record', body);
-        if (resp && resp.segment) activeSegmentID = resp.segment.id;
+        await api.post('/api/vod/record/' + channelID, body);
         startRecordingUI();
       } catch(e) { toast.error('Record failed: ' + e.message); }
     };
-    if (!dvr) recordBtn.style.display = 'none';
+    if (!channelID) recordBtn.style.display = 'none';
     const statsBtn = document.createElement('button');
     statsBtn.className = 'btn btn-sm'; statsBtn.title = 'Toggle stream statistics';
     statsBtn.style.cssText = 'padding:4px 8px;line-height:0;';
@@ -2714,18 +2724,9 @@
     seekPos.style.cssText = 'height:100%;background:var(--accent);border-radius:3px;width:0%;position:absolute;top:0;left:0;';
     const epgMarker = document.createElement('div');
     epgMarker.style.cssText = 'display:none;position:absolute;top:-2px;bottom:-2px;width:2px;background:#ffa726;border-radius:1px;z-index:2;pointer-events:none;';
-    const segOverlayContainer = document.createElement('div');
-    segOverlayContainer.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:3;';
-    const segHandleContainer = document.createElement('div');
-    segHandleContainer.style.cssText = 'position:absolute;top:-4px;left:0;right:0;bottom:-4px;pointer-events:none;z-index:5;';
-    const segDeleteContainer = document.createElement('div');
-    segDeleteContainer.style.cssText = 'position:absolute;top:-18px;left:0;right:0;height:16px;pointer-events:none;z-index:6;';
     seekOuter.appendChild(seekBuf);
     seekOuter.appendChild(seekPos);
     seekOuter.appendChild(epgMarker);
-    seekOuter.appendChild(segOverlayContainer);
-    seekOuter.appendChild(segHandleContainer);
-    seekOuter.appendChild(segDeleteContainer);
     controls.appendChild(seekOuter);
 
     const btnRow = document.createElement('div');
@@ -2738,12 +2739,7 @@
       if (video.paused) {
         if (video.readyState < 2) {
           retryCount = 0;
-          if (dvrTracker && dvrTracker.getBuffered() > 0 && !dvrTracker.isSeeking()) {
-            var pos = dvrTracker.getPos(video.currentTime);
-            seekTo(Math.min(pos, dvrTracker.getBuffered()));
-          } else {
-            startPlayback();
-          }
+          startPlayback();
         } else {
           video.play();
         }
@@ -2824,173 +2820,15 @@
     overlay.onclick = (e) => { if (e.target === overlay) cleanup(); };
     document.body.appendChild(overlay);
 
-    function seekTo(seekTime) {
-      if (!dvrTracker || !dvr) return;
-      var result = dvrTracker.seekTo(seekTime);
-      if (result === null) return;
-      statusEl.style.color = '#ffa726';
-      statusEl.textContent = 'Seeking to ' + fmtTime(result) + '...';
-      videoWrap.style.minHeight = videoWrap.offsetHeight + 'px';
-      destroyPlayer();
-      video.pause();
-      video.removeAttribute('src');
-      video.src = '/vod/' + dvr.id + '/seek?t=' + result.toFixed(1);
-      video.oncanplay = () => {
-        videoWrap.style.minHeight = '';
-        dvrTracker.completeSeek();
-        statusEl.style.color = '#4caf50';
-        currentContainer = 'fMP4';
-        updateStatusText();
-        if (channelID) api.del('/api/channels/' + channelID + '/fail').catch(() => {});
-      };
-      video.play().catch(() => { dvrTracker.completeSeek(); });
-    }
-
     seekOuter.onclick = (e) => {
+      if (dvrTracker) return;
       const rect = seekOuter.getBoundingClientRect();
       if (rect.width === 0) return;
       const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      if (!dvrTracker) {
-        if (video.duration && isFinite(video.duration)) {
-          video.currentTime = pct * video.duration;
-        }
-        return;
+      if (video.duration && isFinite(video.duration)) {
+        video.currentTime = pct * video.duration;
       }
-      if (dvrTracker.getBuffered() <= 0) return;
-      const epg = getEpgTiming();
-      const buf = dvrTracker.getBuffered();
-      let seekTime;
-      if (isLive && epg) {
-        const progTime = pct * epg.duration;
-        const bufStart = epg.elapsed - buf;
-        seekTime = progTime - bufStart;
-        if (seekTime < 0 || seekTime > buf) return;
-      } else {
-        const totalEnd = isLive ? buf : (dvr.duration || buf);
-        seekTime = pct * totalEnd;
-        if (seekTime > buf) return;
-      }
-      seekTo(seekTime);
     };
-
-    function segPctFromOffset(offset, buffered) {
-      var epg = getEpgTiming();
-      if (isLive && epg) {
-        var bufStart = epg.elapsed - buffered;
-        return ((bufStart + offset) / epg.duration) * 100;
-      }
-      var totalEnd = isLive ? buffered : (dvr.duration || buffered);
-      return totalEnd > 0 ? (offset / totalEnd) * 100 : 0;
-    }
-
-    function segOffsetFromPct(pct, buffered) {
-      var epg = getEpgTiming();
-      if (isLive && epg) {
-        var bufStart = epg.elapsed - buffered;
-        return pct * epg.duration - bufStart;
-      }
-      var totalEnd = isLive ? buffered : (dvr.duration || buffered);
-      return pct * totalEnd;
-    }
-
-    var segColorMap = {
-      recording: 'rgba(229,57,53,0.4)',
-      defined: 'rgba(255,167,38,0.4)',
-      extracting: 'rgba(255,167,38,0.25)',
-      completed: 'rgba(76,175,80,0.4)'
-    };
-
-    function renderSegmentOverlays(segments, buffered) {
-      segOverlayContainer.innerHTML = '';
-      segHandleContainer.innerHTML = '';
-      segDeleteContainer.innerHTML = '';
-      if (!segments || !dvrTracker) return;
-      segments.forEach(function(seg) {
-        var segEnd = (seg.status === 'recording' && seg.end_offset != null) ? Math.max(seg.end_offset, buffered) : (seg.end_offset != null ? seg.end_offset : buffered);
-        var startPct = Math.max(0, Math.min(100, segPctFromOffset(seg.start_offset, buffered)));
-        var endPct = Math.max(0, Math.min(100, segPctFromOffset(segEnd, buffered)));
-        var bg = segColorMap[seg.status] || segColorMap.recording;
-        var ov = document.createElement('div');
-        ov.style.cssText = 'position:absolute;top:0;bottom:0;border-radius:3px;background:' + bg + ';';
-        ov.style.left = startPct + '%';
-        ov.style.width = Math.max(0, endPct - startPct) + '%';
-        if (seg.status === 'extracting') {
-          ov.style.backgroundImage = 'repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(255,255,255,0.15) 4px,rgba(255,255,255,0.15) 8px)';
-        }
-        segOverlayContainer.appendChild(ov);
-
-        var isEditable = seg.status === 'recording' || seg.status === 'defined';
-        if (isEditable) {
-          var startHandle = document.createElement('div');
-          startHandle.style.cssText = 'position:absolute;top:0;bottom:0;width:8px;background:#e53935;border-radius:2px;cursor:ew-resize;pointer-events:auto;';
-          startHandle.style.left = 'calc(' + startPct + '% - 4px)';
-          startHandle.dataset.segId = seg.id;
-          startHandle.dataset.edge = 'start';
-          segHandleContainer.appendChild(startHandle);
-
-          var endHandle = document.createElement('div');
-          endHandle.style.cssText = 'position:absolute;top:0;bottom:0;width:8px;border-radius:2px;cursor:ew-resize;pointer-events:auto;';
-          endHandle.style.background = seg.status === 'defined' ? '#ffa726' : '#e53935';
-          endHandle.style.left = 'calc(' + endPct + '% - 4px)';
-          endHandle.dataset.segId = seg.id;
-          endHandle.dataset.edge = 'end';
-          segHandleContainer.appendChild(endHandle);
-
-          var delBtn = document.createElement('div');
-          delBtn.style.cssText = 'position:absolute;width:14px;height:14px;background:#e53935;color:#fff;border-radius:50%;font-size:10px;line-height:14px;text-align:center;cursor:pointer;pointer-events:auto;user-select:none;';
-          delBtn.style.left = 'calc(' + ((startPct + endPct) / 2) + '% - 7px)';
-          delBtn.textContent = '\u2715';
-          delBtn.title = 'Delete segment';
-          delBtn.dataset.segId = seg.id;
-          delBtn.onclick = function(ev) {
-            ev.stopPropagation();
-            api.del('/vod/' + dvr.id + '/record/' + seg.id).catch(function(err) {
-              toast.error('Delete segment failed: ' + err.message);
-            });
-          };
-          segDeleteContainer.appendChild(delBtn);
-        }
-      });
-    }
-
-    segHandleContainer.addEventListener('mousedown', function(e) {
-      var handle = e.target;
-      if (!handle.dataset || !handle.dataset.segId || !dvrTracker) return;
-      e.preventDefault();
-      e.stopPropagation();
-      dragState = { segID: handle.dataset.segId, edge: handle.dataset.edge, rect: seekOuter.getBoundingClientRect(), handle: handle };
-    });
-
-    function onDocMouseMove(e) {
-      if (!dragState || !dragState.handle) return;
-      if (dragState.rect.width === 0) return;
-      e.preventDefault();
-      var pct = Math.max(0, Math.min(1, (e.clientX - dragState.rect.left) / dragState.rect.width));
-      dragState.handle.style.left = 'calc(' + (pct * 100) + '% - 4px)';
-    }
-    document.addEventListener('mousemove', onDocMouseMove);
-
-    function onDocMouseUp(e) {
-      if (!dragState || !dragState.handle) return;
-      var rect = dragState.rect;
-      var segID = dragState.segID;
-      var edge = dragState.edge;
-      dragState = null;
-      if (rect.width === 0) return;
-      var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      var buf = dvrTracker.getBuffered();
-      var newOffset = Math.max(0, Math.min(buf, segOffsetFromPct(pct, buf)));
-      var body = {};
-      if (edge === 'start') {
-        body.start_offset = newOffset;
-      } else {
-        body.end_offset = (pct >= 0.98) ? -1 : newOffset;
-      }
-      api.put('/vod/' + dvr.id + '/record/' + segID, body).catch(function(err) {
-        toast.error('Update segment failed: ' + err.message);
-      });
-    }
-    document.addEventListener('mouseup', onDocMouseUp);
 
     liveBadge.onclick = () => {
       if (!dvr) return;
@@ -2999,8 +2837,7 @@
       video.pause();
       video.removeAttribute('src');
       dvrTracker.reset();
-      var buf = dvrTracker.getBuffered();
-      video.src = buf > 5 ? '/vod/' + dvr.id + '/seek?t=' + Math.max(0, buf - 5).toFixed(1) : '/vod/' + dvr.id + '/stream';
+      video.src = '/vod/' + dvr.id + '/stream';
       video.oncanplay = () => {
         videoWrap.style.minHeight = '';
         statusEl.style.color = '#4caf50';
@@ -3048,7 +2885,7 @@
             return;
           }
           dvrTracker.updateBuffered(st.buffered);
-          if (isLive && st.duration > 0) {
+          if (isLive && st.duration > 0 && !channelID) {
             isLive = false;
             dvrTracker.setDuration(st.duration);
             dvr.duration = st.duration;
@@ -3057,18 +2894,10 @@
             currentProfile = st.profile;
             if (profileSelect) profileSelect.value = currentProfile;
           }
-          if (st.segments && st.segments.length > 0) {
-            var activeSeg = st.segments.find(function(seg) { return seg.status === 'recording'; });
-            if (activeSeg) {
-              activeSegmentID = activeSeg.id;
-              if (!isRecording) startRecordingUI();
-            } else {
-              if (isRecording) stopRecordingUI();
-            }
-            renderSegmentOverlays(st.segments, st.buffered);
-          } else {
-            if (isRecording) stopRecordingUI();
-            renderSegmentOverlays([], st.buffered);
+          if (st.recording && !isRecording) {
+            startRecordingUI();
+          } else if (!st.recording && isRecording) {
+            stopRecordingUI();
           }
           if (st.video || st.audio_tracks) {
             probeData = { video: st.video || null, audio_tracks: st.audio_tracks || [], duration: st.duration, profile: st.profile || '' };
@@ -3128,22 +2957,20 @@
 
       dvrPosInterval = setInterval(() => {
         if (playerCtx.signal.aborted) { clearDvrIntervals(); return; }
-        if (!video || dvrTracker.isSeeking()) return;
+        if (!video) return;
         var d = dvrTracker.getDisplay(video.currentTime);
         const epg = getEpgTiming();
 
         if (isLive && epg) {
-          const progPos = epg.elapsed - dvrTracker.getBuffered() + d.pos;
-          seekPos.style.width = Math.min(100, Math.max(0, (progPos / epg.duration) * 100)) + '%';
-          const progRemain = Math.max(0, epg.duration - epg.elapsed);
-          timeLabel.textContent = fmtTime(d.pos) + ' / ' + fmtTime(d.total) + ' (' + fmtTime(progRemain) + ' left)';
+          const viewerProgPos = epg.elapsed - dvrTracker.getBuffered() + d.pos;
+          seekPos.style.width = Math.min(100, Math.max(0, (viewerProgPos / epg.duration) * 100)) + '%';
+          const progRemain = Math.max(0, epg.duration - viewerProgPos);
+          timeLabel.textContent = fmtTime(viewerProgPos) + ' / ' + fmtTime(epg.duration) + ' (' + fmtTime(progRemain) + ' left)';
           liveBadge.style.display = 'inline-block';
-          liveBadge.style.opacity = (dvrTracker.getSeekOffset() > 0) ? '1' : '0.5';
         } else if (isLive) {
           seekPos.style.width = d.pct + '%';
           timeLabel.textContent = fmtTime(d.pos) + ' / ' + fmtTime(d.total);
           liveBadge.style.display = 'inline-block';
-          liveBadge.style.opacity = (dvrTracker.getSeekOffset() > 0) ? '1' : '0.5';
         } else {
           seekPos.style.width = d.pct + '%';
           timeLabel.textContent = fmtTime(d.pos) + ' / ' + fmtTime(d.total);
@@ -3172,38 +2999,45 @@
       if (mpegtsPlayer && mpegtsPlayer.statisticsInfo) {
         var stats = mpegtsPlayer.statisticsInfo;
         var mi = mpegtsPlayer.mediaInfo || {};
-        lines.push('Resolution: ' + (res || '?'));
-        lines.push('Video: ' + codecName(mi.videoCodec) + (vi && vi.profile ? ' (' + vi.profile + ')' : ''));
-        lines.push('FPS: ' + (vi && vi.fps ? vi.fps : (mi.fps || '?')));
-        lines.push('Audio: ' + codecName(mi.audioCodec) + (activeAudio && activeAudio.language ? ' [' + activeAudio.language + ']' : ''));
-        if (activeAudio && activeAudio.channels) lines.push('Channels: ' + activeAudio.channels + 'ch' + (activeAudio.sample_rate ? ' @ ' + activeAudio.sample_rate + ' Hz' : ''));
-        if (vi && vi.color_space && vi.color_space !== 'unknown') lines.push('Color: ' + vi.color_space + (vi.color_transfer && vi.color_transfer !== 'unknown' ? '/' + vi.color_transfer : ''));
-        if (vi && vi.pix_fmt) lines.push('Pixel: ' + vi.pix_fmt);
-        if (vi && vi.field_order && vi.field_order !== 'unknown' && vi.field_order !== 'progressive') lines.push('Scan: ' + vi.field_order);
-        lines.push('Container: ' + (currentContainer || '?'));
-        lines.push('Buffer: ' + buf);
+        lines.push('Resolution: ' + esc(res || '?'));
+        lines.push('Video: ' + esc(codecName(mi.videoCodec)) + (vi && vi.profile ? ' (' + esc(vi.profile) + ')' : ''));
+        lines.push('FPS: ' + esc('' + (vi && vi.fps ? vi.fps : (mi.fps || '?'))));
+        lines.push('Audio: ' + esc(codecName(mi.audioCodec)) + (activeAudio && activeAudio.language ? ' [' + esc(activeAudio.language) + ']' : ''));
+        if (activeAudio && activeAudio.channels) lines.push('Channels: ' + esc('' + activeAudio.channels) + 'ch' + (activeAudio.sample_rate ? ' @ ' + esc('' + activeAudio.sample_rate) + ' Hz' : ''));
+        if (vi && vi.color_space && vi.color_space !== 'unknown') lines.push('Color: ' + esc(vi.color_space) + (vi.color_transfer && vi.color_transfer !== 'unknown' ? '/' + esc(vi.color_transfer) : ''));
+        if (vi && vi.pix_fmt) lines.push('Pixel: ' + esc(vi.pix_fmt));
+        if (vi && vi.field_order && vi.field_order !== 'unknown' && vi.field_order !== 'progressive') lines.push('Scan: ' + esc(vi.field_order));
+        lines.push('Container: ' + esc(currentContainer || '?'));
+        lines.push('Buffer: ' + esc(buf));
         lines.push('Speed: ' + (stats.speed != null ? (stats.speed / 1024).toFixed(2) + ' MB/s' : '?'));
         lines.push('Dropped: ' + (stats.droppedFrames != null ? stats.droppedFrames : '?'));
       } else {
-        lines.push('Resolution: ' + (res || (vi ? vi.codec : '?')));
+        lines.push('Resolution: ' + esc(res || (vi ? vi.codec : '?')));
         if (vi) {
-          lines.push('Video: ' + vi.codec + (vi.profile ? ' (' + vi.profile + ')' : ''));
-          if (vi.fps) lines.push('FPS: ' + vi.fps);
+          lines.push('Video: ' + esc(vi.codec) + (vi.profile ? ' (' + esc(vi.profile) + ')' : ''));
+          if (vi.fps) lines.push('FPS: ' + esc('' + vi.fps));
           if (vi.bit_rate) lines.push('Video BR: ' + (parseInt(vi.bit_rate) / 1000).toFixed(0) + ' kbps');
         }
         if (activeAudio) {
-          lines.push('Audio: ' + activeAudio.codec + (activeAudio.language ? ' [' + activeAudio.language + ']' : '') + (activeAudio.profile ? ' (' + activeAudio.profile + ')' : ''));
-          if (activeAudio.channels) lines.push('Channels: ' + activeAudio.channels + 'ch' + (activeAudio.sample_rate ? ' @ ' + activeAudio.sample_rate + ' Hz' : ''));
+          lines.push('Audio: ' + esc(activeAudio.codec) + (activeAudio.language ? ' [' + esc(activeAudio.language) + ']' : '') + (activeAudio.profile ? ' (' + esc(activeAudio.profile) + ')' : ''));
+          if (activeAudio.channels) lines.push('Channels: ' + esc('' + activeAudio.channels) + 'ch' + (activeAudio.sample_rate ? ' @ ' + esc('' + activeAudio.sample_rate) + ' Hz' : ''));
           if (activeAudio.bit_rate) lines.push('Audio BR: ' + (parseInt(activeAudio.bit_rate) / 1000).toFixed(0) + ' kbps');
         }
-        if (vi && vi.color_space && vi.color_space !== 'unknown') lines.push('Color: ' + vi.color_space + (vi.color_transfer && vi.color_transfer !== 'unknown' ? '/' + vi.color_transfer : '') + (vi.color_primaries && vi.color_primaries !== 'unknown' ? '/' + vi.color_primaries : ''));
-        if (vi && vi.pix_fmt) lines.push('Pixel: ' + vi.pix_fmt);
-        if (vi && vi.field_order && vi.field_order !== 'unknown' && vi.field_order !== 'progressive') lines.push('Scan: ' + vi.field_order);
-        lines.push('Container: ' + (currentContainer || '?'));
-        lines.push('Buffer: ' + buf);
+        if (vi && vi.color_space && vi.color_space !== 'unknown') lines.push('Color: ' + esc(vi.color_space) + (vi.color_transfer && vi.color_transfer !== 'unknown' ? '/' + esc(vi.color_transfer) : '') + (vi.color_primaries && vi.color_primaries !== 'unknown' ? '/' + esc(vi.color_primaries) : ''));
+        if (vi && vi.pix_fmt) lines.push('Pixel: ' + esc(vi.pix_fmt));
+        if (vi && vi.field_order && vi.field_order !== 'unknown' && vi.field_order !== 'progressive') lines.push('Scan: ' + esc(vi.field_order));
+        lines.push('Container: ' + esc(currentContainer || '?'));
+        lines.push('Buffer: ' + esc(buf));
       }
-      if (probeData && probeData.duration > 0) lines.push('Duration: ' + fmtTime(probeData.duration));
-      if (probeData && probeData.profile) lines.push('Profile: ' + probeData.profile);
+      if (probeData) lines.push('Duration: ' + (probeData.duration > 0 ? fmtTime(probeData.duration) : '\u221E'));
+      if (probeData && probeData.profile) lines.push('Profile: ' + esc(probeData.profile));
+      if (dvr && dvr.request_headers) {
+        lines.push('');
+        lines.push('<b>Request Headers</b>');
+        Object.keys(dvr.request_headers).sort().forEach(function(k) {
+          lines.push(esc(k) + ': ' + esc(dvr.request_headers[k]));
+        });
+      }
       statsOverlay.innerHTML = lines.join('<br>');
     }
 
@@ -3245,7 +3079,7 @@
       progInterval = setInterval(fetchNowPlaying, 60000);
     }
 
-    const isBrowserProfile = url.includes('profile=Browser');
+    let isBrowserProfile = url.includes('profile=Browser');
 
     function startPlayback() {
       destroyPlayer();
@@ -3256,13 +3090,15 @@
       nowProgram = null;
       video.removeAttribute('src');
 
+      var useHLS = isBrowserProfile && dvr && (dvr.container === 'hls' || (/iPhone|iPad/.test(navigator.userAgent) || (/Safari\//.test(navigator.userAgent) && !/Chrome\//.test(navigator.userAgent))));
+
       if (isBrowserProfile) {
         statusEl.style.color = '#999';
         statusEl.textContent = 'Connecting...';
-        video.src = dvr ? '/vod/' + dvr.id + '/stream' : url;
+        video.src = dvr ? (useHLS ? '/vod/' + dvr.id + '/hls/live.m3u8' : '/vod/' + dvr.id + '/stream') : url;
         video.oncanplay = () => {
           statusEl.style.color = '#4caf50';
-          currentContainer = 'fMP4';
+          currentContainer = useHLS ? 'HLS' : 'fMP4';
           retryCount = 0;
           updateStatusText();
           fetchNowPlaying();
@@ -3329,11 +3165,11 @@
       if (dvr && channelID) {
         retryTimeout = setTimeout(async () => {
           try {
-            await api.del('/vod/' + dvr.id).catch(() => {});
+            await api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(() => {});
             var audioParam = currentAudioIndex > 0 ? '&audio=' + currentAudioIndex : '';
             const resp = await fetch('/channel/' + channelID + '/vod?profile=' + encodeURIComponent(currentProfile) + audioParam, { method: 'POST' }).then(r => r.json());
             if (resp.session_id) {
-              dvr = { id: resp.session_id, duration: resp.duration };
+              dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
               if (dvrTracker) dvrTracker.reset();
             }
           } catch(e) {}
@@ -3349,11 +3185,8 @@
       statusEl.textContent = 'Buffering...';
       if (stallTimeout) clearTimeout(stallTimeout);
       stallTimeout = setTimeout(() => {
-        if (!video.paused && video.readyState < 3) {
-          if (dvrTracker && dvrTracker.getBuffered() > 0 && !dvrTracker.isSeeking()) {
-            var pos = dvrTracker.getPos(video.currentTime);
-            seekTo(Math.min(pos, dvrTracker.getBuffered()));
-          }
+        if (!video.paused && video.readyState < 3 && dvr) {
+          handleRetry();
         }
       }, dvr ? 5000 : 30000);
     });
@@ -3364,13 +3197,19 @@
     });
 
     video.onerror = () => {
-      if (!mpegtsPlayer && !(dvrTracker && dvrTracker.isSeeking())) {
+      if (!mpegtsPlayer) {
         if (channelID) api.post('/api/channels/' + channelID + '/fail').catch(() => {});
         statusEl.style.color = '#ff6b6b';
         statusEl.textContent = 'Source error';
         handleRetry();
       }
     };
+
+    if (probeUrl) {
+      api.get(probeUrl).then(function(pd) {
+        if (pd) probeData = { video: pd.video || null, audio_tracks: pd.audio_tracks || [], duration: pd.duration || 0, profile: '' };
+      }).catch(function() {});
+    }
 
     startPlayback();
   }
@@ -3538,9 +3377,20 @@
         ],
       },
       columns: [
-        { key: 'logo', label: '', thStyle: 'width:110px;padding-right:0;text-align:center', tdStyle: 'padding-right:0;text-align:center', render: item =>
-          item.logo ? h('img', { src: item.logo, style: 'max-width:100px;max-height:40px;object-fit:contain;border-radius:2px;vertical-align:middle;' }) : null
-        },
+        { key: 'logo', label: '', thStyle: 'width:110px;padding-right:0;text-align:center', tdStyle: 'padding-right:0;text-align:center', render: item => {
+          var copyUrl = function() {
+            var url = window.location.origin + '/channel/' + item.id + '?profile=Copy';
+            navigator.clipboard.writeText(url).then(function() { toast.success('Copied!'); }).catch(function() { toast.error('Copy failed'); });
+          };
+          if (item.logo) {
+            var img = h('img', { src: item.logo, style: 'max-width:100px;max-height:40px;object-fit:contain;border-radius:2px;vertical-align:middle;cursor:pointer;' });
+            img.onclick = copyUrl;
+            return img;
+          }
+          var link = h('span', { style: 'cursor:pointer;font-size:18px;' }, '\uD83D\uDD17');
+          link.onclick = copyUrl;
+          return link;
+        }},
         { key: 'name', label: 'Name', render: item => {
           const span = h('span', null, item.name);
           if (item.fail_count > 0) {
@@ -3616,16 +3466,13 @@
       ],
       rowActions: (item, reload, openFormFn) => [
         { label: 'Play', icon: '\u25B6', handler: () => playChannelWithDVR(item.id, item.name, item.tvg_id || undefined) },
-        { label: 'Duplicate', icon: '\u2398', handler: () => {
-          var dup = {};
-          for (var k in item) dup[k] = item[k];
-          dup.name = item.name + ' (copy)';
-          delete dup.id;
-          delete dup.created_at;
-          delete dup.updated_at;
-          delete dup.fail_count;
-          delete dup._now_playing;
-          openFormFn(dup, true);
+        { label: 'Record', icon: '\u23FA', handler: async () => {
+          try {
+            await api.post('/channel/' + item.id + '/record', { program_title: item.name, channel_name: item.name });
+            toast.success('Recording started: ' + item.name);
+          } catch (err) {
+            toast.error('Record failed: ' + err.message);
+          }
         }},
       ],
       postFormSetup: (inputs, isEdit, item) => {
@@ -3782,9 +3629,9 @@
         { key: 'name', label: 'Name' },
         { key: 'stream_mode', label: 'Mode', render: item => ({direct:'Direct',proxy:'Proxy',ffmpeg:'FFmpeg'})[item.stream_mode] || item.stream_mode },
         { key: 'source_type', label: 'Source', render: item => ({direct:'Direct',satip:'SAT>IP',m3u:'M3U'})[item.source_type] || item.source_type },
-        { key: 'hwaccel', label: 'HW Accel', render: item => ({none:'None (Software)',qsv:'Intel QSV',nvenc:'NVIDIA NVENC',vaapi:'VAAPI (AMD/Intel)',videotoolbox:'VideoToolbox (macOS)'})[item.hwaccel] || item.hwaccel },
-        { key: 'video_codec', label: 'Codec', render: item => ({copy:'Copy',h264:'H.264',h265:'H.265',av1:'AV1'})[item.video_codec] || item.video_codec },
-        { key: 'container', label: 'Container', render: item => ({mpegts:'MPEG-TS',matroska:'Matroska',mp4:'MP4',webm:'WebM'})[item.container] || item.container },
+        { key: 'hwaccel', label: 'HW Accel', render: item => ({'default':'Global Default',none:'None (Software)',qsv:'Intel QSV',nvenc:'NVIDIA NVENC',vaapi:'VAAPI (AMD/Intel)',videotoolbox:'VideoToolbox (macOS)'})[item.hwaccel] || item.hwaccel },
+        { key: 'video_codec', label: 'Codec', render: item => ({'default':'Global Default',copy:'Copy',h264:'H.264',h265:'H.265',av1:'AV1'})[item.video_codec] || item.video_codec },
+        { key: 'container', label: 'Container/Delivery', render: item => ({mpegts:'MPEG-TS',matroska:'Matroska',mp4:'MP4',webm:'WebM',hls:'HLS'})[item.container] || item.container },
         { key: 'is_default', label: 'Default', render: item => {
           const badges = [];
           if (item.is_system) badges.push(h('span', { className: 'badge badge-info', style: 'margin-right:4px' }, 'System'));
@@ -3808,29 +3655,32 @@
           { value: 'm3u', label: 'M3U' },
         ], showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
         { key: 'hwaccel', label: 'Hardware Acceleration', type: 'select', options: [
+          { value: 'default', label: 'Global Default' },
           { value: 'none', label: 'None (Software)' },
           { value: 'qsv', label: 'Intel QSV (Arc/iGPU)' },
           { value: 'nvenc', label: 'NVIDIA NVENC' },
           { value: 'vaapi', label: 'VAAPI (AMD/Intel)' },
           { value: 'videotoolbox', label: 'VideoToolbox (macOS only)' },
-        ], showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
+        ], default: 'default', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
         { key: 'video_codec', label: 'Video Codec', type: 'select', options: [
+          { value: 'default', label: 'Global Default' },
           { value: 'copy', label: 'Copy (No Transcode)' },
           { value: 'h264', label: 'H.264 / AVC' },
           { value: 'h265', label: 'H.265 / HEVC' },
           { value: 'av1', label: 'AV1' },
-        ], showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
-        { key: 'container', label: 'Container Format', type: 'select', options: [
+        ], default: 'default', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
+        { key: 'container', label: 'Container/Delivery', type: 'select', options: [
           { value: 'mpegts', label: 'MPEG-TS (HDHR/Plex)' },
           { value: 'matroska', label: 'Matroska (VLC)' },
-          { value: 'mp4', label: 'MP4 (Browser/Plex)' },
+          { value: 'mp4', label: 'MP4 (Browser)' },
+          { value: 'hls', label: 'HLS (Safari/iPhone)' },
           { value: 'webm', label: 'WebM (Browser, requires Opus audio)' },
         ], showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
-        { key: 'deinterlace', label: 'Deinterlace', type: 'checkbox', default: false, help: 'Apply yadif deinterlace filter (only when transcoding, not copy).', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' && (form.video_codec || 'copy') !== 'copy' },
+        { key: 'deinterlace', label: 'Deinterlace', type: 'checkbox', default: false, help: 'Apply yadif deinterlace filter (only when transcoding, not copy).', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' && (form.video_codec || 'default') !== 'copy' },
         { key: 'fps_mode', label: 'FPS Mode', type: 'select', options: [
           { value: 'auto', label: 'Auto (variable)' },
           { value: 'cfr', label: 'CFR (constant frame rate)' },
-        ], default: 'auto', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' && (form.video_codec || 'copy') !== 'copy' },
+        ], default: 'auto', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' && (form.video_codec || 'default') !== 'copy' },
         { key: 'use_custom_args', label: 'Use Custom Args', type: 'checkbox', default: false, help: 'When checked, the FFmpeg Args field below is used as the complete command (dropdowns are ignored).', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
         { key: 'custom_args', label: 'FFmpeg Args', type: 'textarea', placeholder: '-b:v 4M -maxrate 5M', help: 'Extra flags appended to the composed command. When "Use Custom Args" is checked, this is the full command.', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
       ],
@@ -4137,65 +3987,6 @@
         return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
       }
 
-      function fmtDur(secs) {
-        var hrs = Math.floor(secs / 3600);
-        var mins = Math.floor((secs % 3600) / 60);
-        var s = Math.floor(secs % 60);
-        return hrs > 0 ? hrs + ':' + String(mins).padStart(2,'0') + ':' + String(s).padStart(2,'0')
-                       : mins + ':' + String(s).padStart(2,'0');
-      }
-
-      async function renderActive(activeDiv) {
-        try {
-          var recordings = await api.get('/api/recordings');
-          activeDiv.innerHTML = '';
-          if (!recordings || recordings.length === 0) {
-            activeDiv.appendChild(h('p', { style: 'color: var(--text-muted); padding: 16px;' }, 'No active recordings.'));
-            return;
-          }
-          var table = h('table', { className: 'table' });
-          table.innerHTML = '<thead><tr><th>Channel</th><th>Program</th><th>Buffered</th><th>Segments</th><th>Stop At</th><th>Actions</th></tr></thead>';
-          var tbody = h('tbody');
-          recordings.forEach(function(rec) {
-            var stopStr = fmtLocalTime(rec.stop_at);
-            var segCount = rec.segments ? rec.segments.length : 0;
-            var activeSeg = rec.segments ? rec.segments.find(function(s) { return s.status === 'recording'; }) : null;
-            var segLabel = segCount + (activeSeg ? ' (recording)' : '');
-            var actions = h('td', { style: 'display:flex;gap:4px;' });
-            var playBtn = h('button', { className: 'btn btn-primary btn-sm', onClick: function() {
-              playChannelWithDVR(rec.session_id, rec.channel_name || rec.program_title, null);
-            }}, '\u25B6 Play');
-            var stopBtn = h('button', { className: 'btn btn-warning btn-sm', onClick: async function() {
-              await api.post('/vod/' + rec.session_id + '/stop?extract=true');
-              renderActive(activeDiv);
-              renderCompleted(completedDiv);
-            }}, 'Stop');
-            var cancelBtn = h('button', { className: 'btn btn-danger btn-sm', onClick: async function() {
-              if (!confirm('Cancel and discard "' + (rec.program_title || 'recording') + '"?')) return;
-              await api.post('/vod/' + rec.session_id + '/cancel');
-              renderActive(activeDiv);
-            }}, 'Cancel');
-            actions.appendChild(playBtn);
-            actions.appendChild(stopBtn);
-            actions.appendChild(cancelBtn);
-            var tr = h('tr', null,
-              h('td', null, rec.channel_name),
-              h('td', null, rec.program_title),
-              h('td', null, fmtDur(rec.buffered_secs)),
-              h('td', null, segLabel),
-              h('td', { title: fmtUTC(rec.stop_at) }, stopStr),
-              actions
-            );
-            tbody.appendChild(tr);
-          });
-          table.appendChild(tbody);
-          activeDiv.appendChild(table);
-        } catch(err) {
-          activeDiv.innerHTML = '';
-          activeDiv.appendChild(h('p', { style: 'color: var(--danger)' }, 'Failed to load: ' + err.message));
-        }
-      }
-
       async function renderCompleted(completedDiv) {
         try {
           var recordings = await api.get('/api/recordings/completed');
@@ -4205,24 +3996,31 @@
             return;
           }
           var table = h('table', { className: 'table' });
-          table.innerHTML = '<thead><tr><th>Filename</th><th>Size</th><th>Date</th><th>Actions</th></tr></thead>';
+          table.innerHTML = '<thead><tr><th>Title</th><th>Channel</th><th>Size</th><th>Date</th><th>Actions</th></tr></thead>';
           var tbody = h('tbody');
           recordings.forEach(function(rec) {
             var dateStr = fmtLocalDateTime(rec.mod_time);
+            var title = (rec.meta && rec.meta.program_title) || rec.filename;
+            var channelName = (rec.meta && rec.meta.channel_name) || '';
+            var encodedStreamID = encodeURIComponent(rec.stream_id);
+            var encodedName = encodeURIComponent(rec.filename);
+            var basePath = '/api/recordings/completed/' + encodedStreamID + '/' + encodedName;
             var actions = h('td', { style: 'display:flex;gap:4px;' });
             var playBtn = h('button', { className: 'btn btn-primary btn-sm', onClick: function() {
-              var fileUrl = '/api/recordings/completed/' + encodeURIComponent(rec.filename) + '/stream?profile=Browser&user_id=' + encodeURIComponent(rec.user_id || '') + '&token=' + encodeURIComponent(state.accessToken || '');
-              openVideoPlayer(rec.filename, fileUrl, null, null);
+              var fileUrl = basePath + '/stream?profile=Browser&token=' + encodeURIComponent(state.accessToken || '');
+              var probeUrl = basePath + '/probe';
+              openVideoPlayer(title, fileUrl, null, null, null, probeUrl);
             }}, '\u25B6 Play');
             var deleteBtn = h('button', { className: 'btn btn-danger btn-sm', onClick: async function() {
-              if (!confirm('Delete ' + rec.filename + '?')) return;
-              await api.del('/api/recordings/completed/' + encodeURIComponent(rec.filename) + '?user_id=' + encodeURIComponent(rec.user_id || ''));
+              if (!confirm('Delete ' + title + '?')) return;
+              await api.del(basePath);
               renderCompleted(completedDiv);
             }}, 'Delete');
             actions.appendChild(playBtn);
             actions.appendChild(deleteBtn);
             var tr = h('tr', null,
-              h('td', null, rec.filename),
+              h('td', null, title),
+              h('td', null, channelName),
               h('td', null, fmtSize(rec.size)),
               h('td', { title: fmtUTC(rec.mod_time) }, dateStr),
               actions
@@ -4284,12 +4082,6 @@
       var scheduledDiv = h('div');
       scheduledSection.appendChild(scheduledDiv);
 
-      var activeSection = h('div', { className: 'table-container', style: 'margin-top: 16px;' },
-        h('div', { className: 'table-header' }, h('h3', null, 'Active Recordings'))
-      );
-      var activeDiv = h('div');
-      activeSection.appendChild(activeDiv);
-
       var completedSection = h('div', { className: 'table-container', style: 'margin-top: 16px;' },
         h('div', { className: 'table-header' }, h('h3', null, 'Completed Recordings'))
       );
@@ -4297,14 +4089,12 @@
       completedSection.appendChild(completedDiv);
 
       container.appendChild(scheduledSection);
-      container.appendChild(activeSection);
       container.appendChild(completedSection);
 
       renderScheduled(scheduledDiv);
-      renderActive(activeDiv);
       renderCompleted(completedDiv);
 
-      pollTimer = setInterval(function() { renderScheduled(scheduledDiv); renderActive(activeDiv); }, 5000);
+      pollTimer = setInterval(function() { renderScheduled(scheduledDiv); }, 5000);
 
       var observer = new MutationObserver(function() {
         if (!document.body.contains(container)) {
@@ -4347,6 +4137,63 @@
             ),
             h('p', { style: 'color: var(--text-muted); margin-top: 8px; font-size: 13px' },
               'When enabled, the VOD player shows a dropdown to switch between stream profiles for testing transcoding. When disabled, Browser profile is always used.'),
+          ),
+        ));
+
+        const currentHWAccel = ((Array.isArray(settings) ? settings : []).find(s => s.key === 'default_hwaccel') || {}).value || 'none';
+        const hwaccelSelect = h('select', { id: 'setting-default-hwaccel', style: 'padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); font-size: 14px' },
+          h('option', { value: 'none' }, 'Software (none)'),
+          h('option', { value: 'qsv' }, 'Intel QSV'),
+          h('option', { value: 'nvenc' }, 'NVIDIA NVENC'),
+          h('option', { value: 'vaapi' }, 'VA-API'),
+          h('option', { value: 'videotoolbox' }, 'VideoToolbox'),
+        );
+        hwaccelSelect.value = currentHWAccel;
+        hwaccelSelect.onchange = async function() {
+          hwaccelSelect.disabled = true;
+          try {
+            await api.put('/api/settings', { default_hwaccel: hwaccelSelect.value });
+            toast.success('Hardware acceleration updated');
+          } catch (err) {
+            toast.error(err.message);
+            hwaccelSelect.value = currentHWAccel;
+          }
+          hwaccelSelect.disabled = false;
+        };
+
+        const currentVideoCodec = ((Array.isArray(settings) ? settings : []).find(s => s.key === 'default_video_codec') || {}).value || 'copy';
+        const videoCodecSelect = h('select', { id: 'setting-default-video-codec', style: 'padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); font-size: 14px' },
+          h('option', { value: 'copy' }, 'Passthrough (copy)'),
+          h('option', { value: 'h264' }, 'H.264'),
+          h('option', { value: 'h265' }, 'H.265 / HEVC'),
+          h('option', { value: 'av1' }, 'AV1'),
+        );
+        videoCodecSelect.value = currentVideoCodec;
+        videoCodecSelect.onchange = async function() {
+          videoCodecSelect.disabled = true;
+          try {
+            await api.put('/api/settings', { default_video_codec: videoCodecSelect.value });
+            toast.success('Video codec updated');
+          } catch (err) {
+            toast.error(err.message);
+            videoCodecSelect.value = currentVideoCodec;
+          }
+          videoCodecSelect.disabled = false;
+        };
+
+        container.appendChild(h('div', { className: 'table-container', style: 'margin-top: 24px' },
+          h('div', { className: 'table-header' }, h('h3', null, 'Encoding Defaults')),
+          h('div', { style: 'padding: 16px; font-size: 15px' },
+            h('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:12px' },
+              h('label', { for: 'setting-default-hwaccel', style: 'margin:0;min-width:160px' }, 'Hardware acceleration:'),
+              hwaccelSelect,
+            ),
+            h('div', { style: 'display:flex;align-items:center;gap:10px' },
+              h('label', { for: 'setting-default-video-codec', style: 'margin:0;min-width:160px' }, 'Video codec:'),
+              videoCodecSelect,
+            ),
+            h('p', { style: 'color: var(--text-muted); margin-top: 8px; font-size: 13px' },
+              'System-wide encoding defaults. Any stream profile set to "Global Default" uses these values. Set hardware acceleration to match your GPU. Video codec controls the output format — copy passes through the source codec without re-encoding.'),
           ),
         ));
 
@@ -4980,7 +4827,7 @@
       async function fetchAndRender() {
         var viewers = await api.get('/api/activity');
         var recordings = [];
-        try { recordings = await api.get('/api/recordings') || []; } catch (e) {}
+        try { recordings = await api.get('/api/recordings', { cache: 'no-store' }) || []; } catch (e) {}
         renderViewers(viewers, recordings);
       }
 

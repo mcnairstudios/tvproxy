@@ -19,6 +19,7 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 const placeholderLogo = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Crect width='200' height='200' rx='20' fill='%23374151'/%3E%3Ctext x='100' y='115' font-family='sans-serif' font-size='80' fill='%239CA3AF' text-anchor='middle'%3ETV%3C/text%3E%3C/svg%3E`
@@ -30,6 +31,7 @@ type LogoService struct {
 	logosDir       string
 	streamLogosDir string
 	log            zerolog.Logger
+	rev            *store.Revision
 
 	streamLogoMu    sync.RWMutex
 	streamLogoCache map[string]string
@@ -55,9 +57,14 @@ func NewLogoService(
 		logosDir:        filepath.Join(staticRoot, "logos"),
 		streamLogosDir:  filepath.Join(staticRoot, "streams", "logoscache"),
 		log:             log.With().Str("service", "logo").Logger(),
+		rev:             store.NewRevision(),
 		streamLogoCache: make(map[string]string),
 		resolveCache:    make(map[string]string),
 	}
+}
+
+func (s *LogoService) ETag() string {
+	return s.rev.ETag()
 }
 
 func (s *LogoService) EnsureDir() {
@@ -88,6 +95,7 @@ func (s *LogoService) Create(ctx context.Context, logo *models.Logo) error {
 	if err := s.repo.Create(ctx, logo); err != nil {
 		return err
 	}
+	s.rev.Bump()
 	go s.downloadLogo(context.Background(), logo.ID, logo.URL)
 	return nil
 }
@@ -101,6 +109,7 @@ func (s *LogoService) Update(ctx context.Context, logo *models.Logo) error {
 	if err := s.repo.Update(ctx, logo); err != nil {
 		return err
 	}
+	s.rev.Bump()
 	if urlChanged {
 		if old.CachedFilename != "" {
 			os.Remove(filepath.Join(s.logosDir, old.CachedFilename))
@@ -116,7 +125,11 @@ func (s *LogoService) Delete(ctx context.Context, id string) error {
 	if err == nil && logo.CachedFilename != "" {
 		os.Remove(filepath.Join(s.logosDir, logo.CachedFilename))
 	}
-	return s.repo.Delete(ctx, id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.rev.Bump()
+	return nil
 }
 
 func (s *LogoService) List(ctx context.Context) ([]models.Logo, error) {
@@ -146,7 +159,7 @@ func (s *LogoService) CacheAll(ctx context.Context) {
 }
 
 func (s *LogoService) downloadLogo(ctx context.Context, id, url string) {
-	if url == "" {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		return
 	}
 
@@ -265,6 +278,9 @@ func (s *LogoService) StreamLogoFilename(url string) string {
 }
 
 func (s *LogoService) downloadStreamLogo(ctx context.Context, url, hash string) {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return
+	}
 	resp, err := httputil.Fetch(ctx, s.httpClient, s.config, url)
 	if err != nil {
 		return

@@ -88,7 +88,9 @@ func (s *ClientService) CreateClient(ctx context.Context, client *models.Client,
 	client.StreamProfileID = profile.ID
 
 	if err := s.clientRepo.Create(ctx, client); err != nil {
-		s.streamProfileRepo.Delete(ctx, profile.ID) //nolint:errcheck
+		if delErr := s.streamProfileRepo.Delete(ctx, profile.ID); delErr != nil {
+			s.log.Warn().Err(delErr).Str("profile_id", profile.ID).Msg("failed to clean up orphan profile")
+		}
 		return fmt.Errorf("creating client: %w", err)
 	}
 
@@ -129,7 +131,9 @@ func (s *ClientService) DeleteClient(ctx context.Context, id string) error {
 	if profileErr == nil && !profile.IsSystem {
 		referenced, refErr := s.clientRepo.IsStreamProfileReferenced(ctx, profileID)
 		if refErr == nil && !referenced {
-			s.streamProfileRepo.Delete(ctx, profileID) //nolint:errcheck
+			if delErr := s.streamProfileRepo.Delete(ctx, profileID); delErr != nil {
+				s.log.Warn().Err(delErr).Str("profile_id", profileID).Msg("failed to clean up orphan profile")
+			}
 		}
 	}
 

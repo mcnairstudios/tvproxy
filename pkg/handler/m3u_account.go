@@ -152,5 +152,5 @@ func (h *M3UAccountHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 func (h *M3UAccountHandler) RefreshStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	respondJSON(w, http.StatusOK, h.m3uService.GetStatus(id))
+	respondJSON(w, http.StatusOK, h.m3uService.Get(id))
 }

@@ -21,10 +21,12 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/defaults"
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/handler"
+	"github.com/gavinmcnair/tvproxy/pkg/hls"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/openapi"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
+	"github.com/gavinmcnair/tvproxy/pkg/session"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/worker"
 	"github.com/gavinmcnair/tvproxy/web"
@@ -116,8 +118,9 @@ func main() {
 	if err == nil && adminUser != nil {
 		adminUserID = adminUser.ID
 	}
-	settingsService := service.NewSettingsService(settingsRepo)
+	settingsService := service.NewSettingsService(settingsRepo, streamProfileRepo, log)
 	settingsService.LoadDebugFlag(ctx)
+	settingsService.RecomposeDefaultProfiles(ctx)
 
 	wgService := service.NewWireGuardService(settingsService, log)
 	if err := wgService.Start(ctx); err != nil {
@@ -138,28 +141,30 @@ func main() {
 	proxyService := service.NewProxyService(channelRepo, streamStore, streamProfileRepo, clientService, activityService, cfg, wgHTTPClient, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgStore, logoService, cfg, log)
-	ffmpegMgr := service.NewFFmpegManager(cfg, wgHTTPClient, log)
-	vodService := service.NewVODService(channelRepo, streamStore, streamProfileRepo, ffmpegMgr, activityService, cfg, log)
+	recordingStore := store.NewRecordingStore(cfg.RecordDir, log)
+	sessionMgr := session.NewManager(cfg, wgHTTPClient, recordingStore, log)
+	vodService := service.NewVODService(channelRepo, streamStore, streamProfileRepo, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
 	vodService.RecoverRecordings(ctx)
 	schedulerService := service.NewSchedulerService(scheduledRecRepo, channelRepo, vodService, cfg, log)
-	dlnaService := service.NewDLNAService(channelRepo, channelGroupRepo, userRepo, settingsService, logoService, cfg, log)
+	dlnaService := service.NewDLNAService(channelRepo, channelGroupRepo, userRepo, settingsService, logoService, vodService, cfg, log)
 
 	authMW := middleware.NewAuthMiddleware(authService, cfg.APIKey, adminUserID)
 
 	authHandler := handler.NewAuthHandler(authService)
 	userHandler := handler.NewUserHandler(authService)
 	m3uAccountHandler := handler.NewM3UAccountHandler(m3uService)
-	streamHandler := handler.NewStreamHandler(streamStore, logoService)
+	streamHandler := handler.NewStreamHandler(streamStore, streamStore, logoService)
 	channelHandler := handler.NewChannelHandler(channelService, logoService)
 	channelGroupHandler := handler.NewChannelGroupHandler(channelService)
 	logoHandler := handler.NewLogoHandler(logoService)
-	streamProfileHandler := handler.NewStreamProfileHandler(streamProfileRepo)
+	streamProfileHandler := handler.NewStreamProfileHandler(streamProfileRepo, settingsService)
 	epgSourceHandler := handler.NewEPGSourceHandler(epgService)
-	epgDataHandler := handler.NewEPGDataHandler(epgStore)
+	epgDataHandler := handler.NewEPGDataHandler(epgStore, epgStore)
 	hdhrHandler := handler.NewHDHRHandler(hdhrService, proxyService, cfg)
 	outputHandler := handler.NewOutputHandler(outputService)
 	proxyHandler := handler.NewProxyHandler(proxyService, settingsService, log)
-	vodHandler := handler.NewVODHandler(vodService, log)
+	hlsManager := hls.NewManager(log)
+	vodHandler := handler.NewVODHandler(vodService, clientService, hlsManager, log)
 	activityHandler := handler.NewActivityHandler(activityService)
 	exportService := service.NewExportService(channelRepo, channelGroupRepo, streamProfileRepo, clientRepo, m3uAccountRepo, epgSourceRepo, settingsService, authService)
 	settingsHandler := handler.NewSettingsHandler(settingsService, exportService, db, authService, streamStore, epgStore)
@@ -177,7 +182,7 @@ func main() {
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-API-Key"},
-		ExposedHeaders:   []string{"Link"},
+		ExposedHeaders:   []string{"Link", "ETag"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	})
@@ -231,24 +236,22 @@ func main() {
 	r.Get("/channel/{channelID}", proxyHandler.Stream)
 	r.Head("/channel/{channelID}", proxyHandler.StreamHead)
 	r.Get("/stream/{streamID}", proxyHandler.RawStream)
+	r.Get("/recording/{streamID}/{filename}", vodHandler.StreamRecordingDLNA)
 
 	r.Get("/stream/{streamID}/probe", vodHandler.ProbeStream)
 	r.Post("/stream/{streamID}/vod", vodHandler.CreateSession)
 	r.Post("/channel/{channelID}/vod", vodHandler.CreateChannelSession)
 	r.Get("/vod/{sessionID}/status", vodHandler.Status)
-	r.Get("/vod/{sessionID}/seek", vodHandler.Seek)
 	r.Get("/vod/{sessionID}/stream", vodHandler.Stream)
+	r.Get("/vod/{sessionID}/hls/live.m3u8", vodHandler.HLSPlaylist)
+	r.Get("/vod/{sessionID}/hls/{segment}", vodHandler.HLSSegment)
 
 	r.Group(func(r chi.Router) {
 		r.Use(authMW.Authenticate)
 
 		r.Delete("/vod/{sessionID}", vodHandler.DeleteSession)
-		r.Post("/vod/{sessionID}/record", vodHandler.MarkRecording)
-		r.Put("/vod/{sessionID}/record/{segmentID}", vodHandler.UpdateSegment)
-		r.Delete("/vod/{sessionID}/record/{segmentID}", vodHandler.DeleteSegment)
-		r.Post("/vod/{sessionID}/stop", vodHandler.StopRecording)
-		r.Post("/vod/{sessionID}/cancel", vodHandler.CancelRecording)
-		r.Post("/channel/{channelID}/record", vodHandler.CreateRecording)
+		r.Post("/api/vod/record/{channelID}", vodHandler.StartRecording)
+		r.Delete("/api/vod/record/{channelID}", vodHandler.StopRecording)
 
 		r.Post("/api/auth/logout", authHandler.Logout)
 		r.Get("/api/auth/me", authHandler.Me)
@@ -368,10 +371,10 @@ func main() {
 		})
 
 		r.Route("/api/recordings", func(r chi.Router) {
-			r.Get("/", vodHandler.ListRecordings)
 			r.Get("/completed", vodHandler.ListCompletedRecordings)
-			r.Get("/completed/{filename}/stream", vodHandler.StreamCompletedRecording)
-			r.Delete("/completed/{filename}", vodHandler.DeleteCompletedRecording)
+			r.Get("/completed/{streamID}/{filename}/probe", vodHandler.ProbeCompletedRecording)
+			r.Get("/completed/{streamID}/{filename}/stream", vodHandler.StreamCompletedRecording)
+			r.Delete("/completed/{streamID}/{filename}", vodHandler.DeleteCompletedRecording)
 			r.Post("/schedule", schedulerHandler.Schedule)
 			r.Get("/schedule", schedulerHandler.List)
 			r.Get("/schedule/{id}", schedulerHandler.Get)
@@ -436,7 +439,6 @@ func main() {
 	wm.Add("hdhr_discover", worker.NewHDHRDiscoverWorker(hdhrDeviceRepo, cfg.BaseURL, cfg.Settings.Workers.RetryDelay, log))
 	wm.Add("hdhr_servers", worker.NewHDHRServerWorker(hdhrDeviceRepo, hdhrService, proxyService, settingsService, outputService, cfg, log))
 	wm.Add("dlna", worker.NewDLNAWorker(dlnaService, cfg.BaseURL, cfg.Port, cfg.Settings.Workers.RetryDelay, cfg.Settings.Workers.DLNAAnnounceInterval, log))
-	wm.Add("vod_cleanup", worker.NewVODCleanupWorker(vodService, 60*time.Second, log))
 	wm.Add("recording_scheduler", worker.NewSchedulerWorker(schedulerService, 30*time.Second, log))
 	wm.Add("wal_checkpoint", worker.NewWALCheckpointWorker(db, 5*time.Minute, log))
 	wm.Add("wireguard", worker.NewWireGuardWorker(wgService, 30*time.Second, log))
@@ -462,6 +464,7 @@ func main() {
 	log.Info().Msg("shutting down")
 
 	wgService.Stop()
+	hlsManager.Shutdown()
 	vodService.Shutdown()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -63,6 +63,7 @@ global.fetch = async (path) => {
   return {
     ok: true,
     status: 200,
+    headers: { get() { return null; } },
     text: async () => body,
     json: async () => JSON.parse(body),
   };

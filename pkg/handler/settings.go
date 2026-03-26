@@ -56,6 +56,10 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for key, value := range req {
+		if !service.IsAPISettable(key) {
+			respondError(w, http.StatusBadRequest, "unknown setting: "+key)
+			return
+		}
 		if err := h.settingsService.Set(r.Context(), key, value); err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to update setting: "+key)
 			return
@@ -118,7 +122,7 @@ func (h *SettingsHandler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
+	respondJSON(w, http.StatusOK, map[string]any{
 		"message":  "import complete",
 		"imported": imported,
 	})

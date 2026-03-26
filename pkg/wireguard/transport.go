@@ -60,7 +60,22 @@ func chromeTLSDialer(dialCtx func(ctx context.Context, network, address string) 
 			return nil, err
 		}
 		host, _, _ := net.SplitHostPort(addr)
-		uconn := utls.UClient(conn, &utls.Config{ServerName: host}, utls.HelloChrome_Auto)
+		spec, err := utls.UTLSIdToSpec(utls.HelloChrome_Auto)
+		if err != nil {
+			conn.Close()
+			return nil, err
+		}
+		for i, ext := range spec.Extensions {
+			if _, ok := ext.(*utls.ALPNExtension); ok {
+				spec.Extensions[i] = &utls.ALPNExtension{AlpnProtocols: []string{"http/1.1"}}
+				break
+			}
+		}
+		uconn := utls.UClient(conn, &utls.Config{ServerName: host}, utls.HelloCustom)
+		if err := uconn.ApplyPreset(&spec); err != nil {
+			conn.Close()
+			return nil, err
+		}
 		if err := uconn.HandshakeContext(ctx); err != nil {
 			conn.Close()
 			return nil, err

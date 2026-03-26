@@ -49,14 +49,6 @@ func channelEPGID(ch models.Channel) string {
 	return fmt.Sprintf("tvproxy.%s", ch.ID)
 }
 
-func (s *OutputService) listChannels(ctx context.Context) ([]models.Channel, error) {
-	return s.channelRepo.List(ctx)
-}
-
-func (s *OutputService) listChannelGroups(ctx context.Context) ([]models.ChannelGroup, error) {
-	return s.channelGroupRepo.List(ctx)
-}
-
 func (s *OutputService) baseURL() string {
 	return fmt.Sprintf("%s:%d", s.config.BaseURL, s.config.Port)
 }
@@ -88,12 +80,12 @@ func (s *OutputService) GenerateEPGForGroups(ctx context.Context, groupIDs []str
 }
 
 func (s *OutputService) generateM3U(ctx context.Context, groupFilter map[string]bool, baseURL string, urlSuffix string) (string, error) {
-	channels, err := s.listChannels(ctx)
+	channels, err := s.channelRepo.List(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing channels: %w", err)
 	}
 
-	groups, err := s.listChannelGroups(ctx)
+	groups, err := s.channelGroupRepo.List(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing channel groups: %w", err)
 	}
@@ -139,7 +131,7 @@ func (s *OutputService) generateM3U(ctx context.Context, groupFilter map[string]
 }
 
 func (s *OutputService) generateEPG(ctx context.Context, groupFilter map[string]bool) (string, error) {
-	channels, err := s.listChannels(ctx)
+	channels, err := s.channelRepo.List(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing channels: %w", err)
 	}

@@ -4,8 +4,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 )
+
+type Versioned interface {
+	ETag() string
+}
 
 type StreamReader interface {
 	List(ctx context.Context) ([]models.Stream, error)
@@ -61,4 +66,26 @@ type EPGStore interface {
 	EPGReader
 	EPGWriter
 	EPGPersister
+}
+
+type ProbeCache interface {
+	GetProbe(streamID string) (*ffmpeg.ProbeResult, error)
+	SaveProbe(streamID string, result *ffmpeg.ProbeResult) error
+}
+
+type RecordingReader interface {
+	List(userID string, isAdmin bool) ([]RecordingEntry, error)
+	FilePath(streamID, filename string) (string, error)
+	GetMeta(streamID, filename string) (*RecordingMeta, error)
+}
+
+type RecordingWriter interface {
+	Save(streamID string, srcPath string, meta RecordingMeta) (string, error)
+	Delete(streamID, filename string) error
+}
+
+type RecordingStore interface {
+	ProbeCache
+	RecordingReader
+	RecordingWriter
 }

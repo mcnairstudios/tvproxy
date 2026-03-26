@@ -26,6 +26,7 @@ type EPGStoreImpl struct {
 	bySourceID      map[string][]string
 	programsByEPGID map[string][]string
 	epgByChannelID  map[string]string
+	rev             *Revision
 
 	path string
 	log  zerolog.Logger
@@ -38,9 +39,14 @@ func NewEPGStore(path string, log zerolog.Logger) *EPGStoreImpl {
 		bySourceID:      make(map[string][]string),
 		programsByEPGID: make(map[string][]string),
 		epgByChannelID:  make(map[string]string),
+		rev:             NewRevision(),
 		path:            path,
 		log:             log.With().Str("store", "epg").Logger(),
 	}
+}
+
+func (s *EPGStoreImpl) ETag() string {
+	return s.rev.ETag()
 }
 
 func (s *EPGStoreImpl) ListEPGData(_ context.Context) ([]models.EPGData, error) {
@@ -217,6 +223,7 @@ func (s *EPGStoreImpl) BulkCreateEPGData(_ context.Context, data []models.EPGDat
 		s.bySourceID[data[i].EPGSourceID] = append(s.bySourceID[data[i].EPGSourceID], data[i].ID)
 		s.epgByChannelID[data[i].ChannelID] = data[i].ID
 	}
+	s.rev.Bump()
 	return nil
 }
 
@@ -244,6 +251,7 @@ func (s *EPGStoreImpl) BulkCreatePrograms(_ context.Context, programs []models.P
 		s.programs[programs[i].ID] = programs[i]
 		s.programsByEPGID[programs[i].EPGDataID] = append(s.programsByEPGID[programs[i].EPGDataID], programs[i].ID)
 	}
+	s.rev.Bump()
 	return nil
 }
 
@@ -263,6 +271,7 @@ func (s *EPGStoreImpl) DeleteBySourceID(_ context.Context, sourceID string) erro
 		delete(s.programsByEPGID, epgID)
 	}
 	delete(s.bySourceID, sourceID)
+	s.rev.Bump()
 	return nil
 }
 
@@ -274,6 +283,7 @@ func (s *EPGStoreImpl) DeleteProgramsByEPGDataID(_ context.Context, epgDataID st
 		delete(s.programs, pid)
 	}
 	delete(s.programsByEPGID, epgDataID)
+	s.rev.Bump()
 	return nil
 }
 
@@ -286,6 +296,7 @@ func (s *EPGStoreImpl) Clear() error {
 	s.bySourceID = make(map[string][]string)
 	s.programsByEPGID = make(map[string][]string)
 	s.epgByChannelID = make(map[string]string)
+	s.rev.Bump()
 	return nil
 }
 
@@ -340,6 +351,7 @@ func (s *EPGStoreImpl) Load() error {
 	for id, p := range snap.Programs {
 		s.programsByEPGID[p.EPGDataID] = append(s.programsByEPGID[p.EPGDataID], id)
 	}
+	s.rev.Bump()
 
 	s.log.Info().
 		Int("epg_channels", len(snap.EPGData)).

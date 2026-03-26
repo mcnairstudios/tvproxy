@@ -27,7 +27,6 @@ type deviceServer struct {
 	cancel context.CancelFunc
 }
 
-// HDHRServerWorker manages per-device HTTP listeners on unique ports.
 type HDHRServerWorker struct {
 	hdhrDeviceRepo  *repository.HDHRDeviceRepository
 	hdhrService     *service.HDHRService
@@ -44,7 +43,6 @@ type HDHRServerWorker struct {
 	idleTimeout     time.Duration
 }
 
-// NewHDHRServerWorker creates a new per-device HDHR HTTP server worker.
 func NewHDHRServerWorker(
 	hdhrDeviceRepo *repository.HDHRDeviceRepository,
 	hdhrService *service.HDHRService,
@@ -80,7 +78,6 @@ func NewHDHRServerWorker(
 	}
 }
 
-// Run implements the Worker interface. Syncs device servers every 10 seconds.
 func (w *HDHRServerWorker) Run(ctx context.Context) {
 	select {
 	case <-time.After(w.retryDelay):
@@ -114,7 +111,6 @@ func (w *HDHRServerWorker) sync(ctx context.Context) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Build set of desired device ID → port
 	desired := make(map[string]int)
 	for _, d := range devices {
 		if d.IsEnabled && d.Port > 0 {
@@ -122,7 +118,6 @@ func (w *HDHRServerWorker) sync(ctx context.Context) {
 		}
 	}
 
-	// Stop servers for removed/disabled/port-changed devices
 	for id, ds := range w.servers {
 		wantPort, ok := desired[id]
 		if !ok || wantPort != ds.port {
@@ -133,7 +128,6 @@ func (w *HDHRServerWorker) sync(ctx context.Context) {
 		}
 	}
 
-	// Start servers for new devices
 	for _, d := range devices {
 		if !d.IsEnabled || d.Port <= 0 {
 			continue
@@ -190,7 +184,6 @@ func (w *HDHRServerWorker) buildRouter(device models.HDHRDevice, baseURL string)
 		MaxAge:           300,
 	}))
 
-	// Device-specific HDHR endpoints
 	r.Get("/discover.json", func(rw http.ResponseWriter, req *http.Request) {
 		data, err := w.hdhrService.GetDiscoverDataForDevice(req.Context(), &device, baseURL)
 		if err != nil {
@@ -210,7 +203,7 @@ func (w *HDHRServerWorker) buildRouter(device models.HDHRDevice, baseURL string)
 	})
 
 	r.Get("/lineup_status.json", func(rw http.ResponseWriter, req *http.Request) {
-		handler.RespondJSONPublic(rw, http.StatusOK, map[string]interface{}{
+		handler.RespondJSONPublic(rw, http.StatusOK, map[string]any{
 			"ScanInProgress": 0,
 			"ScanPossible":   1,
 			"Source":         "Cable",
@@ -240,11 +233,9 @@ func (w *HDHRServerWorker) buildRouter(device models.HDHRDevice, baseURL string)
 		xml.NewEncoder(rw).Encode(deviceXML)
 	})
 
-	// Shared channel proxy route
 	proxyHandler := handler.NewProxyHandler(w.proxyService, w.settingsService, w.log)
 	r.Get("/channel/{channelID}", proxyHandler.Stream)
 
-	// Device-specific filtered M3U/EPG output
 	r.Get("/output/m3u", func(rw http.ResponseWriter, req *http.Request) {
 		content, err := w.outputService.GenerateM3UForGroups(req.Context(), device.ChannelGroupIDs, baseURL)
 		if err != nil {

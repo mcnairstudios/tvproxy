@@ -176,7 +176,7 @@ func (s *WireGuardService) IsConnected() bool {
 	return s.tunnel != nil
 }
 
-func (s *WireGuardService) Status(ctx context.Context) map[string]interface{} {
+func (s *WireGuardService) Status(ctx context.Context) map[string]any {
 	s.mu.RLock()
 	currentState := s.state
 	connAt := s.connectedAt
@@ -185,7 +185,7 @@ func (s *WireGuardService) Status(ctx context.Context) map[string]interface{} {
 	tunnel := s.tunnel
 	s.mu.RUnlock()
 
-	result := map[string]interface{}{
+	result := map[string]any{
 		"state": currentState,
 		"error": lastErr,
 	}
@@ -206,7 +206,7 @@ func (s *WireGuardService) Status(ctx context.Context) map[string]interface{} {
 		}
 	}
 
-	config := map[string]interface{}{}
+	config := map[string]any{}
 	if addr, err := s.settingsService.Get(ctx, "wg_address"); err == nil {
 		config["address"] = addr
 	}

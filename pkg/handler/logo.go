@@ -18,13 +18,20 @@ func NewLogoHandler(logoService *service.LogoService) *LogoHandler {
 }
 
 func (h *LogoHandler) List(w http.ResponseWriter, r *http.Request) {
+	etag := h.logoService.ETag()
+	if r.Header.Get("If-None-Match") == etag {
+		w.Header().Set("ETag", etag)
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	logos, err := h.logoService.List(r.Context())
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to list logos")
 		return
 	}
 
-	respondJSON(w, http.StatusOK, logos)
+	respondCacheable(w, r, etag, http.StatusOK, logos)
 }
 
 func (h *LogoHandler) Create(w http.ResponseWriter, r *http.Request) {

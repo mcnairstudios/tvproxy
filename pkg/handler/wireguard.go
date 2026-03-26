@@ -14,7 +14,7 @@ import (
 )
 
 type WireGuardStatusProvider interface {
-	Status(ctx context.Context) map[string]interface{}
+	Status(ctx context.Context) map[string]any
 	Reconfigure(ctx context.Context) error
 	IsConnected() bool
 	Connect(ctx context.Context, req service.ConnectRequest) error
@@ -54,7 +54,7 @@ func (h *WireGuardHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if errs := validateWireGuardConfig(req); len(errs) > 0 {
-		respondJSON(w, http.StatusUnprocessableEntity, map[string]interface{}{"errors": errs})
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]any{"errors": errs})
 		return
 	}
 

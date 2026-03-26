@@ -1,28 +1,36 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 
+	"github.com/gavinmcnair/tvproxy/pkg/hls"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
 
 type VODHandler struct {
-	vodService *service.VODService
-	log        zerolog.Logger
+	vodService    *service.VODService
+	clientService *service.ClientService
+	hlsManager    *hls.Manager
+	log           zerolog.Logger
 }
 
-func NewVODHandler(vodService *service.VODService, log zerolog.Logger) *VODHandler {
+func NewVODHandler(vodService *service.VODService, clientService *service.ClientService, hlsManager *hls.Manager, log zerolog.Logger) *VODHandler {
 	return &VODHandler{
-		vodService: vodService,
-		log:        log.With().Str("handler", "vod").Logger(),
+		vodService:    vodService,
+		clientService: clientService,
+		hlsManager:    hlsManager,
+		log:           log.With().Str("handler", "vod").Logger(),
 	}
 }
 
@@ -37,16 +45,19 @@ func parseStopAt(raw string) (time.Time, error) {
 	return time.Parse(time.RFC3339, raw)
 }
 
-func parseAudioIndex(r *http.Request) int {
-	raw := r.URL.Query().Get("audio")
-	if raw == "" {
-		return 0
+func clientHeaders(r *http.Request) map[string]string {
+	skip := map[string]bool{
+		"Cookie": true, "Authorization": true, "Connection": true,
+		"Upgrade": true, "Sec-Websocket-Key": true, "Sec-Websocket-Version": true,
 	}
-	v, err := strconv.Atoi(raw)
-	if err != nil || v < 0 {
-		return 0
+	out := make(map[string]string, len(r.Header))
+	for k, v := range r.Header {
+		if skip[k] {
+			continue
+		}
+		out[k] = v[0]
 	}
-	return v
+	return out
 }
 
 func setStreamHeaders(w http.ResponseWriter) {
@@ -74,6 +85,19 @@ func streamResponse(w http.ResponseWriter, reader io.Reader) {
 	}
 }
 
+func serveTranscodedOrFile(w http.ResponseWriter, r *http.Request, reader io.ReadCloser, contentType string) {
+	if f, ok := reader.(*os.File); ok {
+		reader.Close()
+		http.ServeFile(w, r, f.Name())
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "no-cache, no-store")
+	w.WriteHeader(http.StatusOK)
+	streamResponse(w, reader)
+}
+
 func (h *VODHandler) ProbeStream(w http.ResponseWriter, r *http.Request) {
 	streamID := chi.URLParam(r, "streamID")
 
@@ -85,14 +109,14 @@ func (h *VODHandler) ProbeStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if result.IsVOD {
-		respondJSON(w, http.StatusOK, map[string]interface{}{
+		respondJSON(w, http.StatusOK, map[string]any{
 			"type":     "vod",
 			"duration": result.Duration,
 			"width":    result.Width,
 			"height":   result.Height,
 		})
 	} else {
-		respondJSON(w, http.StatusOK, map[string]interface{}{
+		respondJSON(w, http.StatusOK, map[string]any{
 			"type": "live",
 		})
 	}
@@ -100,11 +124,9 @@ func (h *VODHandler) ProbeStream(w http.ResponseWriter, r *http.Request) {
 
 func (h *VODHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 	streamID := chi.URLParam(r, "streamID")
-
 	profileName := r.URL.Query().Get("profile")
-	audioIndex := parseAudioIndex(r)
 
-	session, err := h.vodService.CreateSession(r.Context(), streamID, profileName, audioIndex, r.UserAgent(), r.RemoteAddr)
+	sessionID, consumerID, container, err := h.vodService.StartWatchingStream(r.Context(), streamID, profileName, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
 		h.log.Error().Err(err).Str("stream_id", streamID).Msg("create VOD session failed")
 		if errors.Is(err, service.ErrStreamNotFound) {
@@ -115,115 +137,85 @@ func (h *VODHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"session_id": session.ID,
-		"duration":   h.vodService.GetDuration(session.ID),
+	respondJSON(w, http.StatusOK, map[string]any{
+		"session_id":      sessionID,
+		"consumer_id":     consumerID,
+		"channel_id":      streamID,
+		"container":       container,
+		"request_headers": clientHeaders(r),
 	})
 }
 
 func (h *VODHandler) CreateChannelSession(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelID")
-
 	profileName := r.URL.Query().Get("profile")
-	audioIndex := parseAudioIndex(r)
 
-	session, err := h.vodService.CreateSessionForChannel(r.Context(), channelID, profileName, audioIndex, r.UserAgent(), r.RemoteAddr)
+	sessionID, consumerID, container, err := h.vodService.StartWatching(r.Context(), channelID, profileName, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
 		h.log.Error().Err(err).Str("channel_id", channelID).Msg("create channel VOD session failed")
-		if errors.Is(err, service.ErrStreamNotFound) {
-			respondError(w, http.StatusNotFound, err.Error())
-			return
-		}
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"session_id": session.ID,
-		"duration":   h.vodService.GetDuration(session.ID),
+	respondJSON(w, http.StatusOK, map[string]any{
+		"session_id":      sessionID,
+		"consumer_id":     consumerID,
+		"channel_id":      channelID,
+		"container":       container,
+		"request_headers": clientHeaders(r),
 	})
 }
 
 func (h *VODHandler) Status(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
+	channelID := chi.URLParam(r, "sessionID")
 
-	if _, ok := h.vodService.GetSession(sessionID); !ok {
+	sess := h.vodService.GetSession(channelID)
+	if sess == nil {
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
-	buffered := h.vodService.GetBufferedSecs(sessionID)
-	ready := h.vodService.IsProcessReady(sessionID)
+	buffered := h.vodService.GetBufferedSecs(channelID)
+	done := h.vodService.IsDone(channelID)
 
 	errMsg := ""
-	if procErr := h.vodService.GetProcessError(sessionID); procErr != nil {
+	if procErr := h.vodService.GetError(channelID); procErr != nil {
 		errMsg = procErr.Error()
 	}
 
-	segments := h.vodService.GetSegments(sessionID)
-	if segments == nil {
-		segments = []service.SegmentInfo{}
-	}
+	video, audioTracks, duration := h.vodService.GetProbeInfo(channelID)
 
-	resp := map[string]interface{}{
-		"buffered":    buffered,
-		"duration":    h.vodService.GetDuration(sessionID),
-		"ready":       ready,
-		"error":       errMsg,
-		"recording":   h.vodService.IsRecording(sessionID),
-		"segments":    segments,
-		"audio_index": h.vodService.GetAudioIndex(sessionID),
-		"profile":     h.vodService.GetProfileName(sessionID),
+	resp := map[string]any{
+		"buffered":  buffered,
+		"ready":     done,
+		"error":     errMsg,
+		"recording": h.vodService.IsRecording(channelID),
+		"profile":   sess.ProfileName,
 	}
-	if vi := h.vodService.GetVideoInfo(sessionID); vi != nil {
-		resp["video"] = vi
+	if video != nil {
+		resp["video"] = video
 	}
-	if tracks := h.vodService.GetAudioTracks(sessionID); len(tracks) > 0 {
-		resp["audio_tracks"] = tracks
+	if len(audioTracks) > 0 {
+		resp["audio_tracks"] = audioTracks
+	}
+	if duration > 0 {
+		resp["duration"] = duration
 	}
 	respondJSON(w, http.StatusOK, resp)
 }
 
-func (h *VODHandler) Seek(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
-
-	session, ok := h.vodService.GetSession(sessionID)
-	if !ok {
-		respondError(w, http.StatusNotFound, "session not found")
-		return
-	}
-
-	tStr := r.URL.Query().Get("t")
-	offset, err := strconv.ParseFloat(tStr, 64)
-	if err != nil || offset < 0 {
-		respondError(w, http.StatusBadRequest, "invalid time offset")
-		return
-	}
-
-	reader, err := h.vodService.StreamSeek(r.Context(), session, offset)
-	if err != nil {
-		h.log.Error().Err(err).Str("session_id", sessionID).Float64("offset", offset).Msg("seek failed")
-		respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	defer reader.Close()
-
-	setStreamHeaders(w)
-	streamResponse(w, reader)
-}
-
 func (h *VODHandler) Stream(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
+	channelID := chi.URLParam(r, "sessionID")
 
-	session, ok := h.vodService.GetSession(sessionID)
-	if !ok {
+	sess := h.vodService.GetSession(channelID)
+	if sess == nil {
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
-	reader, err := h.vodService.StreamFile(r.Context(), session)
+	reader, err := h.vodService.TailSession(r.Context(), channelID)
 	if err != nil {
-		h.log.Error().Err(err).Str("session_id", sessionID).Msg("stream failed")
+		h.log.Error().Err(err).Str("channel_id", channelID).Msg("stream failed")
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -234,76 +226,27 @@ func (h *VODHandler) Stream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *VODHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
+	channelID := chi.URLParam(r, "sessionID")
+	consumerID := r.URL.Query().Get("consumer_id")
 	user := requireUser(r)
 	if user == nil {
 		respondError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	h.vodService.DeleteSession(sessionID)
+	h.vodService.StopWatching(channelID, consumerID)
+	if h.vodService.ConsumerCount(channelID) == 0 && h.hlsManager != nil {
+		h.hlsManager.Stop(channelID)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 type recordRequest struct {
-	ProgramTitle string  `json:"program_title"`
-	ChannelName  string  `json:"channel_name"`
-	StopAt       string  `json:"stop_at"`
-	StartOffset  float64 `json:"start_offset"`
-	EndOffset    float64 `json:"end_offset"`
+	ProgramTitle string `json:"program_title"`
+	ChannelName  string `json:"channel_name"`
+	StopAt       string `json:"stop_at"`
 }
 
-func (h *VODHandler) MarkRecording(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
-	user := requireUser(r)
-	if user == nil {
-		respondError(w, http.StatusUnauthorized, "authentication required")
-		return
-	}
-
-	var req recordRequest
-	if err := decodeJSON(r, &req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	stopAt, err := parseStopAt(req.StopAt)
-	if err != nil {
-		respondError(w, http.StatusBadRequest, "invalid stop_at time format")
-		return
-	}
-
-	seg, err := h.vodService.CreateSegment(sessionID, req.ProgramTitle, req.ChannelName, user.UserID, req.StartOffset, req.EndOffset, stopAt)
-	if err != nil {
-		if errors.Is(err, service.ErrSessionNotFound) {
-			respondError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrActiveSegmentExists) {
-			h.log.Warn().Str("session_id", sessionID).Msg("segment creation rejected: active segment exists")
-			respondError(w, http.StatusConflict, err.Error())
-			return
-		}
-		h.log.Error().Err(err).Str("session_id", sessionID).Msg("create segment failed")
-		respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	resp := map[string]interface{}{"status": "recording"}
-	if seg != nil {
-		segResp := map[string]interface{}{
-			"id":           seg.ID,
-			"start_offset": seg.StartOffset,
-			"status":       string(seg.Status),
-		}
-		if seg.EndOffset != nil {
-			segResp["end_offset"] = *seg.EndOffset
-		}
-		resp["segment"] = segResp
-	}
-	respondJSON(w, http.StatusOK, resp)
-}
-
-func (h *VODHandler) CreateRecording(w http.ResponseWriter, r *http.Request) {
+func (h *VODHandler) StartRecording(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelID")
 	user := requireUser(r)
 	if user == nil {
@@ -323,38 +266,34 @@ func (h *VODHandler) CreateRecording(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, seg, err := h.vodService.CreateRecordingSession(r.Context(), channelID, req.ProgramTitle, req.ChannelName, user.UserID, stopAt)
-	if err != nil {
-		h.log.Error().Err(err).Str("channel_id", channelID).Msg("create recording failed")
+	if err := h.vodService.StartRecording(r.Context(), channelID, req.ProgramTitle, req.ChannelName, user.UserID, stopAt); err != nil {
+		if errors.Is(err, service.ErrAlreadyRecording) {
+			respondError(w, http.StatusConflict, err.Error())
+			return
+		}
+		h.log.Error().Err(err).Str("channel_id", channelID).Msg("start recording failed")
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	resp := map[string]interface{}{
-		"session_id": session.ID,
-		"status":     "recording",
-	}
-	if seg != nil {
-		resp["segment"] = map[string]interface{}{
-			"id":           seg.ID,
-			"start_offset": seg.StartOffset,
-			"status":       string(seg.Status),
-		}
-	}
-	respondJSON(w, http.StatusOK, resp)
+	respondJSON(w, http.StatusOK, map[string]any{"status": "recording"})
 }
 
-func (h *VODHandler) ListRecordings(w http.ResponseWriter, r *http.Request) {
+func (h *VODHandler) StopRecording(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelID")
 	user := requireUser(r)
 	if user == nil {
 		respondError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	list := h.vodService.ListRecordings(user.UserID, user.IsAdmin)
-	if list == nil {
-		list = []service.RecordingInfo{}
+
+	if err := h.vodService.StopRecording(channelID); err != nil {
+		h.log.Error().Err(err).Str("channel_id", channelID).Msg("stop recording failed")
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	respondJSON(w, http.StatusOK, list)
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *VODHandler) ListCompletedRecordings(w http.ResponseWriter, r *http.Request) {
@@ -373,6 +312,7 @@ func (h *VODHandler) ListCompletedRecordings(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *VODHandler) DeleteCompletedRecording(w http.ResponseWriter, r *http.Request) {
+	streamID := chi.URLParam(r, "streamID")
 	filename := chi.URLParam(r, "filename")
 	user := requireUser(r)
 	if user == nil {
@@ -380,21 +320,12 @@ func (h *VODHandler) DeleteCompletedRecording(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	targetUserID := user.UserID
-	if user.IsAdmin && r.URL.Query().Has("user_id") {
-		targetUserID = r.URL.Query().Get("user_id")
-	}
-
-	if err := h.vodService.DeleteCompletedRecording(filename, targetUserID); err != nil {
-		if errors.Is(err, service.ErrInvalidFilename) {
-			respondError(w, http.StatusBadRequest, err.Error())
+	if err := h.vodService.DeleteCompletedRecording(streamID, filename, user.UserID, user.IsAdmin); err != nil {
+		if errors.Is(err, service.ErrNotAuthorized) {
+			respondError(w, http.StatusForbidden, "not authorized")
 			return
 		}
-		if errors.Is(err, service.ErrFileNotFound) {
-			respondError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		h.log.Error().Err(err).Str("filename", filename).Msg("delete recording failed")
+		h.log.Error().Err(err).Str("stream_id", streamID).Str("filename", filename).Msg("delete recording failed")
 		respondError(w, http.StatusInternalServerError, "failed to delete recording")
 		return
 	}
@@ -402,121 +333,35 @@ func (h *VODHandler) DeleteCompletedRecording(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *VODHandler) StopRecording(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
-	user := requireUser(r)
-	if user == nil {
-		respondError(w, http.StatusUnauthorized, "authentication required")
-		return
-	}
-	extract := r.URL.Query().Get("extract") == "true"
-	var err error
-	if extract {
-		err = h.vodService.CloseAndExtract(sessionID, user.UserID, user.IsAdmin)
-	} else {
-		err = h.vodService.CloseSegment(sessionID, user.UserID, user.IsAdmin)
-	}
+func (h *VODHandler) StreamRecordingDLNA(w http.ResponseWriter, r *http.Request) {
+	streamID := chi.URLParam(r, "streamID")
+	filename := chi.URLParam(r, "filename")
+
+	fullPath, err := h.vodService.GetCompletedRecordingPath(streamID, filename, "", true)
 	if err != nil {
-		if errors.Is(err, service.ErrSessionNotFound) {
-			respondError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrNotAuthorized) {
-			h.log.Warn().Str("session_id", sessionID).Str("user_id", user.UserID).Msg("unauthorized stop recording attempt")
-			respondError(w, http.StatusForbidden, err.Error())
-			return
-		}
-		respondError(w, http.StatusBadRequest, err.Error())
+		respondError(w, http.StatusNotFound, "recording not found")
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+
+	profile, _, _ := h.clientService.MatchClient(r.Context(), r)
+	if profile == nil {
+		http.ServeFile(w, r, fullPath)
+		return
+	}
+
+	reader, contentType, err := h.vodService.TranscodeFile(r.Context(), fullPath, profile.Name)
+	if err != nil {
+		h.log.Error().Err(err).Str("filename", filename).Str("profile", profile.Name).Msg("dlna transcode failed")
+		http.ServeFile(w, r, fullPath)
+		return
+	}
+	defer reader.Close()
+
+	serveTranscodedOrFile(w, r, reader, contentType)
 }
 
-func (h *VODHandler) CancelRecording(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
-	user := requireUser(r)
-	if user == nil {
-		respondError(w, http.StatusUnauthorized, "authentication required")
-		return
-	}
-	if err := h.vodService.CancelSegment(sessionID, user.UserID, user.IsAdmin); err != nil {
-		if errors.Is(err, service.ErrSessionNotFound) {
-			respondError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrNotAuthorized) {
-			h.log.Warn().Str("session_id", sessionID).Str("user_id", user.UserID).Msg("unauthorized cancel recording attempt")
-			respondError(w, http.StatusForbidden, err.Error())
-			return
-		}
-		respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *VODHandler) UpdateSegment(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
-	segmentID := chi.URLParam(r, "segmentID")
-	user := requireUser(r)
-	if user == nil {
-		respondError(w, http.StatusUnauthorized, "authentication required")
-		return
-	}
-
-	var req struct {
-		StartOffset *float64 `json:"start_offset"`
-		EndOffset   *float64 `json:"end_offset"`
-	}
-	if err := decodeJSON(r, &req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	if err := h.vodService.UpdateSegment(sessionID, segmentID, user.UserID, user.IsAdmin, req.StartOffset, req.EndOffset); err != nil {
-		if errors.Is(err, service.ErrSessionNotFound) || errors.Is(err, service.ErrSegmentNotFound) {
-			respondError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrNotAuthorized) {
-			h.log.Warn().Str("session_id", sessionID).Str("segment_id", segmentID).Str("user_id", user.UserID).Msg("unauthorized update segment attempt")
-			respondError(w, http.StatusForbidden, err.Error())
-			return
-		}
-		respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *VODHandler) DeleteSegment(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionID")
-	segmentID := chi.URLParam(r, "segmentID")
-	user := requireUser(r)
-	if user == nil {
-		respondError(w, http.StatusUnauthorized, "authentication required")
-		return
-	}
-
-	if err := h.vodService.DeleteSegment(sessionID, segmentID, user.UserID, user.IsAdmin); err != nil {
-		if errors.Is(err, service.ErrSessionNotFound) || errors.Is(err, service.ErrSegmentNotFound) {
-			respondError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		if errors.Is(err, service.ErrNotAuthorized) {
-			h.log.Warn().Str("session_id", sessionID).Str("segment_id", segmentID).Str("user_id", user.UserID).Msg("unauthorized delete segment attempt")
-			respondError(w, http.StatusForbidden, err.Error())
-			return
-		}
-		respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *VODHandler) StreamCompletedRecording(w http.ResponseWriter, r *http.Request) {
+func (h *VODHandler) ProbeCompletedRecording(w http.ResponseWriter, r *http.Request) {
+	streamID := chi.URLParam(r, "streamID")
 	filename := chi.URLParam(r, "filename")
 	user := requireUser(r)
 	if user == nil {
@@ -524,20 +369,127 @@ func (h *VODHandler) StreamCompletedRecording(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	targetUserID := user.UserID
-	if user.IsAdmin && r.URL.Query().Has("user_id") {
-		targetUserID = r.URL.Query().Get("user_id")
-	}
-
-	fullPath, err := h.vodService.GetCompletedRecordingPath(filename, targetUserID)
+	fullPath, err := h.vodService.GetCompletedRecordingPath(streamID, filename, user.UserID, user.IsAdmin)
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidFilename) {
-			respondError(w, http.StatusBadRequest, err.Error())
+		if errors.Is(err, service.ErrNotAuthorized) {
+			respondError(w, http.StatusForbidden, "not authorized")
 			return
 		}
-		respondError(w, http.StatusNotFound, err.Error())
+		respondError(w, http.StatusNotFound, "recording not found")
 		return
 	}
 
-	http.ServeFile(w, r, fullPath)
+	result, err := h.vodService.ProbeFile(r.Context(), streamID, fullPath)
+	if err != nil {
+		h.log.Error().Err(err).Str("filename", filename).Msg("probe completed recording failed")
+		respondError(w, http.StatusInternalServerError, "probe failed")
+		return
+	}
+
+	resp := map[string]any{
+		"duration": result.Duration,
+	}
+	if result.Video != nil {
+		resp["video"] = result.Video
+	}
+	if len(result.AudioTracks) > 0 {
+		resp["audio_tracks"] = result.AudioTracks
+	}
+	respondJSON(w, http.StatusOK, resp)
+}
+
+func (h *VODHandler) StreamCompletedRecording(w http.ResponseWriter, r *http.Request) {
+	streamID := chi.URLParam(r, "streamID")
+	filename := chi.URLParam(r, "filename")
+	user := requireUser(r)
+	if user == nil {
+		respondError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	fullPath, err := h.vodService.GetCompletedRecordingPath(streamID, filename, user.UserID, user.IsAdmin)
+	if err != nil {
+		if errors.Is(err, service.ErrNotAuthorized) {
+			respondError(w, http.StatusForbidden, "not authorized")
+			return
+		}
+		respondError(w, http.StatusNotFound, "recording not found")
+		return
+	}
+
+	profileName := r.URL.Query().Get("profile")
+	if profileName == "" {
+		http.ServeFile(w, r, fullPath)
+		return
+	}
+
+	reader, contentType, err := h.vodService.TranscodeFile(r.Context(), fullPath, profileName)
+	if err != nil {
+		h.log.Error().Err(err).Str("filename", filename).Str("profile", profileName).Msg("transcode failed")
+		respondError(w, http.StatusInternalServerError, "transcode failed")
+		return
+	}
+	defer reader.Close()
+
+	serveTranscodedOrFile(w, r, reader, contentType)
+}
+
+func (h *VODHandler) HLSPlaylist(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "sessionID")
+
+	if h.hlsManager == nil {
+		respondError(w, http.StatusNotImplemented, "hls not available")
+		return
+	}
+
+	sess := h.vodService.GetSession(channelID)
+	if sess == nil {
+		respondError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	hlsDir := filepath.Join(sess.TempDir, "hls")
+	remuxer, err := h.hlsManager.GetOrStart(context.Background(), channelID, sess.FilePath, hlsDir)
+	if err != nil {
+		h.log.Error().Err(err).Str("channel_id", channelID).Msg("failed to start hls remuxer")
+		respondError(w, http.StatusInternalServerError, "hls remuxer failed")
+		return
+	}
+
+	waitCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	if err := remuxer.WaitReady(waitCtx); err != nil {
+		h.log.Error().Err(err).Str("channel_id", channelID).Msg("hls playlist not ready")
+		respondError(w, http.StatusServiceUnavailable, "hls not ready")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeFile(w, r, remuxer.PlaylistPath())
+}
+
+func (h *VODHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "sessionID")
+	segment := chi.URLParam(r, "segment")
+
+	if strings.Contains(segment, "/") || strings.Contains(segment, "..") {
+		respondError(w, http.StatusBadRequest, "invalid segment name")
+		return
+	}
+
+	sess := h.vodService.GetSession(channelID)
+	if sess == nil {
+		respondError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	segPath := filepath.Join(sess.TempDir, "hls", segment)
+	if _, err := os.Stat(segPath); err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "video/mp4")
+	http.ServeFile(w, r, segPath)
 }

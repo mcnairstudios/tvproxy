@@ -18,11 +18,11 @@ const (
 	RecStatusPending   = "pending"
 	RecStatusRecording = "recording"
 	RecStatusCompleted = "completed"
-	RecStatusFailed = "failed"
+	RecStatusFailed    = "failed"
 )
 
 var (
-	ErrScheduleConflict = errors.New("overlapping recording already scheduled")
+	ErrScheduleConflict  = errors.New("overlapping recording already scheduled")
 	ErrRecordingNotFound = errors.New("scheduled recording not found")
 )
 
@@ -103,8 +103,8 @@ func (s *SchedulerService) Delete(ctx context.Context, id, userID string, isAdmi
 		return ErrNotAuthorized
 	}
 
-	if rec.Status == RecStatusRecording && rec.SessionID != "" {
-		s.vodService.DeleteSession(rec.SessionID)
+	if rec.Status == RecStatusRecording {
+		s.vodService.StopRecording(rec.ChannelID)
 	}
 
 	if rec.FilePath != "" {
@@ -170,35 +170,20 @@ func (s *SchedulerService) monitorActiveRecordings(ctx context.Context) {
 	}
 
 	for _, rec := range active {
-		if rec.SessionID == "" || rec.SegmentID == "" {
-			if rec.StopAt.Before(time.Now()) {
-				s.recRepo.UpdateStatus(ctx, rec.ID, RecStatusFailed, "recording session lost")
-			} else {
-				s.startRecording(ctx, &rec)
-			}
-			continue
-		}
-
-		seg, ok := s.vodService.GetSegmentByID(rec.SessionID, rec.SegmentID)
-		if !ok {
-			if rec.StopAt.Before(time.Now()) {
-				s.recRepo.UpdateStatus(ctx, rec.ID, RecStatusFailed, "recording session lost")
-			} else {
-				s.startRecording(ctx, &rec)
-			}
-			continue
-		}
-
-		switch seg.Status {
-		case SegmentRecording, SegmentDefined, SegmentExtracting:
-			// still in progress
-		case SegmentCompleted:
-			s.recRepo.UpdateFilePath(ctx, rec.ID, seg.FilePath)
+		if rec.StopAt.Before(time.Now()) {
+			s.vodService.StopRecording(rec.ChannelID)
 			s.recRepo.UpdateStatus(ctx, rec.ID, RecStatusCompleted, "")
-			s.log.Info().Str("id", rec.ID).Str("file", seg.FilePath).Msg("scheduled recording completed")
-		case SegmentFailed:
-			s.recRepo.UpdateStatus(ctx, rec.ID, RecStatusFailed, "extraction failed")
-			s.log.Warn().Str("id", rec.ID).Msg("scheduled recording extraction failed")
+			s.log.Info().Str("id", rec.ID).Msg("scheduled recording completed")
+			continue
+		}
+
+		sess := s.vodService.GetSession(rec.ChannelID)
+		if sess == nil {
+			if rec.StopAt.Before(time.Now()) {
+				s.recRepo.UpdateStatus(ctx, rec.ID, RecStatusFailed, "recording session lost")
+			} else {
+				s.startRecording(ctx, &rec)
+			}
 		}
 	}
 }
@@ -209,20 +194,18 @@ func (s *SchedulerService) startRecording(ctx context.Context, rec *models.Sched
 		return
 	}
 
-	session, seg, err := s.vodService.CreateRecordingSession(ctx, rec.ChannelID, rec.ProgramTitle, rec.ChannelName, rec.UserID, rec.StopAt)
+	err := s.vodService.StartRecording(ctx, rec.ChannelID, rec.ProgramTitle, rec.ChannelName, rec.UserID, rec.StopAt)
 	if err != nil {
-		s.log.Error().Err(err).Str("id", rec.ID).Msg("failed to start recording session")
-		s.recRepo.UpdateStatus(ctx, rec.ID, RecStatusFailed, err.Error())
-		return
+		if !errors.Is(err, ErrAlreadyRecording) {
+			s.log.Error().Err(err).Str("id", rec.ID).Msg("failed to start recording session")
+			s.recRepo.UpdateStatus(ctx, rec.ID, RecStatusFailed, err.Error())
+			return
+		}
 	}
 
-	segID := ""
-	if seg != nil {
-		segID = seg.ID
-	}
-	if err := s.recRepo.UpdateRecordingState(ctx, rec.ID, session.ID, segID); err != nil {
+	if err := s.recRepo.UpdateRecordingState(ctx, rec.ID, rec.ChannelID, ""); err != nil {
 		s.log.Error().Err(err).Str("id", rec.ID).Msg("failed to update recording state")
 	}
 
-	s.log.Info().Str("id", rec.ID).Str("session", session.ID).Str("segment", segID).Msg("scheduled recording started")
+	s.log.Info().Str("id", rec.ID).Str("channel_id", rec.ChannelID).Msg("scheduled recording started")
 }

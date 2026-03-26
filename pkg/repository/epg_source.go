@@ -12,6 +12,28 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 )
 
+const epgSourceColumns = `id, name, url, is_enabled, last_refreshed, channel_count, program_count, last_error, created_at, updated_at`
+
+type epgSourceScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanEPGSource(s epgSourceScanner) (*models.EPGSource, error) {
+	src := &models.EPGSource{}
+	var lastRefreshed sql.NullTime
+	if err := s.Scan(
+		&src.ID, &src.Name, &src.URL, &src.IsEnabled,
+		&lastRefreshed, &src.ChannelCount, &src.ProgramCount,
+		&src.LastError, &src.CreatedAt, &src.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if lastRefreshed.Valid {
+		src.LastRefreshed = &lastRefreshed.Time
+	}
+	return src, nil
+}
+
 type EPGSourceRepository struct {
 	db *database.DB
 }
@@ -24,10 +46,10 @@ func (r *EPGSourceRepository) Create(ctx context.Context, source *models.EPGSour
 	now := time.Now()
 	source.ID = uuid.New().String()
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO epg_sources (id, name, url, is_enabled, last_refreshed, channel_count, program_count, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO epg_sources (`+epgSourceColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		source.ID, source.Name, source.URL, source.IsEnabled, source.LastRefreshed,
-		source.ChannelCount, source.ProgramCount, now, now,
+		source.ChannelCount, source.ProgramCount, source.LastError, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("creating epg source: %w", err)
@@ -38,32 +60,21 @@ func (r *EPGSourceRepository) Create(ctx context.Context, source *models.EPGSour
 }
 
 func (r *EPGSourceRepository) GetByID(ctx context.Context, id string) (*models.EPGSource, error) {
-	source := &models.EPGSource{}
-	var lastRefreshed sql.NullTime
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, name, url, is_enabled, last_refreshed, channel_count, program_count, last_error, created_at, updated_at
-		FROM epg_sources WHERE id = ?`, id,
-	).Scan(
-		&source.ID, &source.Name, &source.URL, &source.IsEnabled,
-		&lastRefreshed, &source.ChannelCount, &source.ProgramCount,
-		&source.LastError, &source.CreatedAt, &source.UpdatedAt,
-	)
+	src, err := scanEPGSource(r.db.QueryRowContext(ctx,
+		`SELECT `+epgSourceColumns+` FROM epg_sources WHERE id = ?`, id,
+	))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("epg source not found: %w", err)
 		}
 		return nil, fmt.Errorf("getting epg source by id: %w", err)
 	}
-	if lastRefreshed.Valid {
-		source.LastRefreshed = &lastRefreshed.Time
-	}
-	return source, nil
+	return src, nil
 }
 
 func (r *EPGSourceRepository) List(ctx context.Context) ([]models.EPGSource, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, url, is_enabled, last_refreshed, channel_count, program_count, last_error, created_at, updated_at
-		FROM epg_sources ORDER BY created_at`,
+		`SELECT `+epgSourceColumns+` FROM epg_sources ORDER BY created_at`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing epg sources: %w", err)
@@ -72,18 +83,11 @@ func (r *EPGSourceRepository) List(ctx context.Context) ([]models.EPGSource, err
 
 	var sources []models.EPGSource
 	for rows.Next() {
-		var s models.EPGSource
-		var lastRefreshed sql.NullTime
-		if err := rows.Scan(
-			&s.ID, &s.Name, &s.URL, &s.IsEnabled, &lastRefreshed,
-			&s.ChannelCount, &s.ProgramCount, &s.LastError, &s.CreatedAt, &s.UpdatedAt,
-		); err != nil {
+		s, err := scanEPGSource(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning epg source: %w", err)
 		}
-		if lastRefreshed.Valid {
-			s.LastRefreshed = &lastRefreshed.Time
-		}
-		sources = append(sources, s)
+		sources = append(sources, *s)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating epg sources: %w", err)

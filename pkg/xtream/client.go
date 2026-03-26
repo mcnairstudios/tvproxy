@@ -109,7 +109,7 @@ func (c *Client) GetStreamURL(streamID int, extension string) string {
 	return fmt.Sprintf("%s/%s/%s/%d.%s", c.baseURL, c.username, c.password, streamID, extension)
 }
 
-func (c *Client) get(ctx context.Context, url string, result interface{}) error {
+func (c *Client) get(ctx context.Context, url string, result any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err

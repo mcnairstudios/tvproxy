@@ -16,6 +16,8 @@ type ChannelService struct {
 	channelGroupRepo *repository.ChannelGroupRepository
 	streamStore      store.StreamReader
 	log              zerolog.Logger
+	rev              *store.Revision
+	groupRev         *store.Revision
 }
 
 func NewChannelService(
@@ -29,13 +31,24 @@ func NewChannelService(
 		channelGroupRepo: channelGroupRepo,
 		streamStore:      streamStore,
 		log:              log.With().Str("service", "channel").Logger(),
+		rev:              store.NewRevision(),
+		groupRev:         store.NewRevision(),
 	}
+}
+
+func (s *ChannelService) ETag() string {
+	return s.rev.ETag()
+}
+
+func (s *ChannelService) GroupETag() string {
+	return s.groupRev.ETag()
 }
 
 func (s *ChannelService) CreateChannel(ctx context.Context, channel *models.Channel) error {
 	if err := s.channelRepo.Create(ctx, channel); err != nil {
 		return fmt.Errorf("creating channel: %w", err)
 	}
+	s.rev.Bump()
 	s.log.Info().Str("id", channel.ID).Str("name", channel.Name).Msg("channel created")
 	return nil
 }
@@ -60,6 +73,7 @@ func (s *ChannelService) UpdateChannel(ctx context.Context, channel *models.Chan
 	if err := s.channelRepo.Update(ctx, channel); err != nil {
 		return fmt.Errorf("updating channel: %w", err)
 	}
+	s.rev.Bump()
 	return nil
 }
 
@@ -67,6 +81,7 @@ func (s *ChannelService) DeleteChannel(ctx context.Context, id string) error {
 	if err := s.channelRepo.Delete(ctx, id); err != nil {
 		return fmt.Errorf("deleting channel: %w", err)
 	}
+	s.rev.Bump()
 	return nil
 }
 
@@ -101,6 +116,7 @@ func (s *ChannelService) ListChannelsForUser(ctx context.Context, userID string)
 	if err != nil {
 		return nil, fmt.Errorf("listing channels for user: %w", err)
 	}
+	s.log.Debug().Str("user_id", userID).Int("count", len(channels)).Msg("listing channels for user")
 	return channels, nil
 }
 
@@ -116,6 +132,7 @@ func (s *ChannelService) UpdateChannelForUser(ctx context.Context, channel *mode
 	if err := s.channelRepo.UpdateForUser(ctx, channel, userID); err != nil {
 		return fmt.Errorf("updating channel for user: %w", err)
 	}
+	s.rev.Bump()
 	return nil
 }
 
@@ -123,6 +140,7 @@ func (s *ChannelService) DeleteChannelForUser(ctx context.Context, id, userID st
 	if err := s.channelRepo.DeleteForUser(ctx, id, userID); err != nil {
 		return fmt.Errorf("deleting channel for user: %w", err)
 	}
+	s.rev.Bump()
 	return nil
 }
 
@@ -160,6 +178,7 @@ func (s *ChannelService) UpdateChannelGroupForUser(ctx context.Context, group *m
 	if err := s.channelGroupRepo.UpdateForUser(ctx, group, userID); err != nil {
 		return fmt.Errorf("updating channel group for user: %w", err)
 	}
+	s.groupRev.Bump()
 	return nil
 }
 
@@ -167,6 +186,7 @@ func (s *ChannelService) DeleteChannelGroupForUser(ctx context.Context, id, user
 	if err := s.channelGroupRepo.DeleteForUser(ctx, id, userID); err != nil {
 		return fmt.Errorf("deleting channel group for user: %w", err)
 	}
+	s.groupRev.Bump()
 	return nil
 }
 
@@ -174,6 +194,7 @@ func (s *ChannelService) CreateChannelGroup(ctx context.Context, group *models.C
 	if err := s.channelGroupRepo.Create(ctx, group); err != nil {
 		return fmt.Errorf("creating channel group: %w", err)
 	}
+	s.groupRev.Bump()
 	return nil
 }
 
@@ -197,6 +218,7 @@ func (s *ChannelService) UpdateChannelGroup(ctx context.Context, group *models.C
 	if err := s.channelGroupRepo.Update(ctx, group); err != nil {
 		return fmt.Errorf("updating channel group: %w", err)
 	}
+	s.groupRev.Bump()
 	return nil
 }
 
@@ -204,15 +226,24 @@ func (s *ChannelService) DeleteChannelGroup(ctx context.Context, id string) erro
 	if err := s.channelGroupRepo.Delete(ctx, id); err != nil {
 		return fmt.Errorf("deleting channel group: %w", err)
 	}
+	s.groupRev.Bump()
 	return nil
 }
 
 func (s *ChannelService) IncrementChannelFailCount(ctx context.Context, id string) error {
-	return s.channelRepo.IncrementFailCount(ctx, id)
+	if err := s.channelRepo.IncrementFailCount(ctx, id); err != nil {
+		return err
+	}
+	s.rev.Bump()
+	return nil
 }
 
 func (s *ChannelService) ResetChannelFailCount(ctx context.Context, id string) error {
-	return s.channelRepo.ResetFailCount(ctx, id)
+	if err := s.channelRepo.ResetFailCount(ctx, id); err != nil {
+		return err
+	}
+	s.rev.Bump()
+	return nil
 }
 
 func (s *ChannelService) assignStreams(ctx context.Context, channelID string, streamIDs []string) error {
@@ -230,6 +261,7 @@ func (s *ChannelService) assignStreams(ctx context.Context, channelID string, st
 		return fmt.Errorf("assigning streams to channel: %w", err)
 	}
 
+	s.rev.Bump()
 	s.log.Info().Str("channel_id", channelID).Int("stream_count", len(streamIDs)).Msg("streams assigned to channel")
 	return nil
 }

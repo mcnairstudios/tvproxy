@@ -3,6 +3,10 @@ package database
 import (
 	"context"
 	"database/sql"
+
+	"github.com/google/uuid"
+
+	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 )
 
 type migration struct {
@@ -268,4 +272,101 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		name: "add_copy_profile",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			return seedCopyProfile(ctx, db)
+		},
+	},
+	{
+		name: "update_recording_profile_av1",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			return updateRecordingProfileAV1(ctx, db)
+		},
+	},
+	{
+		name: "add_default_hwaccel",
+		fn:   addDefaultHWAccelMigration,
+	},
+	{
+		name: "add_default_video_codec",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			_, err := db.ExecContext(ctx,
+				`INSERT OR IGNORE INTO core_settings (key, value) VALUES ('default_video_codec', 'copy')`)
+			return err
+		},
+	},
+	{
+		name: "remove_recording_copy_profiles",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			_, err := db.ExecContext(ctx,
+				`DELETE FROM stream_profiles WHERE name IN ('Recording', 'Copy') AND is_system = 1`)
+			return err
+		},
+	},
+	{
+		name: "deterministic_channel_ids",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			ns := uuid.MustParse("c8a5e2b1-7f3d-4a96-b8e1-d2c4f6a89012")
+
+			rows, err := db.QueryContext(ctx, `SELECT id, name, user_id FROM channels`)
+			if err != nil {
+				return err
+			}
+			type ch struct {
+				id, name, userID string
+			}
+			var channels []ch
+			for rows.Next() {
+				var c ch
+				if err := rows.Scan(&c.id, &c.name, &c.userID); err != nil {
+					rows.Close()
+					return err
+				}
+				channels = append(channels, c)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+
+			for _, c := range channels {
+				newID := uuid.NewSHA1(ns, []byte(c.name+":"+c.userID)).String()
+				if newID == c.id {
+					continue
+				}
+				if _, err := tx.ExecContext(ctx, `UPDATE channel_streams SET channel_id = ? WHERE channel_id = ?`, newID, c.id); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, `UPDATE scheduled_recordings SET channel_id = ? WHERE channel_id = ?`, newID, c.id); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, `UPDATE channels SET id = ? WHERE id = ?`, newID, c.id); err != nil {
+					return err
+				}
+			}
+
+			return tx.Commit()
+		},
+	},
+}
+
+func addDefaultHWAccelMigration(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO core_settings (key, value) VALUES ('default_hwaccel', 'none')`)
+	if err != nil {
+		return err
+	}
+
+	args := ffmpeg.ComposeStreamProfileArgs(ffmpeg.ComposeOptions{SourceType: "m3u", HWAccel: "none", VideoCodec: "av1", Container: "mp4"})
+	_, err = db.ExecContext(ctx,
+		`UPDATE stream_profiles SET hwaccel = 'none', args = ? WHERE name = 'Recording' AND is_system = 1`,
+		args)
+	return err
 }

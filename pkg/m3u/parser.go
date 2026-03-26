@@ -15,12 +15,10 @@ type Entry struct {
 	TvgName string
 }
 
-// Parse reads an M3U file from the reader and extracts stream entries.
-// It handles #EXTM3U header and #EXTINF lines with attributes.
 func Parse(r io.Reader) ([]Entry, error) {
 	var entries []Entry
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024) // 10MB max line
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 	var current *Entry
 	for scanner.Scan() {
@@ -41,14 +39,11 @@ func Parse(r io.Reader) ([]Entry, error) {
 }
 
 func parseExtInf(line string, entry *Entry) {
-	// Format: #EXTINF:-1 tvg-id="id" tvg-name="name" tvg-logo="logo" group-title="group",Channel Name
-	// Extract attributes
 	entry.TvgID = extractAttr(line, "tvg-id")
 	entry.TvgName = extractAttr(line, "tvg-name")
 	entry.Logo = extractAttr(line, "tvg-logo")
 	entry.Group = extractAttr(line, "group-title")
 
-	// Extract channel name (after last comma)
 	if idx := strings.LastIndex(line, ","); idx >= 0 {
 		entry.Name = strings.TrimSpace(line[idx+1:])
 	}

@@ -10,69 +10,58 @@ import (
 )
 
 type Config struct {
-	// Server
 	Host string
 	Port int
 
-	// Database
 	DatabasePath string
 
-	// JWT
 	JWTSecret          string
 	AccessTokenExpiry  time.Duration
 	RefreshTokenExpiry time.Duration
 
-	// API Key
 	APIKey string
 
-	// Logging
 	LogLevel string
 	LogJSON  bool
 
-	// Base URL (for SSDP discovery and HDHR links)
 	BaseURL string
 
-	// Upstream HTTP
 	UserAgent    string
 	BypassHeader string
 	BypassSecret string
 
-	// Workers
 	M3URefreshInterval time.Duration
 	EPGRefreshInterval time.Duration
 
-	// VOD
 	VODTempDir        string
 	VODSessionTimeout time.Duration
 
-	// Recording
 	RecordDir             string
 	RecordDefaultDuration time.Duration
 	RecordStopBuffer      time.Duration
 
-	// Tuning settings (loaded from settings.json)
 	Settings *defaults.Settings
 }
 
 func Load() *Config {
 	return &Config{
-		Host:               envStr("TVPROXY_HOST", "0.0.0.0"),
-		Port:               envInt("TVPROXY_PORT", 8080),
-		DatabasePath:       envStr("TVPROXY_DB_PATH", "tvproxy.db"),
-		JWTSecret:          envStr("TVPROXY_JWT_SECRET", "change-me-in-production"),
-		AccessTokenExpiry:  envDuration("TVPROXY_ACCESS_TOKEN_EXPIRY", 15*time.Minute),
-		RefreshTokenExpiry: envDuration("TVPROXY_REFRESH_TOKEN_EXPIRY", 7*24*time.Hour),
-		APIKey:             envStr("TVPROXY_API_KEY", ""),
-		BaseURL:            envStr("TVPROXY_BASE_URL", ""),
-		UserAgent:          envStr("TVPROXY_USER_AGENT", "TVProxy"),
-		BypassHeader:       envStr("TVPROXY_BYPASS_HEADER", ""),
-		BypassSecret:       envStr("TVPROXY_BYPASS_SECRET", ""),
-		LogLevel:           envStr("TVPROXY_LOG_LEVEL", "info"),
-		LogJSON:            envBool("TVPROXY_LOG_JSON", false),
-		M3URefreshInterval: envDuration("TVPROXY_M3U_REFRESH_INTERVAL", 24*time.Hour),
-		EPGRefreshInterval: envDuration("TVPROXY_EPG_REFRESH_INTERVAL", 12*time.Hour),
+		Host:                  envStr("TVPROXY_HOST", "0.0.0.0"),
+		Port:                  envInt("TVPROXY_PORT", 8080),
+		DatabasePath:          envStr("TVPROXY_DB_PATH", "tvproxy.db"),
+		JWTSecret:             envStr("TVPROXY_JWT_SECRET", "change-me-in-production"),
+		AccessTokenExpiry:     envDuration("TVPROXY_ACCESS_TOKEN_EXPIRY", 15*time.Minute),
+		RefreshTokenExpiry:    envDuration("TVPROXY_REFRESH_TOKEN_EXPIRY", 7*24*time.Hour),
+		APIKey:                envStr("TVPROXY_API_KEY", ""),
+		BaseURL:               envStr("TVPROXY_BASE_URL", ""),
+		UserAgent:             envStr("TVPROXY_USER_AGENT", "TVProxy"),
+		BypassHeader:          envStr("TVPROXY_BYPASS_HEADER", ""),
+		BypassSecret:          envStr("TVPROXY_BYPASS_SECRET", ""),
+		LogLevel:              envStr("TVPROXY_LOG_LEVEL", "info"),
+		LogJSON:               envBool("TVPROXY_LOG_JSON", false),
+		M3URefreshInterval:    envDuration("TVPROXY_M3U_REFRESH_INTERVAL", 24*time.Hour),
+		EPGRefreshInterval:    envDuration("TVPROXY_EPG_REFRESH_INTERVAL", 12*time.Hour),
 		VODTempDir:            envStr("TVPROXY_VOD_TEMP_DIR", "/tmp/tvproxy-vod"),
-		VODSessionTimeout:    envDuration("TVPROXY_VOD_SESSION_TIMEOUT", 5*time.Minute),
+		VODSessionTimeout:     envDuration("TVPROXY_VOD_SESSION_TIMEOUT", 5*time.Minute),
 		RecordDir:             envStr("TVPROXY_RECORD_DIR", "/record"),
 		RecordDefaultDuration: envDuration("TVPROXY_RECORD_DEFAULT_DURATION", 4*time.Hour),
 		RecordStopBuffer:      envDuration("TVPROXY_RECORD_STOP_BUFFER", 5*time.Minute),

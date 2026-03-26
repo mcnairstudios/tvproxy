@@ -34,7 +34,6 @@ func NewAuthMiddleware(authService *service.AuthService, apiKey string, adminUse
 	return &AuthMiddleware{authService: authService, apiKey: apiKey, adminUserID: adminUserID}
 }
 
-// Authenticate checks for JWT bearer token or API key.
 func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m.apiKey != "" {

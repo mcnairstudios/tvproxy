@@ -12,6 +12,28 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 )
 
+const m3uAccountColumns = `id, name, url, type, username, password, max_streams, is_enabled, last_refreshed, stream_count, refresh_interval, last_error, created_at, updated_at`
+
+type m3uAccountScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanM3UAccount(s m3uAccountScanner) (*models.M3UAccount, error) {
+	a := &models.M3UAccount{}
+	var lastRefreshed sql.NullTime
+	if err := s.Scan(
+		&a.ID, &a.Name, &a.URL, &a.Type, &a.Username, &a.Password,
+		&a.MaxStreams, &a.IsEnabled, &lastRefreshed, &a.StreamCount,
+		&a.RefreshInterval, &a.LastError, &a.CreatedAt, &a.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if lastRefreshed.Valid {
+		a.LastRefreshed = &lastRefreshed.Time
+	}
+	return a, nil
+}
+
 type M3UAccountRepository struct {
 	db *database.DB
 }
@@ -24,11 +46,11 @@ func (r *M3UAccountRepository) Create(ctx context.Context, account *models.M3UAc
 	now := time.Now()
 	account.ID = uuid.New().String()
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO m3u_accounts (id, name, url, type, username, password, max_streams, is_enabled, last_refreshed, stream_count, refresh_interval, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO m3u_accounts (`+m3uAccountColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		account.ID, account.Name, account.URL, account.Type, account.Username, account.Password,
 		account.MaxStreams, account.IsEnabled, account.LastRefreshed, account.StreamCount,
-		account.RefreshInterval, now, now,
+		account.RefreshInterval, account.LastError, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("creating m3u account: %w", err)
@@ -39,33 +61,21 @@ func (r *M3UAccountRepository) Create(ctx context.Context, account *models.M3UAc
 }
 
 func (r *M3UAccountRepository) GetByID(ctx context.Context, id string) (*models.M3UAccount, error) {
-	account := &models.M3UAccount{}
-	var lastRefreshed sql.NullTime
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, name, url, type, username, password, max_streams, is_enabled, last_refreshed, stream_count, refresh_interval, last_error, created_at, updated_at
-		FROM m3u_accounts WHERE id = ?`, id,
-	).Scan(
-		&account.ID, &account.Name, &account.URL, &account.Type,
-		&account.Username, &account.Password, &account.MaxStreams,
-		&account.IsEnabled, &lastRefreshed, &account.StreamCount,
-		&account.RefreshInterval, &account.LastError, &account.CreatedAt, &account.UpdatedAt,
-	)
+	a, err := scanM3UAccount(r.db.QueryRowContext(ctx,
+		`SELECT `+m3uAccountColumns+` FROM m3u_accounts WHERE id = ?`, id,
+	))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("m3u account not found: %w", err)
 		}
 		return nil, fmt.Errorf("getting m3u account by id: %w", err)
 	}
-	if lastRefreshed.Valid {
-		account.LastRefreshed = &lastRefreshed.Time
-	}
-	return account, nil
+	return a, nil
 }
 
 func (r *M3UAccountRepository) List(ctx context.Context) ([]models.M3UAccount, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, url, type, username, password, max_streams, is_enabled, last_refreshed, stream_count, refresh_interval, last_error, created_at, updated_at
-		FROM m3u_accounts ORDER BY created_at`,
+		`SELECT `+m3uAccountColumns+` FROM m3u_accounts ORDER BY created_at`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing m3u accounts: %w", err)
@@ -74,19 +84,11 @@ func (r *M3UAccountRepository) List(ctx context.Context) ([]models.M3UAccount, e
 
 	var accounts []models.M3UAccount
 	for rows.Next() {
-		var a models.M3UAccount
-		var lastRefreshed sql.NullTime
-		if err := rows.Scan(
-			&a.ID, &a.Name, &a.URL, &a.Type, &a.Username, &a.Password,
-			&a.MaxStreams, &a.IsEnabled, &lastRefreshed, &a.StreamCount,
-			&a.RefreshInterval, &a.LastError, &a.CreatedAt, &a.UpdatedAt,
-		); err != nil {
+		a, err := scanM3UAccount(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning m3u account: %w", err)
 		}
-		if lastRefreshed.Valid {
-			a.LastRefreshed = &lastRefreshed.Time
-		}
-		accounts = append(accounts, a)
+		accounts = append(accounts, *a)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating m3u accounts: %w", err)

@@ -2,10 +2,9 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"net/http"
-	"sync"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,11 +19,6 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/xtream"
 )
 
-type RefreshStatus struct {
-	State   string `json:"state"`
-	Message string `json:"message,omitempty"`
-}
-
 type M3UService struct {
 	m3uAccountRepo *repository.M3UAccountRepository
 	streamStore    store.StreamStore
@@ -33,9 +27,7 @@ type M3UService struct {
 	config         *config.Config
 	httpClient     *http.Client
 	log            zerolog.Logger
-
-	statusMu sync.RWMutex
-	statuses map[string]RefreshStatus
+	StatusTracker
 }
 
 func NewM3UService(
@@ -58,7 +50,7 @@ func NewM3UService(
 		config:         cfg,
 		httpClient:     httpClient,
 		log:            log.With().Str("service", "m3u").Logger(),
-		statuses:       make(map[string]RefreshStatus),
+		StatusTracker:  NewStatusTracker(),
 	}
 }
 
@@ -107,35 +99,22 @@ func (s *M3UService) DeleteAccount(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *M3UService) setStatus(id string, st RefreshStatus) {
-	s.statusMu.Lock()
-	s.statuses[id] = st
-	s.statusMu.Unlock()
-}
-
-func (s *M3UService) GetStatus(id string) RefreshStatus {
-	s.statusMu.RLock()
-	st := s.statuses[id]
-	s.statusMu.RUnlock()
-	return st
-}
-
 func (s *M3UService) RefreshAccount(ctx context.Context, accountID string) error {
 	account, err := s.m3uAccountRepo.GetByID(ctx, accountID)
 	if err != nil {
 		return fmt.Errorf("getting account: %w", err)
 	}
 
-	s.setStatus(accountID, RefreshStatus{State: "running", Message: "Refreshing..."})
+	s.Set(accountID, RefreshStatus{State: "running", Message: "Refreshing..."})
 
 	if err := s.refreshAccount(ctx, account); err != nil {
 		s.m3uAccountRepo.UpdateLastError(ctx, account.ID, err.Error())
-		s.setStatus(accountID, RefreshStatus{State: "error", Message: err.Error()})
+		s.Set(accountID, RefreshStatus{State: "error", Message: err.Error()})
 		return err
 	}
 
 	s.m3uAccountRepo.UpdateLastError(ctx, account.ID, "")
-	s.setStatus(accountID, RefreshStatus{State: "done", Message: "Refresh complete"})
+	s.Set(accountID, RefreshStatus{State: "done", Message: "Refresh complete"})
 	return nil
 }
 
@@ -167,7 +146,8 @@ func (s *M3UService) refreshXtreamAccount(ctx context.Context, account *models.M
 	streams := make([]models.Stream, 0, len(liveStreams))
 	keepIDs := make([]string, 0, len(liveStreams))
 	for _, xs := range liveStreams {
-		hash := computeContentHash(xs.Name, account.ID)
+		streamURL := client.GetStreamURL(xs.StreamID, "ts")
+		hash := computeContentHash(streamURL)
 		if _, dup := seen[hash]; dup {
 			continue
 		}
@@ -178,7 +158,7 @@ func (s *M3UService) refreshXtreamAccount(ctx context.Context, account *models.M
 			ID:           id,
 			M3UAccountID: account.ID,
 			Name:         xs.Name,
-			URL:          client.GetStreamURL(xs.StreamID, "ts"),
+			URL:          streamURL,
 			Group:        xs.CategoryName,
 			Logo:         xs.StreamIcon,
 			TvgID:        xs.EPGChannelID,
@@ -210,7 +190,7 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 	streams := make([]models.Stream, 0, len(entries))
 	keepIDs := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		hash := computeContentHash(entry.Name, account.ID)
+		hash := computeContentHash(entry.URL)
 		if _, dup := seen[hash]; dup {
 			continue
 		}
@@ -305,8 +285,10 @@ func deterministicStreamID(contentHash string) string {
 	return uuid.NewSHA1(streamNamespace, []byte(contentHash)).String()
 }
 
-func computeContentHash(name string, accountID string) string {
-	h := sha256.New()
-	h.Write([]byte(fmt.Sprintf("%s:%s", accountID, name)))
-	return fmt.Sprintf("%x", h.Sum(nil))
+func computeContentHash(streamURL string) string {
+	u, err := url.Parse(streamURL)
+	if err != nil {
+		return streamURL
+	}
+	return u.Path
 }

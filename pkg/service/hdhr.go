@@ -212,12 +212,8 @@ func (s *HDHRService) firstEnabledDevice(ctx context.Context) (*models.HDHRDevic
 	return nil, ErrNoHDHRDevice
 }
 
-func (s *HDHRService) listChannels(ctx context.Context) ([]models.Channel, error) {
-	return s.channelRepo.List(ctx)
-}
-
 func (s *HDHRService) buildLineup(ctx context.Context, baseURL string, groupFilter map[string]bool) ([]LineupEntry, error) {
-	channels, err := s.listChannels(ctx)
+	channels, err := s.channelRepo.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing channels: %w", err)
 	}

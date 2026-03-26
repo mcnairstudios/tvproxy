@@ -21,7 +21,8 @@
       "Bash(go build:*)",
       "Bash(echo:*)",
       "WebFetch(domain:staging.svgrepo.com)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(go test:*)"
     ]
   }
 }

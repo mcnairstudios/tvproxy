@@ -26,6 +26,7 @@ func (h *ChannelGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Cache-Control", "private, no-store")
 	respondJSON(w, http.StatusOK, groups)
 }
 

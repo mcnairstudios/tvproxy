@@ -50,7 +50,6 @@ func TestCreateUser(t *testing.T) {
 	assert.False(t, user.CreatedAt.IsZero())
 	assert.False(t, user.UpdatedAt.IsZero())
 
-	// Verify it was stored in the database
 	var storedUsername string
 	err = db.QueryRowContext(ctx, "SELECT username FROM users WHERE id = ?", user.ID).Scan(&storedUsername)
 	require.NoError(t, err)
@@ -158,14 +157,12 @@ func TestValidateTokenWrongSecret(t *testing.T) {
 	userRepo := repository.NewUserRepository(db)
 	ctx := context.Background()
 
-	// Create token with one secret
 	authService1 := NewAuthService(userRepo, "secret-one", 15*time.Minute, 7*24*time.Hour)
 	_, err := authService1.CreateUser(ctx, "testuser", "password123", false)
 	require.NoError(t, err)
 	accessToken, _, err := authService1.Login(ctx, "testuser", "password123")
 	require.NoError(t, err)
 
-	// Validate with a different secret
 	authService2 := NewAuthService(userRepo, "secret-two", 15*time.Minute, 7*24*time.Hour)
 	claims, err := authService2.ValidateToken(accessToken)
 	assert.Error(t, err)
@@ -182,12 +179,10 @@ func TestRefreshToken(t *testing.T) {
 	_, refreshToken, err := authService.Login(ctx, "testuser", "password123")
 	require.NoError(t, err)
 
-	// Use refresh token to get a new access token
 	newAccessToken, err := authService.RefreshToken(ctx, refreshToken)
 	require.NoError(t, err)
 	assert.NotEmpty(t, newAccessToken)
 
-	// The new access token should be valid
 	claims, err := authService.ValidateToken(newAccessToken)
 	require.NoError(t, err)
 	assert.Equal(t, "testuser", claims.Username)
@@ -208,7 +203,6 @@ func TestRefreshTokenWithAccessTokenFails(t *testing.T) {
 	accessToken, _, err := authService.Login(ctx, "testuser", "password123")
 	require.NoError(t, err)
 
-	// Attempting to refresh with an access token should fail
 	_, err = authService.RefreshToken(ctx, accessToken)
 	assert.Error(t, err, "should not be able to use an access token to refresh")
 	assert.Contains(t, err.Error(), "not a refresh token")
@@ -263,17 +257,14 @@ func TestUpdateUser(t *testing.T) {
 	err = authService.UpdateUser(ctx, user, "newpassword")
 	require.NoError(t, err)
 
-	// Verify the user was updated
 	fetched, err := authService.GetUser(ctx, user.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "updateduser", fetched.Username)
 	assert.True(t, fetched.IsAdmin)
 
-	// Verify login works with new password
 	_, _, err = authService.Login(ctx, "updateduser", "newpassword")
 	require.NoError(t, err)
 
-	// Verify login fails with old password
 	_, _, err = authService.Login(ctx, "updateduser", "password123")
 	assert.Error(t, err)
 }
@@ -289,7 +280,6 @@ func TestUpdateUserWithoutPasswordChange(t *testing.T) {
 	err = authService.UpdateUser(ctx, user, "")
 	require.NoError(t, err)
 
-	// Old password should still work
 	_, _, err = authService.Login(ctx, "testuser", "password123")
 	require.NoError(t, err)
 }

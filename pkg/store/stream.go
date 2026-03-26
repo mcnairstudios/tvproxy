@@ -16,6 +16,7 @@ import (
 type StreamStoreImpl struct {
 	mu    sync.RWMutex
 	items map[string]models.Stream
+	rev   *Revision
 
 	path string
 	log  zerolog.Logger
@@ -24,9 +25,14 @@ type StreamStoreImpl struct {
 func NewStreamStore(path string, log zerolog.Logger) *StreamStoreImpl {
 	return &StreamStoreImpl{
 		items: make(map[string]models.Stream),
+		rev:   NewRevision(),
 		path:  path,
 		log:   log.With().Str("store", "stream").Logger(),
 	}
+}
+
+func (s *StreamStoreImpl) ETag() string {
+	return s.rev.ETag()
 }
 
 func (s *StreamStoreImpl) List(_ context.Context) ([]models.Stream, error) {
@@ -119,6 +125,7 @@ func (s *StreamStoreImpl) BulkUpsert(_ context.Context, streams []models.Stream)
 		st.UpdatedAt = now
 		s.items[st.ID] = st
 	}
+	s.rev.Bump()
 	return nil
 }
 
@@ -141,6 +148,9 @@ func (s *StreamStoreImpl) DeleteStaleByAccountID(_ context.Context, accountID st
 			deleted = append(deleted, id)
 		}
 	}
+	if len(deleted) > 0 {
+		s.rev.Bump()
+	}
 	return deleted, nil
 }
 
@@ -153,12 +163,14 @@ func (s *StreamStoreImpl) DeleteByAccountID(_ context.Context, accountID string)
 			delete(s.items, id)
 		}
 	}
+	s.rev.Bump()
 	return nil
 }
 
 func (s *StreamStoreImpl) Delete(_ context.Context, id string) error {
 	s.mu.Lock()
 	delete(s.items, id)
+	s.rev.Bump()
 	s.mu.Unlock()
 	return nil
 }
@@ -166,6 +178,7 @@ func (s *StreamStoreImpl) Delete(_ context.Context, id string) error {
 func (s *StreamStoreImpl) Clear() error {
 	s.mu.Lock()
 	s.items = make(map[string]models.Stream)
+	s.rev.Bump()
 	s.mu.Unlock()
 	return nil
 }
@@ -197,6 +210,7 @@ func (s *StreamStoreImpl) Load() error {
 
 	s.mu.Lock()
 	s.items = items
+	s.rev.Bump()
 	s.mu.Unlock()
 
 	s.log.Info().Int("count", len(items)).Msg("loaded stream store")

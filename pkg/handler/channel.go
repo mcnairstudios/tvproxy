@@ -47,6 +47,7 @@ func (h *ChannelHandler) resolveLogoID(ctx context.Context, logoID *string, logo
 
 func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
+
 	channels, err := h.channelService.ListChannelsForUser(r.Context(), user.UserID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to list channels")
@@ -54,6 +55,7 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logoService.ResolveChannelLogos(channels)
+	w.Header().Set("Cache-Control", "private, no-store")
 	respondJSON(w, http.StatusOK, channels)
 }
 

@@ -29,7 +29,6 @@ func seedData(ctx context.Context, db execContext) error {
 	profiles := []profileSeed{
 		{"Direct", "direct", "m3u", "none", "copy", "mpegts", false, true},
 		{"Proxy", "proxy", "m3u", "none", "copy", "mpegts", true, true},
-		{"Recording", "ffmpeg", "m3u", "none", "copy", "mp4", false, true},
 	}
 
 	for _, p := range profiles {
@@ -61,11 +60,37 @@ func seedRecordingProfile(ctx context.Context, db *sql.DB) error {
 		return nil
 	}
 	id := uuid.New().String()
-	args := ffmpeg.ComposeStreamProfileArgs(ffmpeg.ComposeOptions{SourceType: "m3u", HWAccel: "none", VideoCodec: "copy", Container: "mp4"})
+	args := ffmpeg.ComposeStreamProfileArgs(ffmpeg.ComposeOptions{SourceType: "m3u", HWAccel: "none", VideoCodec: "av1", Container: "mp4"})
 	_, err = db.ExecContext(ctx,
 		`INSERT INTO stream_profiles (id, name, stream_mode, source_type, hwaccel, video_codec, container, custom_args, command, args, is_default, is_system)
-		 VALUES (?, 'Recording', 'ffmpeg', 'm3u', 'none', 'copy', 'mp4', '', 'ffmpeg', ?, 0, 1)`,
+		 VALUES (?, 'Recording', 'ffmpeg', 'm3u', 'none', 'av1', 'mp4', '', 'ffmpeg', ?, 0, 1)`,
 		id, args)
+	return err
+}
+
+func seedCopyProfile(ctx context.Context, db *sql.DB) error {
+	var count int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM stream_profiles WHERE name = 'Copy'`).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	id := uuid.New().String()
+	args := ffmpeg.ComposeStreamProfileArgs(ffmpeg.ComposeOptions{SourceType: "m3u", HWAccel: "none", VideoCodec: "h265", Container: "mpegts", Deinterlace: true, FPSMode: "auto"})
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO stream_profiles (id, name, stream_mode, source_type, hwaccel, video_codec, container, custom_args, command, args, is_default, is_system, deinterlace, fps_mode)
+		 VALUES (?, 'Copy', 'ffmpeg', 'm3u', 'none', 'h265', 'mpegts', '', 'ffmpeg', ?, 0, 1, 1, 'auto')`,
+		id, args)
+	return err
+}
+
+func updateRecordingProfileAV1(ctx context.Context, db *sql.DB) error {
+	args := ffmpeg.ComposeStreamProfileArgs(ffmpeg.ComposeOptions{SourceType: "m3u", HWAccel: "none", VideoCodec: "av1", Container: "mp4"})
+	_, err := db.ExecContext(ctx,
+		`UPDATE stream_profiles SET hwaccel = 'none', video_codec = 'av1', args = ? WHERE name = 'Recording' AND is_system = 1`,
+		args)
 	return err
 }
 
@@ -86,7 +111,15 @@ func SeedClientDefaults(ctx context.Context, db *sql.DB, defs *defaults.ClientDe
 	}
 
 	for _, c := range defs.Clients {
-		args := ffmpeg.ComposeStreamProfileArgs(ffmpeg.ComposeOptions{SourceType: c.SourceType, HWAccel: c.HWAccel, VideoCodec: c.VideoCodec, Container: c.Container})
+		hwaccel := c.HWAccel
+		if hwaccel == "default" {
+			hwaccel = "none"
+		}
+		videoCodec := c.VideoCodec
+		if videoCodec == "default" {
+			videoCodec = "copy"
+		}
+		args := ffmpeg.ComposeStreamProfileArgs(ffmpeg.ComposeOptions{SourceType: c.SourceType, HWAccel: hwaccel, VideoCodec: videoCodec, Container: c.Container})
 		profileID := uuid.New().String()
 		if _, err := db.ExecContext(ctx,
 			`INSERT INTO stream_profiles (id, name, stream_mode, source_type, hwaccel, video_codec, container, custom_args, command, args, is_default, is_system, is_client)

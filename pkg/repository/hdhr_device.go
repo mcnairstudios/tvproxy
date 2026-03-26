@@ -14,11 +14,11 @@ import (
 
 const hdhrDeviceSelect = `SELECT id, name, device_id, device_auth, firmware_version, tuner_count, port, is_enabled, created_at, updated_at FROM hdhr_devices`
 
-type hdhrScanner interface {
+type hdhrDeviceScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanDevice(s hdhrScanner) (*models.HDHRDevice, error) {
+func scanDevice(s hdhrDeviceScanner) (*models.HDHRDevice, error) {
 	d := &models.HDHRDevice{}
 	if err := s.Scan(
 		&d.ID, &d.Name, &d.DeviceID, &d.DeviceAuth,

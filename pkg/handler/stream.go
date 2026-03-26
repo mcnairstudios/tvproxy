@@ -11,11 +11,12 @@ import (
 
 type StreamHandler struct {
 	streamStore store.StreamReader
+	versioned   store.Versioned
 	logoService *service.LogoService
 }
 
-func NewStreamHandler(streamStore store.StreamReader, logoService *service.LogoService) *StreamHandler {
-	return &StreamHandler{streamStore: streamStore, logoService: logoService}
+func NewStreamHandler(streamStore store.StreamReader, versioned store.Versioned, logoService *service.LogoService) *StreamHandler {
+	return &StreamHandler{streamStore: streamStore, versioned: versioned, logoService: logoService}
 }
 
 func (h *StreamHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -33,6 +34,13 @@ func (h *StreamHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	etag := h.versioned.ETag()
+	if r.Header.Get("If-None-Match") == etag {
+		w.Header().Set("ETag", etag)
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	if r.URL.Query().Get("full") == "true" {
 		streams, err := h.streamStore.List(r.Context())
 		if err != nil {
@@ -42,7 +50,7 @@ func (h *StreamHandler) List(w http.ResponseWriter, r *http.Request) {
 		for i := range streams {
 			streams[i].Logo = h.logoService.Resolve(streams[i].Logo)
 		}
-		respondJSON(w, http.StatusOK, streams)
+		respondCacheable(w, r, etag, http.StatusOK, streams)
 		return
 	}
 
@@ -54,7 +62,7 @@ func (h *StreamHandler) List(w http.ResponseWriter, r *http.Request) {
 	for i := range summaries {
 		summaries[i].Logo = h.logoService.Resolve(summaries[i].Logo)
 	}
-	respondJSON(w, http.StatusOK, summaries)
+	respondCacheable(w, r, etag, http.StatusOK, summaries)
 }
 
 func (h *StreamHandler) Get(w http.ResponseWriter, r *http.Request) {

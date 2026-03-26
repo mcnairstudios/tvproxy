@@ -40,6 +40,12 @@ func scanChannel(s channelScanner) (*models.Channel, error) {
 	return c, nil
 }
 
+var channelNamespace = uuid.MustParse("c8a5e2b1-7f3d-4a96-b8e1-d2c4f6a89012")
+
+func deterministicChannelID(name, userID string) string {
+	return uuid.NewSHA1(channelNamespace, []byte(name+":"+userID)).String()
+}
+
 type ChannelRepository struct {
 	db *database.DB
 }
@@ -50,7 +56,7 @@ func NewChannelRepository(db *database.DB) *ChannelRepository {
 
 func (r *ChannelRepository) Create(ctx context.Context, channel *models.Channel) error {
 	now := time.Now()
-	channel.ID = uuid.New().String()
+	channel.ID = deterministicChannelID(channel.Name, channel.UserID)
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO channels (id, user_id, name, logo_id, tvg_id, channel_group_id, stream_profile_id, is_enabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -18,11 +18,9 @@ import (
 const (
 	hdhrDiscoverPort = 65001
 
-	// Packet types
 	hdhrTypeDiscoverReq = 0x0002
 	hdhrTypeDiscoverRpy = 0x0003
 
-	// Tags
 	hdhrTagDeviceType = 0x01
 	hdhrTagDeviceID   = 0x02
 	hdhrTagTunerCount = 0x10
@@ -30,16 +28,12 @@ const (
 	hdhrTagLineupURL  = 0x27
 	hdhrTagDeviceAuth = 0x2B
 
-	// Device types
 	hdhrDeviceTypeTuner    = 0x00000001
 	hdhrDeviceTypeWildcard = 0xFFFFFFFF
 
-	// Wildcard device ID
 	hdhrDeviceIDWildcard = 0xFFFFFFFF
 )
 
-// HDHRDiscoverWorker listens for HDHomeRun UDP discovery requests on port 65001
-// and responds so that Plex/Jellyfin/Emby can find the virtual tuner.
 type HDHRDiscoverWorker struct {
 	hdhrDeviceRepo *repository.HDHRDeviceRepository
 	baseURL        string
@@ -47,7 +41,6 @@ type HDHRDiscoverWorker struct {
 	retryDelay     time.Duration
 }
 
-// NewHDHRDiscoverWorker creates a new HDHomeRun discovery worker.
 func NewHDHRDiscoverWorker(hdhrDeviceRepo *repository.HDHRDeviceRepository, baseURL string, retryDelay time.Duration, log zerolog.Logger) *HDHRDiscoverWorker {
 	if retryDelay <= 0 {
 		retryDelay = 2 * time.Second
@@ -60,7 +53,6 @@ func NewHDHRDiscoverWorker(hdhrDeviceRepo *repository.HDHRDeviceRepository, base
 	}
 }
 
-// Run starts listening for HDHomeRun discovery packets.
 func (w *HDHRDiscoverWorker) Run(ctx context.Context) {
 	select {
 	case <-time.After(w.retryDelay):
@@ -78,7 +70,6 @@ func (w *HDHRDiscoverWorker) Run(ctx context.Context) {
 
 	w.log.Info().Int("port", hdhrDiscoverPort).Msg("HDHomeRun discovery listener started")
 
-	// Close the connection when context is done
 	go func() {
 		<-ctx.Done()
 		conn.Close()
@@ -96,7 +87,7 @@ func (w *HDHRDiscoverWorker) Run(ctx context.Context) {
 			continue
 		}
 
-		if n < 8 { // minimum packet size: 2 type + 2 length + 0 payload + 4 crc
+		if n < 8 {
 			continue
 		}
 
@@ -113,8 +104,6 @@ func (w *HDHRDiscoverWorker) Run(ctx context.Context) {
 	}
 }
 
-// parsePacket parses an HDHomeRun protocol packet.
-// Format: uint16 type | uint16 payload_length | payload | uint32 crc
 func (w *HDHRDiscoverWorker) parsePacket(data []byte) (uint16, map[byte][]byte, bool) {
 	if len(data) < 4 {
 		return 0, nil, false
@@ -127,7 +116,6 @@ func (w *HDHRDiscoverWorker) parsePacket(data []byte) (uint16, map[byte][]byte, 
 		return 0, nil, false
 	}
 
-	// Verify CRC
 	crcData := data[:4+payloadLen]
 	expectedCRC := binary.LittleEndian.Uint32(data[4+payloadLen : 4+payloadLen+4])
 	actualCRC := crc32.ChecksumIEEE(crcData)
@@ -135,7 +123,6 @@ func (w *HDHRDiscoverWorker) parsePacket(data []byte) (uint16, map[byte][]byte, 
 		return 0, nil, false
 	}
 
-	// Parse TLV tags from payload
 	tags := make(map[byte][]byte)
 	payload := data[4 : 4+payloadLen]
 	for len(payload) > 0 {
@@ -155,9 +142,6 @@ func (w *HDHRDiscoverWorker) parsePacket(data []byte) (uint16, map[byte][]byte, 
 	return pktType, tags, true
 }
 
-// readVarLen reads a variable-length field.
-// If high bit of first byte is clear, length is that byte.
-// If high bit is set, length is (first & 0x7f) | (second << 7).
 func (w *HDHRDiscoverWorker) readVarLen(data []byte) (int, int) {
 	if len(data) == 0 {
 		return 0, 0
@@ -172,21 +156,18 @@ func (w *HDHRDiscoverWorker) readVarLen(data []byte) (int, int) {
 }
 
 func (w *HDHRDiscoverWorker) handleDiscoverRequest(ctx context.Context, conn *net.UDPConn, remoteAddr *net.UDPAddr, tags map[byte][]byte) {
-	// Check device type filter
 	if dt, ok := tags[hdhrTagDeviceType]; ok && len(dt) == 4 {
 		reqType := binary.BigEndian.Uint32(dt)
 		if reqType != hdhrDeviceTypeTuner && reqType != hdhrDeviceTypeWildcard {
-			return // not looking for a tuner
+			return
 		}
 	}
 
-	// Check device ID filter
 	var requestedID uint32 = hdhrDeviceIDWildcard
 	if di, ok := tags[hdhrTagDeviceID]; ok && len(di) == 4 {
 		requestedID = binary.BigEndian.Uint32(di)
 	}
 
-	// Find enabled devices
 	devices, err := w.hdhrDeviceRepo.List(ctx)
 	if err != nil {
 		return
@@ -224,58 +205,45 @@ func (w *HDHRDiscoverWorker) extractHost() string {
 	return host
 }
 
-// parseDeviceID converts a hex device ID string to uint32.
 func (w *HDHRDiscoverWorker) parseDeviceID(id string) uint32 {
 	val, err := strconv.ParseUint(id, 16, 32)
 	if err != nil {
-		// If not valid hex, generate a deterministic ID from the string
 		return crc32.ChecksumIEEE([]byte(id))
 	}
 	return uint32(val)
 }
 
-// buildDiscoverReply builds a complete HDHomeRun discover reply packet.
 func (w *HDHRDiscoverWorker) buildDiscoverReply(deviceID uint32, tunerCount int, deviceAuth string, baseURL string) []byte {
-	// Build payload with TLV tags
 	var payload []byte
 
-	// Device type
 	payload = append(payload, w.encodeTLV(hdhrTagDeviceType, w.encodeUint32(hdhrDeviceTypeTuner))...)
 
-	// Device ID
 	payload = append(payload, w.encodeTLV(hdhrTagDeviceID, w.encodeUint32(deviceID))...)
 
-	// Tuner count
 	if tunerCount > 0 {
 		payload = append(payload, w.encodeTLV(hdhrTagTunerCount, []byte{byte(tunerCount)})...)
 	}
 
-	// Base URL
 	payload = append(payload, w.encodeTLV(hdhrTagBaseURL, []byte(baseURL))...)
 
-	// Lineup URL
 	lineupURL := fmt.Sprintf("%s/lineup.json", baseURL)
 	payload = append(payload, w.encodeTLV(hdhrTagLineupURL, []byte(lineupURL))...)
 
-	// Device auth
 	if deviceAuth != "" {
 		payload = append(payload, w.encodeTLV(hdhrTagDeviceAuth, []byte(deviceAuth))...)
 	}
 
-	// Build packet: type(2) + length(2) + payload + crc(4)
 	pkt := make([]byte, 4+len(payload)+4)
 	binary.BigEndian.PutUint16(pkt[0:2], hdhrTypeDiscoverRpy)
 	binary.BigEndian.PutUint16(pkt[2:4], uint16(len(payload)))
 	copy(pkt[4:], payload)
 
-	// CRC over type + length + payload
 	crc := crc32.ChecksumIEEE(pkt[:4+len(payload)])
 	binary.LittleEndian.PutUint32(pkt[4+len(payload):], crc)
 
 	return pkt
 }
 
-// encodeTLV encodes a tag-length-value entry.
 func (w *HDHRDiscoverWorker) encodeTLV(tag byte, value []byte) []byte {
 	result := []byte{tag}
 	result = append(result, w.encodeVarLen(len(value))...)
@@ -283,7 +251,6 @@ func (w *HDHRDiscoverWorker) encodeTLV(tag byte, value []byte) []byte {
 	return result
 }
 
-// encodeVarLen encodes a variable-length integer.
 func (w *HDHRDiscoverWorker) encodeVarLen(length int) []byte {
 	if length < 128 {
 		return []byte{byte(length)}
@@ -291,7 +258,6 @@ func (w *HDHRDiscoverWorker) encodeVarLen(length int) []byte {
 	return []byte{byte(length&0x7f) | 0x80, byte(length >> 7)}
 }
 
-// encodeUint32 encodes a uint32 in big-endian.
 func (w *HDHRDiscoverWorker) encodeUint32(val uint32) []byte {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, val)

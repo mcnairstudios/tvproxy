@@ -18,8 +18,8 @@ type ComposeOptions struct {
 
 var defaultFFmpegSettings = &defaults.FFmpegSettings{
 	LogLevel:           "warning",
-	AnalyzeDuration:    5000000,
-	ProbeSize:          5000000,
+	AnalyzeDuration:    1000000,
+	ProbeSize:          1000000,
 	SatIPRWTimeout:     5000000,
 	AudioBitrate:       "192k",
 	AudioChannels:      2,
@@ -137,7 +137,7 @@ func ComposeStreamProfileArgs(opts ComposeOptions) string {
 	}
 
 	switch opts.Container {
-	case "mp4":
+	case "mp4", "hls":
 		parts = append(parts, "-f", "mp4", "-movflags", s.MP4Movflags)
 	default:
 		parts = append(parts, "-f", opts.Container)

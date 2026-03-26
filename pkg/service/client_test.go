@@ -104,7 +104,7 @@ func TestMatchRule(t *testing.T) {
 }
 
 func TestMatchesAllRules(t *testing.T) {
-	svc := NewClientService(nil, nil, NewSettingsService(nil), zerolog.Nop())
+	svc := NewClientService(nil, nil, NewSettingsService(nil, nil, zerolog.Nop()), zerolog.Nop())
 
 	tests := []struct {
 		name    string

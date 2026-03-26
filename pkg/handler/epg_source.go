@@ -130,5 +130,5 @@ func (h *EPGSourceHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 func (h *EPGSourceHandler) RefreshStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	respondJSON(w, http.StatusOK, h.epgService.GetStatus(id))
+	respondJSON(w, http.StatusOK, h.epgService.Get(id))
 }

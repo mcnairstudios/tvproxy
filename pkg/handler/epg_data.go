@@ -10,11 +10,12 @@ import (
 )
 
 type EPGDataHandler struct {
-	epgStore store.EPGReader
+	epgStore  store.EPGReader
+	versioned store.Versioned
 }
 
-func NewEPGDataHandler(epgStore store.EPGReader) *EPGDataHandler {
-	return &EPGDataHandler{epgStore: epgStore}
+func NewEPGDataHandler(epgStore store.EPGReader, versioned store.Versioned) *EPGDataHandler {
+	return &EPGDataHandler{epgStore: epgStore, versioned: versioned}
 }
 
 type epgDataWithPrograms struct {
@@ -23,12 +24,19 @@ type epgDataWithPrograms struct {
 	ChannelID   string      `json:"channel_id"`
 	Name        string      `json:"name"`
 	Icon        string      `json:"icon,omitempty"`
-	Programs    interface{} `json:"programs"`
+	Programs    any `json:"programs"`
 }
 
 func (h *EPGDataHandler) List(w http.ResponseWriter, r *http.Request) {
 	sourceIDStr := r.URL.Query().Get("source_id")
 	includePrograms := r.URL.Query().Get("programs") == "true"
+
+	etag := h.versioned.ETag()
+	if r.Header.Get("If-None-Match") == etag {
+		w.Header().Set("ETag", etag)
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 
 	var data []models.EPGData
 	var err error
@@ -45,7 +53,7 @@ func (h *EPGDataHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !includePrograms {
-		respondJSON(w, http.StatusOK, data)
+		respondCacheable(w, r, etag, http.StatusOK, data)
 		return
 	}
 
@@ -74,7 +82,7 @@ func (h *EPGDataHandler) List(w http.ResponseWriter, r *http.Request) {
 			Programs:    progs,
 		})
 	}
-	respondJSON(w, http.StatusOK, results)
+	respondCacheable(w, r, etag, http.StatusOK, results)
 }
 
 func (h *EPGDataHandler) NowPlaying(w http.ResponseWriter, r *http.Request) {
