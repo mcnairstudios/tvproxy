@@ -224,6 +224,12 @@ func (s *LogoService) resolveUncached(url string) string {
 	if cached := s.StreamLogoFilename(url); cached != "" {
 		return "/static/" + cached
 	}
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		if cached := s.cacheAndResolve(url); cached != "" {
+			return "/static/" + cached
+		}
+		return url
+	}
 	if isDisplayableURL(url) {
 		return url
 	}
@@ -272,6 +278,12 @@ func (s *LogoService) CacheStreamLogos(ctx context.Context, streams []models.Str
 		}
 		s.downloadStreamLogo(ctx, stream.Logo, hash)
 	}
+}
+
+func (s *LogoService) cacheAndResolve(url string) string {
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(url)))[:16]
+	s.downloadStreamLogo(context.Background(), url, hash)
+	return s.StreamLogoFilename(url)
 }
 
 func (s *LogoService) StreamLogoFilename(url string) string {
