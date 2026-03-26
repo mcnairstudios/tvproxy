@@ -9,16 +9,22 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/gavinmcnair/tvproxy/pkg/defaults"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 type DB struct {
 	*sql.DB
 	log            zerolog.Logger
 	clientDefaults *defaults.ClientDefaults
+	profileStore   store.ProfileStore
 }
 
 func (db *DB) SetClientDefaults(defs *defaults.ClientDefaults) {
 	db.clientDefaults = defs
+}
+
+func (db *DB) SetProfileStore(ps store.ProfileStore) {
+	db.profileStore = ps
 }
 
 func New(ctx context.Context, dbPath string, log zerolog.Logger) (*DB, error) {
@@ -96,7 +102,7 @@ func (db *DB) SoftReset(ctx context.Context) error {
 	if err := seedData(ctx, db.DB); err != nil {
 		return err
 	}
-	return SeedClientDefaults(ctx, db.DB, db.clientDefaults)
+	return SeedClientDefaults(ctx, db.DB, db.clientDefaults, db.profileStore)
 }
 
 func (db *DB) HardReset(ctx context.Context) error {
@@ -129,7 +135,7 @@ func (db *DB) HardReset(ctx context.Context) error {
 	if err := db.migrate(ctx); err != nil {
 		return err
 	}
-	return SeedClientDefaults(ctx, db.DB, db.clientDefaults)
+	return SeedClientDefaults(ctx, db.DB, db.clientDefaults, db.profileStore)
 }
 
 func (db *DB) Checkpoint(ctx context.Context) {

@@ -11,18 +11,19 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 type ClientService struct {
 	clientRepo        *repository.ClientRepository
-	streamProfileRepo *repository.StreamProfileRepository
+	streamProfileRepo store.ProfileStore
 	settingsService   *SettingsService
 	log               zerolog.Logger
 }
 
 func NewClientService(
 	clientRepo *repository.ClientRepository,
-	streamProfileRepo *repository.StreamProfileRepository,
+	streamProfileRepo store.ProfileStore,
 	settingsService *SettingsService,
 	log zerolog.Logger,
 ) *ClientService {

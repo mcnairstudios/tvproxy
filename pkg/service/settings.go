@@ -10,17 +10,18 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 type SettingsService struct {
 	settingsRepo      *repository.CoreSettingsRepository
-	streamProfileRepo *repository.StreamProfileRepository
+	streamProfileRepo store.ProfileStore
 	debug             atomic.Bool
 	normalLogLevel    zerolog.Level
 	log               zerolog.Logger
 }
 
-func NewSettingsService(settingsRepo *repository.CoreSettingsRepository, streamProfileRepo *repository.StreamProfileRepository, log zerolog.Logger) *SettingsService {
+func NewSettingsService(settingsRepo *repository.CoreSettingsRepository, streamProfileRepo store.ProfileStore, log zerolog.Logger) *SettingsService {
 	return &SettingsService{
 		settingsRepo:      settingsRepo,
 		streamProfileRepo: streamProfileRepo,

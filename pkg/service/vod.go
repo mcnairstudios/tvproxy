@@ -55,7 +55,7 @@ type VODService struct {
 	config            *config.Config
 	channelRepo       *repository.ChannelRepository
 	streamStore       store.StreamReader
-	streamProfileRepo *repository.StreamProfileRepository
+	streamProfileRepo store.ProfileStore
 	settingsService   *SettingsService
 	sessionMgr        *session.Manager
 	recordingStore    store.RecordingStore
@@ -69,7 +69,7 @@ type VODService struct {
 func NewVODService(
 	channelRepo *repository.ChannelRepository,
 	streamStore store.StreamReader,
-	streamProfileRepo *repository.StreamProfileRepository,
+	streamProfileRepo store.ProfileStore,
 	settingsService *SettingsService,
 	sessionMgr *session.Manager,
 	recordingStore store.RecordingStore,

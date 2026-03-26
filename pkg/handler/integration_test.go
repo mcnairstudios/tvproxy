@@ -28,12 +28,13 @@ import (
 )
 
 type fullTestEnv struct {
-	router      *chi.Mux
-	authService *service.AuthService
-	adminToken  string
-	userToken   string
-	db          *database.DB
-	clientDefs  *defaults.ClientDefaults
+	router       *chi.Mux
+	authService  *service.AuthService
+	adminToken   string
+	userToken    string
+	db           *database.DB
+	clientDefs   *defaults.ClientDefaults
+	profileStore *store.ProfileStoreImpl
 }
 
 func setupFullEnv(t *testing.T) *fullTestEnv {
@@ -46,10 +47,14 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 
+	profileStore := store.NewProfileStore(filepath.Join(dir, "profiles.json"), log)
+	profileStore.SeedSystemProfiles()
+
 	clientDefs, err := defaults.LoadClientDefaults(filepath.Join(dir, "clients.json"))
 	require.NoError(t, err)
 	db.SetClientDefaults(clientDefs)
-	err = database.SeedClientDefaults(context.Background(), db.DB, clientDefs)
+	db.SetProfileStore(profileStore)
+	err = database.SeedClientDefaults(context.Background(), db.DB, clientDefs, profileStore)
 	require.NoError(t, err)
 
 	tuningSettings, err := defaults.LoadSettings(filepath.Join(dir, "settings.json"))
@@ -76,7 +81,6 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	channelRepo := repository.NewChannelRepository(db)
 	channelGroupRepo := repository.NewChannelGroupRepository(db)
 	logoRepo := repository.NewLogoRepository(db)
-	streamProfileRepo := repository.NewStreamProfileRepository(db)
 	epgSourceRepo := repository.NewEPGSourceRepository(db)
 	hdhrDeviceRepo := repository.NewHDHRDeviceRepository(db)
 	settingsRepo := repository.NewCoreSettingsRepository(db)
@@ -90,7 +94,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	require.NoError(t, err)
 	adminUserID := adminUser.ID
 
-	settingsService := service.NewSettingsService(settingsRepo, streamProfileRepo, log)
+	settingsService := service.NewSettingsService(settingsRepo, profileStore, log)
 	logoService := service.NewLogoService(logoRepo, cfg, log)
 	logoService.EnsureDir()
 
@@ -98,13 +102,13 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamStore, log)
 	epgService := service.NewEPGService(epgSourceRepo, epgStore, cfg, nil, log)
 	activityService := service.NewActivityService()
-	clientService := service.NewClientService(clientRepo, streamProfileRepo, settingsService, log)
-	proxyService := service.NewProxyService(channelRepo, streamStore, streamProfileRepo, clientService, activityService, cfg, nil, log)
+	clientService := service.NewClientService(clientRepo, profileStore, settingsService, log)
+	proxyService := service.NewProxyService(channelRepo, streamStore, profileStore, clientService, activityService, cfg, nil, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgStore, logoService, cfg, log)
 	recordingStore := store.NewRecordingStore(filepath.Join(dir, "recordings"), log)
 	sessionMgr := session.NewManager(cfg, nil, recordingStore, log)
-	vodService := service.NewVODService(channelRepo, streamStore, streamProfileRepo, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
+	vodService := service.NewVODService(channelRepo, streamStore, profileStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
 	vodService.RecoverRecordings(context.Background())
 	scheduledRecRepo := repository.NewScheduledRecordingRepository(db)
 	schedulerService := service.NewSchedulerService(scheduledRecRepo, channelRepo, vodService, cfg, log)
@@ -118,14 +122,14 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	channelHandler := NewChannelHandler(channelService, logoService)
 	channelGroupHandler := NewChannelGroupHandler(channelService)
 	logoHandler := NewLogoHandler(logoService)
-	streamProfileHandler := NewStreamProfileHandler(streamProfileRepo, settingsService)
+	streamProfileHandler := NewStreamProfileHandler(profileStore, settingsService)
 	epgSourceHandler := NewEPGSourceHandler(epgService)
 	epgDataHandler := NewEPGDataHandler(epgStore, epgStore)
 	hdhrHandler := NewHDHRHandler(hdhrService, proxyService, cfg)
 	outputHandler := NewOutputHandler(outputService)
 	vodHandler := NewVODHandler(vodService, clientService, nil, log)
 	activityHandler := NewActivityHandler(activityService)
-	exportService := service.NewExportService(channelRepo, channelGroupRepo, streamProfileRepo, clientRepo, m3uAccountRepo, epgSourceRepo, settingsService, authService)
+	exportService := service.NewExportService(channelRepo, channelGroupRepo, profileStore, clientRepo, m3uAccountRepo, epgSourceRepo, settingsService, authService)
 	settingsHandler := NewSettingsHandler(settingsService, exportService, db, authService, streamStore, epgStore)
 	clientHandler := NewClientHandler(clientService)
 	schedulerHandler := NewSchedulerHandler(schedulerService, log)
@@ -297,10 +301,11 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	})
 
 	env := &fullTestEnv{
-		router:      r,
-		authService: authService,
-		db:          db,
-		clientDefs:  clientDefs,
+		router:       r,
+		authService:  authService,
+		db:           db,
+		clientDefs:   clientDefs,
+		profileStore: profileStore,
 	}
 
 	env.adminToken, _ = loginHelper(t, env, "admin", "adminpass")
@@ -2868,7 +2873,7 @@ func TestIntegration_ClientSyncSurvival(t *testing.T) {
 		}, env.adminToken)
 		require.Equal(t, http.StatusCreated, rec.Code)
 
-		err := database.SeedClientDefaults(context.Background(), env.db.DB, env.clientDefs)
+		err := database.SeedClientDefaults(context.Background(), env.db.DB, env.clientDefs, env.profileStore)
 		require.NoError(t, err)
 
 		rec = doRequest(t, env, "GET", "/api/stream-profiles/", nil, env.adminToken)

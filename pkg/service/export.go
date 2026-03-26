@@ -7,6 +7,7 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 type ExportData struct {
@@ -40,7 +41,7 @@ type ExportUser struct {
 type ExportService struct {
 	channelRepo       *repository.ChannelRepository
 	channelGroupRepo  *repository.ChannelGroupRepository
-	streamProfileRepo *repository.StreamProfileRepository
+	streamProfileRepo store.ProfileStore
 	clientRepo        *repository.ClientRepository
 	m3uAccountRepo    *repository.M3UAccountRepository
 	epgSourceRepo     *repository.EPGSourceRepository
@@ -51,7 +52,7 @@ type ExportService struct {
 func NewExportService(
 	channelRepo *repository.ChannelRepository,
 	channelGroupRepo *repository.ChannelGroupRepository,
-	streamProfileRepo *repository.StreamProfileRepository,
+	streamProfileRepo store.ProfileStore,
 	clientRepo *repository.ClientRepository,
 	m3uAccountRepo *repository.M3UAccountRepository,
 	epgSourceRepo *repository.EPGSourceRepository,

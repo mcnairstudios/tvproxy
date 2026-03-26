@@ -7,18 +7,17 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 type StreamProfileHandler struct {
-	repo     *repository.StreamProfileRepository
+	repo     store.ProfileStore
 	settings *service.SettingsService
 	rev      *store.Revision
 }
 
-func NewStreamProfileHandler(repo *repository.StreamProfileRepository, settings *service.SettingsService) *StreamProfileHandler {
+func NewStreamProfileHandler(repo store.ProfileStore, settings *service.SettingsService) *StreamProfileHandler {
 	return &StreamProfileHandler{repo: repo, settings: settings, rev: store.NewRevision()}
 }
 

@@ -50,7 +50,7 @@ type channelConnection struct {
 type ProxyService struct {
 	channelRepo       *repository.ChannelRepository
 	streamStore       store.StreamReader
-	streamProfileRepo *repository.StreamProfileRepository
+	streamProfileRepo store.ProfileStore
 	clientService     *ClientService
 	activity          *ActivityService
 	config            *config.Config
@@ -64,7 +64,7 @@ type ProxyService struct {
 func NewProxyService(
 	channelRepo *repository.ChannelRepository,
 	streamStore store.StreamReader,
-	streamProfileRepo *repository.StreamProfileRepository,
+	streamProfileRepo store.ProfileStore,
 	clientService *ClientService,
 	activity *ActivityService,
 	cfg *config.Config,
