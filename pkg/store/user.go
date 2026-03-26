@@ -27,8 +27,9 @@ type UserStore interface {
 }
 
 type userEntry struct {
-	User     models.User `json:"user"`
-	GroupIDs []string    `json:"group_ids,omitempty"`
+	User         models.User `json:"user"`
+	PasswordHash string      `json:"password_hash"`
+	GroupIDs     []string    `json:"group_ids,omitempty"`
 }
 
 type UserStoreImpl struct {
@@ -76,8 +77,14 @@ func (s *UserStoreImpl) Create(_ context.Context, user *models.User) error {
 	now := time.Now()
 	user.CreatedAt = now
 	user.UpdatedAt = now
-	s.users = append(s.users, userEntry{User: *user})
+	s.users = append(s.users, userEntry{User: *user, PasswordHash: user.PasswordHash})
 	return s.save()
+}
+
+func (s *UserStoreImpl) hydrateUser(e *userEntry) *models.User {
+	u := e.User
+	u.PasswordHash = e.PasswordHash
+	return &u
 }
 
 func (s *UserStoreImpl) GetByID(_ context.Context, id string) (*models.User, error) {
@@ -85,8 +92,7 @@ func (s *UserStoreImpl) GetByID(_ context.Context, id string) (*models.User, err
 	defer s.mu.RUnlock()
 	for i := range s.users {
 		if s.users[i].User.ID == id {
-			u := s.users[i].User
-			return &u, nil
+			return s.hydrateUser(&s.users[i]), nil
 		}
 	}
 	return nil, fmt.Errorf("user not found")
@@ -97,8 +103,7 @@ func (s *UserStoreImpl) GetByUsername(_ context.Context, username string) (*mode
 	defer s.mu.RUnlock()
 	for i := range s.users {
 		if s.users[i].User.Username == username {
-			u := s.users[i].User
-			return &u, nil
+			return s.hydrateUser(&s.users[i]), nil
 		}
 	}
 	return nil, fmt.Errorf("user not found")
@@ -109,8 +114,7 @@ func (s *UserStoreImpl) GetByInviteToken(_ context.Context, token string) (*mode
 	defer s.mu.RUnlock()
 	for i := range s.users {
 		if s.users[i].User.InviteToken != nil && *s.users[i].User.InviteToken == token {
-			u := s.users[i].User
-			return &u, nil
+			return s.hydrateUser(&s.users[i]), nil
 		}
 	}
 	return nil, fmt.Errorf("user not found")
@@ -122,6 +126,7 @@ func (s *UserStoreImpl) List(_ context.Context) ([]models.User, error) {
 	result := make([]models.User, len(s.users))
 	for i := range s.users {
 		result[i] = s.users[i].User
+		result[i].PasswordHash = s.users[i].PasswordHash
 	}
 	return result, nil
 }
@@ -131,8 +136,7 @@ func (s *UserStoreImpl) GetFirstAdmin(_ context.Context) (*models.User, error) {
 	defer s.mu.RUnlock()
 	for i := range s.users {
 		if s.users[i].User.IsAdmin {
-			u := s.users[i].User
-			return &u, nil
+			return s.hydrateUser(&s.users[i]), nil
 		}
 	}
 	return nil, fmt.Errorf("no admin user found")
@@ -146,6 +150,7 @@ func (s *UserStoreImpl) Update(_ context.Context, user *models.User) error {
 			user.UpdatedAt = time.Now()
 			user.CreatedAt = s.users[i].User.CreatedAt
 			s.users[i].User = *user
+			s.users[i].PasswordHash = user.PasswordHash
 			return s.save()
 		}
 	}
