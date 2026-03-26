@@ -35,6 +35,7 @@ type fullTestEnv struct {
 	db           *database.DB
 	clientDefs   *defaults.ClientDefaults
 	profileStore *store.ProfileStoreImpl
+	clientStore  *store.ClientStoreImpl
 }
 
 func setupFullEnv(t *testing.T) *fullTestEnv {
@@ -50,11 +51,14 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	profileStore := store.NewProfileStore(filepath.Join(dir, "profiles.json"), log)
 	profileStore.SeedSystemProfiles()
 
+	clientStore := store.NewClientStore(filepath.Join(dir, "clients_data.json"))
+
 	clientDefs, err := defaults.LoadClientDefaults(filepath.Join(dir, "clients.json"))
 	require.NoError(t, err)
 	db.SetClientDefaults(clientDefs)
 	db.SetProfileStore(profileStore)
-	err = database.SeedClientDefaults(context.Background(), db.DB, clientDefs, profileStore)
+	db.SetClientStore(clientStore)
+	err = database.SeedClientDefaults(context.Background(), clientDefs, profileStore, clientStore)
 	require.NoError(t, err)
 
 	tuningSettings, err := defaults.LoadSettings(filepath.Join(dir, "settings.json"))
@@ -84,7 +88,6 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	epgSourceRepo := repository.NewEPGSourceRepository(db)
 	hdhrDeviceRepo := repository.NewHDHRDeviceRepository(db)
 	settingsStore := store.NewSettingsStore(filepath.Join(dir, "core_settings.json"))
-	clientRepo := repository.NewClientRepository(db)
 
 	authService := service.NewAuthService(userRepo, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
 
@@ -102,7 +105,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamStore, log)
 	epgService := service.NewEPGService(epgSourceRepo, epgStore, cfg, nil, log)
 	activityService := service.NewActivityService()
-	clientService := service.NewClientService(clientRepo, profileStore, settingsService, log)
+	clientService := service.NewClientService(clientStore, profileStore, settingsService, log)
 	proxyService := service.NewProxyService(channelRepo, streamStore, profileStore, clientService, activityService, cfg, nil, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgStore, logoService, cfg, log)
@@ -129,7 +132,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	outputHandler := NewOutputHandler(outputService)
 	vodHandler := NewVODHandler(vodService, clientService, nil, log)
 	activityHandler := NewActivityHandler(activityService)
-	exportService := service.NewExportService(channelRepo, channelGroupRepo, profileStore, clientRepo, m3uAccountRepo, epgSourceRepo, settingsService, authService)
+	exportService := service.NewExportService(channelRepo, channelGroupRepo, profileStore, clientStore, m3uAccountRepo, epgSourceRepo, settingsService, authService)
 	settingsHandler := NewSettingsHandler(settingsService, exportService, db, authService, streamStore, epgStore)
 	clientHandler := NewClientHandler(clientService)
 	schedulerHandler := NewSchedulerHandler(schedulerService, log)
@@ -306,6 +309,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 		db:           db,
 		clientDefs:   clientDefs,
 		profileStore: profileStore,
+		clientStore:  clientStore,
 	}
 
 	env.adminToken, _ = loginHelper(t, env, "admin", "adminpass")
@@ -2873,7 +2877,7 @@ func TestIntegration_ClientSyncSurvival(t *testing.T) {
 		}, env.adminToken)
 		require.Equal(t, http.StatusCreated, rec.Code)
 
-		err := database.SeedClientDefaults(context.Background(), env.db.DB, env.clientDefs, env.profileStore)
+		err := database.SeedClientDefaults(context.Background(), env.clientDefs, env.profileStore, env.clientStore)
 		require.NoError(t, err)
 
 		rec = doRequest(t, env, "GET", "/api/stream-profiles/", nil, env.adminToken)

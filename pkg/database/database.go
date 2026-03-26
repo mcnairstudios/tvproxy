@@ -17,6 +17,7 @@ type DB struct {
 	log            zerolog.Logger
 	clientDefaults *defaults.ClientDefaults
 	profileStore   store.ProfileStore
+	clientStore    store.ClientStore
 }
 
 func (db *DB) SetClientDefaults(defs *defaults.ClientDefaults) {
@@ -25,6 +26,10 @@ func (db *DB) SetClientDefaults(defs *defaults.ClientDefaults) {
 
 func (db *DB) SetProfileStore(ps store.ProfileStore) {
 	db.profileStore = ps
+}
+
+func (db *DB) SetClientStore(cs store.ClientStore) {
+	db.clientStore = cs
 }
 
 func New(ctx context.Context, dbPath string, log zerolog.Logger) (*DB, error) {
@@ -102,7 +107,7 @@ func (db *DB) SoftReset(ctx context.Context) error {
 	if err := seedData(ctx, db.DB); err != nil {
 		return err
 	}
-	return SeedClientDefaults(ctx, db.DB, db.clientDefaults, db.profileStore)
+	return SeedClientDefaults(ctx, db.clientDefaults, db.profileStore, db.clientStore)
 }
 
 func (db *DB) HardReset(ctx context.Context) error {
@@ -135,7 +140,7 @@ func (db *DB) HardReset(ctx context.Context) error {
 	if err := db.migrate(ctx); err != nil {
 		return err
 	}
-	return SeedClientDefaults(ctx, db.DB, db.clientDefaults, db.profileStore)
+	return SeedClientDefaults(ctx, db.clientDefaults, db.profileStore, db.clientStore)
 }
 
 func (db *DB) Checkpoint(ctx context.Context) {

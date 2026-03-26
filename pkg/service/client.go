@@ -10,25 +10,24 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 type ClientService struct {
-	clientRepo        *repository.ClientRepository
+	clientStore       store.ClientStore
 	streamProfileRepo store.ProfileStore
 	settingsService   *SettingsService
 	log               zerolog.Logger
 }
 
 func NewClientService(
-	clientRepo *repository.ClientRepository,
+	clientStore store.ClientStore,
 	streamProfileRepo store.ProfileStore,
 	settingsService *SettingsService,
 	log zerolog.Logger,
 ) *ClientService {
 	return &ClientService{
-		clientRepo:        clientRepo,
+		clientStore:       clientStore,
 		streamProfileRepo: streamProfileRepo,
 		settingsService:   settingsService,
 		log:               log.With().Str("service", "client").Logger(),
@@ -36,7 +35,7 @@ func NewClientService(
 }
 
 func (s *ClientService) MatchClient(ctx context.Context, r *http.Request) (*models.StreamProfile, string, error) {
-	clients, err := s.clientRepo.ListEnabledWithRules(ctx)
+	clients, err := s.clientStore.ListEnabledWithRules(ctx)
 	if err != nil {
 		return nil, "", err
 	}
@@ -61,11 +60,11 @@ func (s *ClientService) MatchClient(ctx context.Context, r *http.Request) (*mode
 }
 
 func (s *ClientService) ListClients(ctx context.Context) ([]models.Client, error) {
-	return s.clientRepo.List(ctx)
+	return s.clientStore.List(ctx)
 }
 
 func (s *ClientService) GetClient(ctx context.Context, id string) (*models.Client, error) {
-	return s.clientRepo.GetByID(ctx, id)
+	return s.clientStore.GetByID(ctx, id)
 }
 
 func (s *ClientService) CreateClient(ctx context.Context, client *models.Client, rules []models.ClientMatchRule) error {
@@ -88,14 +87,14 @@ func (s *ClientService) CreateClient(ctx context.Context, client *models.Client,
 
 	client.StreamProfileID = profile.ID
 
-	if err := s.clientRepo.Create(ctx, client); err != nil {
+	if err := s.clientStore.Create(ctx, client); err != nil {
 		if delErr := s.streamProfileRepo.Delete(ctx, profile.ID); delErr != nil {
 			s.log.Warn().Err(delErr).Str("profile_id", profile.ID).Msg("failed to clean up orphan profile")
 		}
 		return fmt.Errorf("creating client: %w", err)
 	}
 
-	if err := s.clientRepo.SetMatchRules(ctx, client.ID, rules); err != nil {
+	if err := s.clientStore.SetMatchRules(ctx, client.ID, rules); err != nil {
 		return fmt.Errorf("setting match rules: %w", err)
 	}
 
@@ -103,12 +102,12 @@ func (s *ClientService) CreateClient(ctx context.Context, client *models.Client,
 }
 
 func (s *ClientService) UpdateClient(ctx context.Context, client *models.Client, rules []models.ClientMatchRule) error {
-	if err := s.clientRepo.Update(ctx, client); err != nil {
+	if err := s.clientStore.Update(ctx, client); err != nil {
 		return fmt.Errorf("updating client: %w", err)
 	}
 
 	if rules != nil {
-		if err := s.clientRepo.SetMatchRules(ctx, client.ID, rules); err != nil {
+		if err := s.clientStore.SetMatchRules(ctx, client.ID, rules); err != nil {
 			return fmt.Errorf("updating match rules: %w", err)
 		}
 	}
@@ -117,20 +116,20 @@ func (s *ClientService) UpdateClient(ctx context.Context, client *models.Client,
 }
 
 func (s *ClientService) DeleteClient(ctx context.Context, id string) error {
-	client, err := s.clientRepo.GetByID(ctx, id)
+	client, err := s.clientStore.GetByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("getting client: %w", err)
 	}
 
 	profileID := client.StreamProfileID
 
-	if err := s.clientRepo.Delete(ctx, id); err != nil {
+	if err := s.clientStore.Delete(ctx, id); err != nil {
 		return fmt.Errorf("deleting client: %w", err)
 	}
 
 	profile, profileErr := s.streamProfileRepo.GetByID(ctx, profileID)
 	if profileErr == nil && !profile.IsSystem {
-		referenced, refErr := s.clientRepo.IsStreamProfileReferenced(ctx, profileID)
+		referenced, refErr := s.clientStore.IsStreamProfileReferenced(ctx, profileID)
 		if refErr == nil && !referenced {
 			if delErr := s.streamProfileRepo.Delete(ctx, profileID); delErr != nil {
 				s.log.Warn().Err(delErr).Str("profile_id", profileID).Msg("failed to clean up orphan profile")

@@ -69,13 +69,19 @@ func main() {
 	}
 	profileStore.SeedSystemProfiles()
 
+	clientStore := store.NewClientStore(filepath.Join(dataDir, "clients_data.json"))
+	if err := clientStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load client store")
+	}
+
 	clientDefs, err := defaults.LoadClientDefaults(filepath.Join(dataDir, "clients.json"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to load client defaults")
 	}
 	db.SetClientDefaults(clientDefs)
 	db.SetProfileStore(profileStore)
-	if err := database.SeedClientDefaults(ctx, db.DB, clientDefs, profileStore); err != nil {
+	db.SetClientStore(clientStore)
+	if err := database.SeedClientDefaults(ctx, clientDefs, profileStore, clientStore); err != nil {
 		log.Fatal().Err(err).Msg("failed to seed client defaults")
 	}
 
@@ -105,7 +111,6 @@ func main() {
 	if err := settingsStore.Load(); err != nil {
 		log.Fatal().Err(err).Msg("failed to load settings store")
 	}
-	clientRepo := repository.NewClientRepository(db)
 	scheduledRecRepo := repository.NewScheduledRecordingRepository(db)
 
 	authService := service.NewAuthService(userRepo, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
@@ -146,7 +151,7 @@ func main() {
 	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamStore, log)
 	epgService := service.NewEPGService(epgSourceRepo, epgStore, cfg, wgHTTPClient, log)
 	activityService := service.NewActivityService()
-	clientService := service.NewClientService(clientRepo, profileStore, settingsService, log)
+	clientService := service.NewClientService(clientStore, profileStore, settingsService, log)
 	proxyService := service.NewProxyService(channelRepo, streamStore, profileStore, clientService, activityService, cfg, wgHTTPClient, log)
 	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
 	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgStore, logoService, cfg, log)
@@ -175,7 +180,7 @@ func main() {
 	hlsManager := hls.NewManager(log)
 	vodHandler := handler.NewVODHandler(vodService, clientService, hlsManager, log)
 	activityHandler := handler.NewActivityHandler(activityService)
-	exportService := service.NewExportService(channelRepo, channelGroupRepo, profileStore, clientRepo, m3uAccountRepo, epgSourceRepo, settingsService, authService)
+	exportService := service.NewExportService(channelRepo, channelGroupRepo, profileStore, clientStore, m3uAccountRepo, epgSourceRepo, settingsService, authService)
 	settingsHandler := handler.NewSettingsHandler(settingsService, exportService, db, authService, streamStore, epgStore)
 	clientHandler := handler.NewClientHandler(clientService)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerService, log)

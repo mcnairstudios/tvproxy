@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -32,19 +33,15 @@ func updateRecordingProfileAV1(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func SeedClientDefaults(ctx context.Context, db *sql.DB, defs *defaults.ClientDefaults, profileStore store.ProfileStore) error {
+func SeedClientDefaults(_ context.Context, defs *defaults.ClientDefaults, profileStore store.ProfileStore, clientStore store.ClientStore) error {
 	if defs == nil {
 		return nil
 	}
 
-	if _, err := db.ExecContext(ctx, `DELETE FROM client_match_rules`); err != nil {
-		return err
-	}
-	if _, err := db.ExecContext(ctx, `DELETE FROM clients`); err != nil {
-		return err
-	}
-
+	clientStore.Clear()
 	profileStore.RemoveClientProfiles()
+
+	now := time.Now()
 
 	for _, c := range defs.Clients {
 		hwaccel := c.HWAccel
@@ -72,22 +69,31 @@ func SeedClientDefaults(ctx context.Context, db *sql.DB, defs *defaults.ClientDe
 		}
 		profileStore.CreateDirect(profile)
 
-		clientID := uuid.New().String()
-		if _, err := db.ExecContext(ctx,
-			`INSERT INTO clients (id, name, priority, stream_profile_id, is_enabled) VALUES (?, ?, ?, ?, 1)`,
-			clientID, c.Name, c.Priority, profile.ID); err != nil {
-			return err
-		}
-
-		for _, r := range c.MatchRules {
-			ruleID := uuid.New().String()
-			if _, err := db.ExecContext(ctx,
-				`INSERT INTO client_match_rules (id, client_id, header_name, match_type, match_value) VALUES (?, ?, ?, ?, ?)`,
-				ruleID, clientID, r.HeaderName, r.MatchType, r.MatchValue); err != nil {
-				return err
+		rules := make([]models.ClientMatchRule, len(c.MatchRules))
+		for j, r := range c.MatchRules {
+			rules[j] = models.ClientMatchRule{
+				ID:         uuid.New().String(),
+				HeaderName: r.HeaderName,
+				MatchType:  r.MatchType,
+				MatchValue: r.MatchValue,
 			}
 		}
+
+		client := &models.Client{
+			ID:              uuid.New().String(),
+			Name:            c.Name,
+			Priority:        c.Priority,
+			StreamProfileID: profile.ID,
+			IsEnabled:       true,
+			MatchRules:      rules,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		clientStore.AddDirect(client)
 	}
 
-	return profileStore.Save()
+	if err := profileStore.Save(); err != nil {
+		return err
+	}
+	return clientStore.Save()
 }

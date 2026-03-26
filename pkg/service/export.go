@@ -42,7 +42,7 @@ type ExportService struct {
 	channelRepo       *repository.ChannelRepository
 	channelGroupRepo  *repository.ChannelGroupRepository
 	streamProfileRepo store.ProfileStore
-	clientRepo        *repository.ClientRepository
+	clientStore       store.ClientStore
 	m3uAccountRepo    *repository.M3UAccountRepository
 	epgSourceRepo     *repository.EPGSourceRepository
 	settingsService   *SettingsService
@@ -53,7 +53,7 @@ func NewExportService(
 	channelRepo *repository.ChannelRepository,
 	channelGroupRepo *repository.ChannelGroupRepository,
 	streamProfileRepo store.ProfileStore,
-	clientRepo *repository.ClientRepository,
+	clientStore store.ClientStore,
 	m3uAccountRepo *repository.M3UAccountRepository,
 	epgSourceRepo *repository.EPGSourceRepository,
 	settingsService *SettingsService,
@@ -63,7 +63,7 @@ func NewExportService(
 		channelRepo:       channelRepo,
 		channelGroupRepo:  channelGroupRepo,
 		streamProfileRepo: streamProfileRepo,
-		clientRepo:        clientRepo,
+		clientStore:       clientStore,
 		m3uAccountRepo:    m3uAccountRepo,
 		epgSourceRepo:     epgSourceRepo,
 		settingsService:   settingsService,
@@ -126,7 +126,7 @@ func (s *ExportService) Export(ctx context.Context, scope string) (*ExportData, 
 	}
 
 	if scope == "full" {
-		clients, err := s.clientRepo.List(ctx)
+		clients, err := s.clientStore.List(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("exporting clients: %w", err)
 		}
