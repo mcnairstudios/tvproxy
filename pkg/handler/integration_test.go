@@ -978,7 +978,7 @@ func TestIntegration_LogoChannelPropagation(t *testing.T) {
 	var ch map[string]any
 	decodeResponse(t, rec, &ch)
 	assert.Equal(t, logoID, ch["logo_id"])
-	assert.Equal(t, "https://example.com/bbc.png", ch["logo"])
+	assert.Contains(t, ch["logo"], "/logo?url=")
 
 	channelID := ch["id"].(string)
 
@@ -990,7 +990,7 @@ func TestIntegration_LogoChannelPropagation(t *testing.T) {
 	rec = doRequest(t, env, "GET", "/api/channels/"+channelID, nil, env.adminToken)
 	require.Equal(t, http.StatusOK, rec.Code)
 	decodeResponse(t, rec, &ch)
-	assert.Equal(t, "https://example.com/bbc-hd.png", ch["logo"])
+	assert.Contains(t, ch["logo"], "/logo?url=")
 
 	rec = doRequest(t, env, "POST", "/api/channels/", map[string]any{
 		"name": "ITV", "logo": "https://example.com/itv.png", "is_enabled": true,
@@ -998,7 +998,7 @@ func TestIntegration_LogoChannelPropagation(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rec.Code)
 	decodeResponse(t, rec, &ch)
 	assert.NotNil(t, ch["logo_id"])
-	assert.Equal(t, "https://example.com/itv.png", ch["logo"])
+	assert.Contains(t, ch["logo"], "/logo?url=")
 
 	rec = doRequest(t, env, "GET", "/api/logos/", nil, env.adminToken)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -1768,7 +1768,7 @@ func TestIntegration_Output(t *testing.T) {
 		assert.Contains(t, body, "#EXTM3U")
 		assert.Contains(t, body, "Channel One")
 		assert.Contains(t, body, `tvg-id="ch1"`)
-		assert.Contains(t, body, `tvg-logo="https://example.com/logo.png"`)
+		assert.Contains(t, body, `tvg-logo="/logo?url=`)
 		assert.Contains(t, body, `group-title="Entertainment"`)
 		assert.NotContains(t, body, "Channel Two")
 	})

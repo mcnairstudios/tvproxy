@@ -441,6 +441,8 @@ func main() {
 		})
 	})
 
+	r.Get("/logo", logoCache.ServeHTTP)
+
 	staticRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "static")
 	staticFileServer := http.FileServer(http.Dir(staticRoot))
 	r.Handle("/static/*", http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

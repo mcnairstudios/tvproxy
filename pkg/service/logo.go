@@ -65,17 +65,17 @@ func (s *LogoService) GetByURL(ctx context.Context, url string) (*models.Logo, e
 }
 
 func (s *LogoService) Resolve(url string) string {
-	return s.cache.Fetch(url)
+	return s.cache.Resolve(url)
 }
 
 func (s *LogoService) ResolveChannel(ch models.Channel) string {
 	if ch.LogoID != nil {
 		if logo, err := s.store.GetByID(context.Background(), *ch.LogoID); err == nil {
-			return s.cache.Fetch(logo.URL)
+			return s.cache.Resolve(logo.URL)
 		}
 	}
 	if ch.Logo != "" {
-		return s.cache.Fetch(ch.Logo)
+		return s.cache.Resolve(ch.Logo)
 	}
 	return logocache.Placeholder
 }

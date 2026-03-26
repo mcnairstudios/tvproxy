@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,7 @@ const Placeholder = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 
 type Cache struct {
 	dir        string
-	config     *config.Config
+	cfg        *config.Config
 	httpClient *http.Client
 	index      map[string]string
 	mu         sync.RWMutex
@@ -30,7 +31,7 @@ type Cache struct {
 func New(dir string, cfg *config.Config, timeout time.Duration) *Cache {
 	c := &Cache{
 		dir:        dir,
-		config:     cfg,
+		cfg:        cfg,
 		httpClient: &http.Client{Timeout: timeout},
 		index:      make(map[string]string),
 	}
@@ -56,35 +57,50 @@ func (c *Cache) buildIndex() {
 	}
 }
 
-func (c *Cache) Fetch(url string) string {
-	if url == "" {
+func (c *Cache) Resolve(logoURL string) string {
+	if logoURL == "" {
 		return Placeholder
 	}
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		if strings.HasPrefix(url, "/") || strings.HasPrefix(url, "data:") {
-			return url
-		}
-		return Placeholder
+	if strings.HasPrefix(logoURL, "/") || strings.HasPrefix(logoURL, "data:") {
+		return logoURL
+	}
+	if strings.HasPrefix(logoURL, "http://") || strings.HasPrefix(logoURL, "https://") {
+		return "/logo?url=" + url.QueryEscape(logoURL)
+	}
+	return Placeholder
+}
+
+func (c *Cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	logoURL := r.URL.Query().Get("url")
+	if logoURL == "" {
+		http.Error(w, "missing url", http.StatusBadRequest)
+		return
 	}
 
-	hash := hashURL(url)
+	hash := hashURL(logoURL)
 
 	c.mu.RLock()
 	filename, ok := c.index[hash]
 	c.mu.RUnlock()
+
 	if ok {
-		return "/static/logocache/" + filename
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		http.ServeFile(w, r, filepath.Join(c.dir, filename))
+		return
 	}
 
-	filename = c.download(url, hash)
-	if filename != "" {
-		return "/static/logocache/" + filename
+	filename = c.fetch(r.Context(), logoURL, hash)
+	if filename == "" {
+		http.Redirect(w, r, logoURL, http.StatusTemporaryRedirect)
+		return
 	}
-	return url
+
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	http.ServeFile(w, r, filepath.Join(c.dir, filename))
 }
 
-func (c *Cache) download(url, hash string) string {
-	resp, err := httputil.Fetch(context.Background(), c.httpClient, c.config, url)
+func (c *Cache) fetch(ctx context.Context, logoURL, hash string) string {
+	resp, err := httputil.Fetch(ctx, c.httpClient, c.cfg, logoURL)
 	if err != nil {
 		return ""
 	}
@@ -94,17 +110,17 @@ func (c *Cache) download(url, hash string) string {
 		return ""
 	}
 
-	ext := detectExtension(resp.Header.Get("Content-Type"), url)
+	ext := detectExtension(resp.Header.Get("Content-Type"), logoURL)
 	filename := hash + ext
+	path := filepath.Join(c.dir, filename)
 
-	f, err := os.Create(filepath.Join(c.dir, filename))
+	f, err := os.Create(path)
 	if err != nil {
 		return ""
 	}
-
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		f.Close()
-		os.Remove(filepath.Join(c.dir, filename))
+		os.Remove(path)
 		return ""
 	}
 	f.Close()
@@ -116,11 +132,11 @@ func (c *Cache) download(url, hash string) string {
 	return filename
 }
 
-func hashURL(url string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(url)))[:16]
+func hashURL(u string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(u)))[:16]
 }
 
-func detectExtension(contentType, url string) string {
+func detectExtension(contentType, u string) string {
 	if contentType != "" {
 		ct := strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0])
 		exts, _ := mime.ExtensionsByType(ct)
@@ -133,7 +149,7 @@ func detectExtension(contentType, url string) string {
 			return exts[0]
 		}
 	}
-	ext := filepath.Ext(strings.SplitN(url, "?", 2)[0])
+	ext := filepath.Ext(strings.SplitN(u, "?", 2)[0])
 	if ext != "" && len(ext) <= 5 {
 		return ext
 	}
