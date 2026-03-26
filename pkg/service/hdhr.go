@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/xmlutil"
 )
 
@@ -58,22 +58,22 @@ type deviceXMLInner struct {
 }
 
 type HDHRService struct {
-	hdhrDeviceRepo *repository.HDHRDeviceRepository
-	channelRepo    *repository.ChannelRepository
+	hdhrStore    store.HDHRDeviceStore
+	channelStore store.ChannelStore
 }
 
 func NewHDHRService(
-	hdhrDeviceRepo *repository.HDHRDeviceRepository,
-	channelRepo *repository.ChannelRepository,
+	hdhrStore store.HDHRDeviceStore,
+	channelStore store.ChannelStore,
 ) *HDHRService {
 	return &HDHRService{
-		hdhrDeviceRepo: hdhrDeviceRepo,
-		channelRepo:    channelRepo,
+		hdhrStore:    hdhrStore,
+		channelStore: channelStore,
 	}
 }
 
 func (s *HDHRService) NextAvailablePort(ctx context.Context) (int, error) {
-	port, err := s.hdhrDeviceRepo.NextAvailablePort(ctx)
+	port, err := s.hdhrStore.NextAvailablePort(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("getting next available port: %w", err)
 	}
@@ -81,21 +81,21 @@ func (s *HDHRService) NextAvailablePort(ctx context.Context) (int, error) {
 }
 
 func (s *HDHRService) SetChannelGroups(ctx context.Context, deviceID string, groupIDs []string) error {
-	if err := s.hdhrDeviceRepo.SetChannelGroups(ctx, deviceID, groupIDs); err != nil {
+	if err := s.hdhrStore.SetChannelGroups(ctx, deviceID, groupIDs); err != nil {
 		return fmt.Errorf("setting channel groups: %w", err)
 	}
 	return nil
 }
 
 func (s *HDHRService) CreateDevice(ctx context.Context, device *models.HDHRDevice) error {
-	if err := s.hdhrDeviceRepo.Create(ctx, device); err != nil {
+	if err := s.hdhrStore.Create(ctx, device); err != nil {
 		return fmt.Errorf("creating hdhr device: %w", err)
 	}
 	return nil
 }
 
 func (s *HDHRService) GetDevice(ctx context.Context, id string) (*models.HDHRDevice, error) {
-	device, err := s.hdhrDeviceRepo.GetByID(ctx, id)
+	device, err := s.hdhrStore.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("getting hdhr device: %w", err)
 	}
@@ -103,7 +103,7 @@ func (s *HDHRService) GetDevice(ctx context.Context, id string) (*models.HDHRDev
 }
 
 func (s *HDHRService) GetDeviceByDeviceID(ctx context.Context, deviceID string) (*models.HDHRDevice, error) {
-	device, err := s.hdhrDeviceRepo.GetByDeviceID(ctx, deviceID)
+	device, err := s.hdhrStore.GetByDeviceID(ctx, deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("getting hdhr device by device id: %w", err)
 	}
@@ -111,7 +111,7 @@ func (s *HDHRService) GetDeviceByDeviceID(ctx context.Context, deviceID string) 
 }
 
 func (s *HDHRService) ListDevices(ctx context.Context) ([]models.HDHRDevice, error) {
-	devices, err := s.hdhrDeviceRepo.List(ctx)
+	devices, err := s.hdhrStore.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing hdhr devices: %w", err)
 	}
@@ -119,14 +119,14 @@ func (s *HDHRService) ListDevices(ctx context.Context) ([]models.HDHRDevice, err
 }
 
 func (s *HDHRService) UpdateDevice(ctx context.Context, device *models.HDHRDevice) error {
-	if err := s.hdhrDeviceRepo.Update(ctx, device); err != nil {
+	if err := s.hdhrStore.Update(ctx, device); err != nil {
 		return fmt.Errorf("updating hdhr device: %w", err)
 	}
 	return nil
 }
 
 func (s *HDHRService) DeleteDevice(ctx context.Context, id string) error {
-	if err := s.hdhrDeviceRepo.Delete(ctx, id); err != nil {
+	if err := s.hdhrStore.Delete(ctx, id); err != nil {
 		return fmt.Errorf("deleting hdhr device: %w", err)
 	}
 	return nil
@@ -197,7 +197,7 @@ func (s *HDHRService) GetDeviceXMLForDevice(ctx context.Context, device *models.
 }
 
 func (s *HDHRService) firstEnabledDevice(ctx context.Context) (*models.HDHRDevice, error) {
-	devices, err := s.hdhrDeviceRepo.List(ctx)
+	devices, err := s.hdhrStore.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing devices: %w", err)
 	}
@@ -213,7 +213,7 @@ func (s *HDHRService) firstEnabledDevice(ctx context.Context) (*models.HDHRDevic
 }
 
 func (s *HDHRService) buildLineup(ctx context.Context, baseURL string, groupFilter map[string]bool) ([]LineupEntry, error) {
-	channels, err := s.channelRepo.List(ctx)
+	channels, err := s.channelStore.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing channels: %w", err)
 	}

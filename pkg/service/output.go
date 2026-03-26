@@ -10,31 +10,30 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/xmlutil"
 )
 
 type OutputService struct {
-	channelRepo      *repository.ChannelRepository
-	channelGroupRepo *repository.ChannelGroupRepository
-	epgStore         store.EPGReader
-	logoService      *LogoService
-	config           *config.Config
-	log              zerolog.Logger
+	channelStore      store.ChannelStore
+	channelGroupStore store.ChannelGroupStore
+	epgStore          store.EPGReader
+	logoService       *LogoService
+	config            *config.Config
+	log               zerolog.Logger
 }
 
 func NewOutputService(
-	channelRepo *repository.ChannelRepository,
-	channelGroupRepo *repository.ChannelGroupRepository,
+	channelStore store.ChannelStore,
+	channelGroupStore store.ChannelGroupStore,
 	epgStore store.EPGReader,
 	logoService *LogoService,
 	cfg *config.Config,
 	log zerolog.Logger,
 ) *OutputService {
 	return &OutputService{
-		channelRepo:      channelRepo,
-		channelGroupRepo: channelGroupRepo,
+		channelStore:      channelStore,
+		channelGroupStore: channelGroupStore,
 		epgStore:         epgStore,
 		logoService:      logoService,
 		config:           cfg,
@@ -80,12 +79,12 @@ func (s *OutputService) GenerateEPGForGroups(ctx context.Context, groupIDs []str
 }
 
 func (s *OutputService) generateM3U(ctx context.Context, groupFilter map[string]bool, baseURL string, urlSuffix string) (string, error) {
-	channels, err := s.channelRepo.List(ctx)
+	channels, err := s.channelStore.List(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing channels: %w", err)
 	}
 
-	groups, err := s.channelGroupRepo.List(ctx)
+	groups, err := s.channelGroupStore.List(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing channel groups: %w", err)
 	}
@@ -131,7 +130,7 @@ func (s *OutputService) generateM3U(ctx context.Context, groupFilter map[string]
 }
 
 func (s *OutputService) generateEPG(ctx context.Context, groupFilter map[string]bool) (string, error) {
-	channels, err := s.channelRepo.List(ctx)
+	channels, err := s.channelStore.List(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing channels: %w", err)
 	}

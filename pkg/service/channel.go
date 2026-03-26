@@ -7,28 +7,27 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 type ChannelService struct {
-	channelRepo      *repository.ChannelRepository
-	channelGroupRepo *repository.ChannelGroupRepository
-	streamStore      store.StreamReader
-	log              zerolog.Logger
-	rev              *store.Revision
-	groupRev         *store.Revision
+	channelStore      store.ChannelStore
+	channelGroupStore store.ChannelGroupStore
+	streamStore       store.StreamReader
+	log               zerolog.Logger
+	rev               *store.Revision
+	groupRev          *store.Revision
 }
 
 func NewChannelService(
-	channelRepo *repository.ChannelRepository,
-	channelGroupRepo *repository.ChannelGroupRepository,
+	channelStore store.ChannelStore,
+	channelGroupStore store.ChannelGroupStore,
 	streamStore store.StreamReader,
 	log zerolog.Logger,
 ) *ChannelService {
 	return &ChannelService{
-		channelRepo:      channelRepo,
-		channelGroupRepo: channelGroupRepo,
+		channelStore:      channelStore,
+		channelGroupStore: channelGroupStore,
 		streamStore:      streamStore,
 		log:              log.With().Str("service", "channel").Logger(),
 		rev:              store.NewRevision(),
@@ -45,7 +44,7 @@ func (s *ChannelService) GroupETag() string {
 }
 
 func (s *ChannelService) CreateChannel(ctx context.Context, channel *models.Channel) error {
-	if err := s.channelRepo.Create(ctx, channel); err != nil {
+	if err := s.channelStore.Create(ctx, channel); err != nil {
 		return fmt.Errorf("creating channel: %w", err)
 	}
 	s.rev.Bump()
@@ -54,7 +53,7 @@ func (s *ChannelService) CreateChannel(ctx context.Context, channel *models.Chan
 }
 
 func (s *ChannelService) GetChannel(ctx context.Context, id string) (*models.Channel, error) {
-	channel, err := s.channelRepo.GetByID(ctx, id)
+	channel, err := s.channelStore.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("getting channel: %w", err)
 	}
@@ -62,7 +61,7 @@ func (s *ChannelService) GetChannel(ctx context.Context, id string) (*models.Cha
 }
 
 func (s *ChannelService) ListChannels(ctx context.Context) ([]models.Channel, error) {
-	channels, err := s.channelRepo.List(ctx)
+	channels, err := s.channelStore.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing channels: %w", err)
 	}
@@ -70,7 +69,7 @@ func (s *ChannelService) ListChannels(ctx context.Context) ([]models.Channel, er
 }
 
 func (s *ChannelService) UpdateChannel(ctx context.Context, channel *models.Channel) error {
-	if err := s.channelRepo.Update(ctx, channel); err != nil {
+	if err := s.channelStore.Update(ctx, channel); err != nil {
 		return fmt.Errorf("updating channel: %w", err)
 	}
 	s.rev.Bump()
@@ -78,7 +77,7 @@ func (s *ChannelService) UpdateChannel(ctx context.Context, channel *models.Chan
 }
 
 func (s *ChannelService) DeleteChannel(ctx context.Context, id string) error {
-	if err := s.channelRepo.Delete(ctx, id); err != nil {
+	if err := s.channelStore.Delete(ctx, id); err != nil {
 		return fmt.Errorf("deleting channel: %w", err)
 	}
 	s.rev.Bump()
@@ -86,14 +85,14 @@ func (s *ChannelService) DeleteChannel(ctx context.Context, id string) error {
 }
 
 func (s *ChannelService) AssignStreams(ctx context.Context, channelID string, streamIDs []string) error {
-	if _, err := s.channelRepo.GetByID(ctx, channelID); err != nil {
+	if _, err := s.channelStore.GetByID(ctx, channelID); err != nil {
 		return fmt.Errorf("channel not found: %w", err)
 	}
 	return s.assignStreams(ctx, channelID, streamIDs)
 }
 
 func (s *ChannelService) GetChannelStreams(ctx context.Context, channelID string) ([]models.Stream, error) {
-	channelStreams, err := s.channelRepo.GetStreams(ctx, channelID)
+	channelStreams, err := s.channelStore.GetStreams(ctx, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("getting channel streams: %w", err)
 	}
@@ -112,7 +111,7 @@ func (s *ChannelService) GetChannelStreams(ctx context.Context, channelID string
 }
 
 func (s *ChannelService) ListChannelsForUser(ctx context.Context, userID string) ([]models.Channel, error) {
-	channels, err := s.channelRepo.ListByUserID(ctx, userID)
+	channels, err := s.channelStore.ListByUserID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("listing channels for user: %w", err)
 	}
@@ -121,7 +120,7 @@ func (s *ChannelService) ListChannelsForUser(ctx context.Context, userID string)
 }
 
 func (s *ChannelService) GetChannelForUser(ctx context.Context, id, userID string) (*models.Channel, error) {
-	channel, err := s.channelRepo.GetByIDForUser(ctx, id, userID)
+	channel, err := s.channelStore.GetByIDForUser(ctx, id, userID)
 	if err != nil {
 		return nil, fmt.Errorf("getting channel for user: %w", err)
 	}
@@ -129,7 +128,7 @@ func (s *ChannelService) GetChannelForUser(ctx context.Context, id, userID strin
 }
 
 func (s *ChannelService) UpdateChannelForUser(ctx context.Context, channel *models.Channel, userID string) error {
-	if err := s.channelRepo.UpdateForUser(ctx, channel, userID); err != nil {
+	if err := s.channelStore.UpdateForUser(ctx, channel, userID); err != nil {
 		return fmt.Errorf("updating channel for user: %w", err)
 	}
 	s.rev.Bump()
@@ -137,7 +136,7 @@ func (s *ChannelService) UpdateChannelForUser(ctx context.Context, channel *mode
 }
 
 func (s *ChannelService) DeleteChannelForUser(ctx context.Context, id, userID string) error {
-	if err := s.channelRepo.DeleteForUser(ctx, id, userID); err != nil {
+	if err := s.channelStore.DeleteForUser(ctx, id, userID); err != nil {
 		return fmt.Errorf("deleting channel for user: %w", err)
 	}
 	s.rev.Bump()
@@ -145,21 +144,21 @@ func (s *ChannelService) DeleteChannelForUser(ctx context.Context, id, userID st
 }
 
 func (s *ChannelService) AssignStreamsForUser(ctx context.Context, channelID string, streamIDs []string, userID string) error {
-	if _, err := s.channelRepo.GetByIDForUser(ctx, channelID, userID); err != nil {
+	if _, err := s.channelStore.GetByIDForUser(ctx, channelID, userID); err != nil {
 		return fmt.Errorf("channel not found: %w", err)
 	}
 	return s.assignStreams(ctx, channelID, streamIDs)
 }
 
 func (s *ChannelService) GetChannelStreamsForUser(ctx context.Context, channelID, userID string) ([]models.Stream, error) {
-	if _, err := s.channelRepo.GetByIDForUser(ctx, channelID, userID); err != nil {
+	if _, err := s.channelStore.GetByIDForUser(ctx, channelID, userID); err != nil {
 		return nil, fmt.Errorf("channel not found: %w", err)
 	}
 	return s.GetChannelStreams(ctx, channelID)
 }
 
 func (s *ChannelService) ListChannelGroupsForUser(ctx context.Context, userID string) ([]models.ChannelGroup, error) {
-	groups, err := s.channelGroupRepo.ListByUserID(ctx, userID)
+	groups, err := s.channelGroupStore.ListByUserID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("listing channel groups for user: %w", err)
 	}
@@ -167,7 +166,7 @@ func (s *ChannelService) ListChannelGroupsForUser(ctx context.Context, userID st
 }
 
 func (s *ChannelService) GetChannelGroupForUser(ctx context.Context, id, userID string) (*models.ChannelGroup, error) {
-	group, err := s.channelGroupRepo.GetByIDForUser(ctx, id, userID)
+	group, err := s.channelGroupStore.GetByIDForUser(ctx, id, userID)
 	if err != nil {
 		return nil, fmt.Errorf("getting channel group for user: %w", err)
 	}
@@ -175,7 +174,7 @@ func (s *ChannelService) GetChannelGroupForUser(ctx context.Context, id, userID 
 }
 
 func (s *ChannelService) UpdateChannelGroupForUser(ctx context.Context, group *models.ChannelGroup, userID string) error {
-	if err := s.channelGroupRepo.UpdateForUser(ctx, group, userID); err != nil {
+	if err := s.channelGroupStore.UpdateForUser(ctx, group, userID); err != nil {
 		return fmt.Errorf("updating channel group for user: %w", err)
 	}
 	s.groupRev.Bump()
@@ -183,7 +182,7 @@ func (s *ChannelService) UpdateChannelGroupForUser(ctx context.Context, group *m
 }
 
 func (s *ChannelService) DeleteChannelGroupForUser(ctx context.Context, id, userID string) error {
-	if err := s.channelGroupRepo.DeleteForUser(ctx, id, userID); err != nil {
+	if err := s.channelGroupStore.DeleteForUser(ctx, id, userID); err != nil {
 		return fmt.Errorf("deleting channel group for user: %w", err)
 	}
 	s.groupRev.Bump()
@@ -191,7 +190,7 @@ func (s *ChannelService) DeleteChannelGroupForUser(ctx context.Context, id, user
 }
 
 func (s *ChannelService) CreateChannelGroup(ctx context.Context, group *models.ChannelGroup) error {
-	if err := s.channelGroupRepo.Create(ctx, group); err != nil {
+	if err := s.channelGroupStore.Create(ctx, group); err != nil {
 		return fmt.Errorf("creating channel group: %w", err)
 	}
 	s.groupRev.Bump()
@@ -199,7 +198,7 @@ func (s *ChannelService) CreateChannelGroup(ctx context.Context, group *models.C
 }
 
 func (s *ChannelService) GetChannelGroup(ctx context.Context, id string) (*models.ChannelGroup, error) {
-	group, err := s.channelGroupRepo.GetByID(ctx, id)
+	group, err := s.channelGroupStore.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("getting channel group: %w", err)
 	}
@@ -207,7 +206,7 @@ func (s *ChannelService) GetChannelGroup(ctx context.Context, id string) (*model
 }
 
 func (s *ChannelService) ListChannelGroups(ctx context.Context) ([]models.ChannelGroup, error) {
-	groups, err := s.channelGroupRepo.List(ctx)
+	groups, err := s.channelGroupStore.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing channel groups: %w", err)
 	}
@@ -215,7 +214,7 @@ func (s *ChannelService) ListChannelGroups(ctx context.Context) ([]models.Channe
 }
 
 func (s *ChannelService) UpdateChannelGroup(ctx context.Context, group *models.ChannelGroup) error {
-	if err := s.channelGroupRepo.Update(ctx, group); err != nil {
+	if err := s.channelGroupStore.Update(ctx, group); err != nil {
 		return fmt.Errorf("updating channel group: %w", err)
 	}
 	s.groupRev.Bump()
@@ -223,7 +222,7 @@ func (s *ChannelService) UpdateChannelGroup(ctx context.Context, group *models.C
 }
 
 func (s *ChannelService) DeleteChannelGroup(ctx context.Context, id string) error {
-	if err := s.channelGroupRepo.Delete(ctx, id); err != nil {
+	if err := s.channelGroupStore.Delete(ctx, id); err != nil {
 		return fmt.Errorf("deleting channel group: %w", err)
 	}
 	s.groupRev.Bump()
@@ -231,7 +230,7 @@ func (s *ChannelService) DeleteChannelGroup(ctx context.Context, id string) erro
 }
 
 func (s *ChannelService) IncrementChannelFailCount(ctx context.Context, id string) error {
-	if err := s.channelRepo.IncrementFailCount(ctx, id); err != nil {
+	if err := s.channelStore.IncrementFailCount(ctx, id); err != nil {
 		return err
 	}
 	s.rev.Bump()
@@ -239,7 +238,7 @@ func (s *ChannelService) IncrementChannelFailCount(ctx context.Context, id strin
 }
 
 func (s *ChannelService) ResetChannelFailCount(ctx context.Context, id string) error {
-	if err := s.channelRepo.ResetFailCount(ctx, id); err != nil {
+	if err := s.channelStore.ResetFailCount(ctx, id); err != nil {
 		return err
 	}
 	s.rev.Bump()
@@ -257,7 +256,7 @@ func (s *ChannelService) assignStreams(ctx context.Context, channelID string, st
 	for i := range streamIDs {
 		prios[i] = i + 1
 	}
-	if err := s.channelRepo.AssignStreams(ctx, channelID, streamIDs, prios); err != nil {
+	if err := s.channelStore.AssignStreams(ctx, channelID, streamIDs, prios); err != nil {
 		return fmt.Errorf("assigning streams to channel: %w", err)
 	}
 

@@ -24,7 +24,6 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/hls"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/openapi"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 	"github.com/gavinmcnair/tvproxy/pkg/session"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
@@ -100,23 +99,47 @@ func main() {
 		}
 	}
 
-	userRepo := repository.NewUserRepository(db)
-	m3uAccountRepo := repository.NewM3UAccountRepository(db)
-	channelRepo := repository.NewChannelRepository(db)
-	channelGroupRepo := repository.NewChannelGroupRepository(db)
-	logoRepo := repository.NewLogoRepository(db)
-	epgSourceRepo := repository.NewEPGSourceRepository(db)
-	hdhrDeviceRepo := repository.NewHDHRDeviceRepository(db)
+	userStore := store.NewUserStore(filepath.Join(dataDir, "users.json"))
+	if err := userStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load user store")
+	}
+	m3uAccountStore := store.NewM3UAccountStore(filepath.Join(dataDir, "m3u_accounts.json"))
+	if err := m3uAccountStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load m3u account store")
+	}
+	channelStore := store.NewChannelStore(filepath.Join(dataDir, "channels.json"))
+	if err := channelStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load channel store")
+	}
+	channelGroupStore := store.NewChannelGroupStore(filepath.Join(dataDir, "channel_groups.json"))
+	if err := channelGroupStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load channel group store")
+	}
+	logoStore := store.NewLogoStore(filepath.Join(dataDir, "logos.json"))
+	if err := logoStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load logo store")
+	}
+	epgSourceStore := store.NewEPGSourceStore(filepath.Join(dataDir, "epg_sources.json"))
+	if err := epgSourceStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load epg source store")
+	}
+	hdhrStore := store.NewHDHRDeviceStore(filepath.Join(dataDir, "hdhr_devices.json"))
+	if err := hdhrStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load hdhr device store")
+	}
 	settingsStore := store.NewSettingsStore(filepath.Join(dataDir, "core_settings.json"))
 	if err := settingsStore.Load(); err != nil {
 		log.Fatal().Err(err).Msg("failed to load settings store")
 	}
-	scheduledRecRepo := repository.NewScheduledRecordingRepository(db)
+	scheduledRecStore := store.NewScheduledRecordingStore(filepath.Join(dataDir, "scheduled_recordings.json"))
+	if err := scheduledRecStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load scheduled recording store")
+	}
 
-	authService := service.NewAuthService(userRepo, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
+	authService := service.NewAuthService(userStore, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
 	authService.SetInviteExpiry(cfg.Settings.Auth.InviteTokenExpiry)
 
-	users, err := userRepo.List(ctx)
+	users, err := userStore.List(ctx)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to check existing users")
 	}
@@ -143,24 +166,24 @@ func main() {
 
 	wgHTTPClient := wgService.HTTPClient()
 
-	logoService := service.NewLogoService(logoRepo, cfg, log)
+	logoService := service.NewLogoService(logoStore, cfg, log)
 	logoService.EnsureDir()
 	go logoService.CacheAll(context.Background())
 
-	m3uService := service.NewM3UService(m3uAccountRepo, streamStore, channelRepo, logoService, cfg, wgHTTPClient, log)
-	channelService := service.NewChannelService(channelRepo, channelGroupRepo, streamStore, log)
-	epgService := service.NewEPGService(epgSourceRepo, epgStore, cfg, wgHTTPClient, log)
+	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, cfg, wgHTTPClient, log)
+	channelService := service.NewChannelService(channelStore, channelGroupStore, streamStore, log)
+	epgService := service.NewEPGService(epgSourceStore, epgStore, cfg, wgHTTPClient, log)
 	activityService := service.NewActivityService()
 	clientService := service.NewClientService(clientStore, profileStore, settingsService, log)
-	proxyService := service.NewProxyService(channelRepo, streamStore, profileStore, clientService, activityService, cfg, wgHTTPClient, log)
-	hdhrService := service.NewHDHRService(hdhrDeviceRepo, channelRepo)
-	outputService := service.NewOutputService(channelRepo, channelGroupRepo, epgStore, logoService, cfg, log)
+	proxyService := service.NewProxyService(channelStore, streamStore, profileStore, clientService, activityService, cfg, wgHTTPClient, log)
+	hdhrService := service.NewHDHRService(hdhrStore, channelStore)
+	outputService := service.NewOutputService(channelStore, channelGroupStore, epgStore, logoService, cfg, log)
 	recordingStore := store.NewRecordingStore(cfg.RecordDir, log)
 	sessionMgr := session.NewManager(cfg, wgHTTPClient, recordingStore, log)
-	vodService := service.NewVODService(channelRepo, streamStore, profileStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
+	vodService := service.NewVODService(channelStore, streamStore, profileStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
 	vodService.RecoverRecordings(ctx)
-	schedulerService := service.NewSchedulerService(scheduledRecRepo, channelRepo, vodService, cfg, log)
-	dlnaService := service.NewDLNAService(channelRepo, channelGroupRepo, userRepo, settingsService, logoService, vodService, cfg, log)
+	schedulerService := service.NewSchedulerService(scheduledRecStore, channelStore, vodService, cfg, log)
+	dlnaService := service.NewDLNAService(channelStore, channelGroupStore, userStore, settingsService, logoService, vodService, cfg, log)
 
 	authMW := middleware.NewAuthMiddleware(authService, cfg.APIKey, adminUserID)
 
@@ -180,7 +203,7 @@ func main() {
 	hlsManager := hls.NewManager(log)
 	vodHandler := handler.NewVODHandler(vodService, clientService, hlsManager, log)
 	activityHandler := handler.NewActivityHandler(activityService)
-	exportService := service.NewExportService(channelRepo, channelGroupRepo, profileStore, clientStore, m3uAccountRepo, epgSourceRepo, settingsService, authService)
+	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
 	settingsHandler := handler.NewSettingsHandler(settingsService, exportService, db, authService, streamStore, epgStore)
 	clientHandler := handler.NewClientHandler(clientService)
 	schedulerHandler := handler.NewSchedulerHandler(schedulerService, log)
@@ -449,9 +472,9 @@ func main() {
 	wm.Add("m3u_refresh", worker.NewM3URefreshWorker(m3uService, cfg.M3URefreshInterval, log))
 	wm.Add("epg_refresh", worker.NewEPGRefreshWorker(epgService, cfg.EPGRefreshInterval, log))
 
-	wm.Add("ssdp", worker.NewSSDPWorker(hdhrDeviceRepo, cfg.BaseURL, cfg.Settings.Workers.RetryDelay, cfg.Settings.Workers.SSDPAnnounceInterval, log))
-	wm.Add("hdhr_discover", worker.NewHDHRDiscoverWorker(hdhrDeviceRepo, cfg.BaseURL, cfg.Settings.Workers.RetryDelay, log))
-	wm.Add("hdhr_servers", worker.NewHDHRServerWorker(hdhrDeviceRepo, hdhrService, proxyService, settingsService, outputService, cfg, log))
+	wm.Add("ssdp", worker.NewSSDPWorker(hdhrStore, cfg.BaseURL, cfg.Settings.Workers.RetryDelay, cfg.Settings.Workers.SSDPAnnounceInterval, log))
+	wm.Add("hdhr_discover", worker.NewHDHRDiscoverWorker(hdhrStore, cfg.BaseURL, cfg.Settings.Workers.RetryDelay, log))
+	wm.Add("hdhr_servers", worker.NewHDHRServerWorker(hdhrStore, hdhrService, proxyService, settingsService, outputService, cfg, log))
 	wm.Add("dlna", worker.NewDLNAWorker(dlnaService, cfg.BaseURL, cfg.Port, cfg.Settings.Workers.RetryDelay, cfg.Settings.Workers.DLNAAnnounceInterval, log))
 	wm.Add("recording_scheduler", worker.NewSchedulerWorker(schedulerService, 30*time.Second, log))
 	wm.Add("wal_checkpoint", worker.NewWALCheckpointWorker(db, 5*time.Minute, log))

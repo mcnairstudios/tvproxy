@@ -10,11 +10,11 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 type SSDPWorker struct {
-	hdhrDeviceRepo   *repository.HDHRDeviceRepository
+	hdhrStore        store.HDHRDeviceStore
 	baseURL          string
 	log              zerolog.Logger
 	advertisers      map[string]*ssdpAdvertiser
@@ -28,7 +28,7 @@ type ssdpAdvertiser struct {
 	cancel context.CancelFunc
 }
 
-func NewSSDPWorker(hdhrDeviceRepo *repository.HDHRDeviceRepository, baseURL string, retryDelay, announceInterval time.Duration, log zerolog.Logger) *SSDPWorker {
+func NewSSDPWorker(hdhrStore store.HDHRDeviceStore, baseURL string, retryDelay, announceInterval time.Duration, log zerolog.Logger) *SSDPWorker {
 	if retryDelay <= 0 {
 		retryDelay = 2 * time.Second
 	}
@@ -36,7 +36,7 @@ func NewSSDPWorker(hdhrDeviceRepo *repository.HDHRDeviceRepository, baseURL stri
 		announceInterval = 30 * time.Second
 	}
 	return &SSDPWorker{
-		hdhrDeviceRepo:   hdhrDeviceRepo,
+		hdhrStore:        hdhrStore,
 		baseURL:          baseURL,
 		log:              log.With().Str("worker", "ssdp").Logger(),
 		advertisers:      make(map[string]*ssdpAdvertiser),
@@ -69,7 +69,7 @@ func (w *SSDPWorker) Run(ctx context.Context) {
 }
 
 func (w *SSDPWorker) syncAdvertisers(ctx context.Context) {
-	devices, err := w.hdhrDeviceRepo.List(ctx)
+	devices, err := w.hdhrStore.List(ctx)
 	if err != nil {
 		w.log.Error().Err(err).Msg("failed to list HDHR devices for SSDP")
 		return

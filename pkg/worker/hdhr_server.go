@@ -17,8 +17,8 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/handler"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 type deviceServer struct {
@@ -28,7 +28,7 @@ type deviceServer struct {
 }
 
 type HDHRServerWorker struct {
-	hdhrDeviceRepo  *repository.HDHRDeviceRepository
+	hdhrStore       store.HDHRDeviceStore
 	hdhrService     *service.HDHRService
 	proxyService    *service.ProxyService
 	settingsService *service.SettingsService
@@ -44,7 +44,7 @@ type HDHRServerWorker struct {
 }
 
 func NewHDHRServerWorker(
-	hdhrDeviceRepo *repository.HDHRDeviceRepository,
+	hdhrStore store.HDHRDeviceStore,
 	hdhrService *service.HDHRService,
 	proxyService *service.ProxyService,
 	settingsService *service.SettingsService,
@@ -63,7 +63,7 @@ func NewHDHRServerWorker(
 		idleTimeout = cfg.Settings.Server.HDHRIdleTimeout
 	}
 	return &HDHRServerWorker{
-		hdhrDeviceRepo:  hdhrDeviceRepo,
+		hdhrStore:       hdhrStore,
 		hdhrService:     hdhrService,
 		proxyService:    proxyService,
 		settingsService: settingsService,
@@ -102,7 +102,7 @@ func (w *HDHRServerWorker) Run(ctx context.Context) {
 }
 
 func (w *HDHRServerWorker) sync(ctx context.Context) {
-	devices, err := w.hdhrDeviceRepo.List(ctx)
+	devices, err := w.hdhrStore.List(ctx)
 	if err != nil {
 		w.log.Error().Err(err).Msg("failed to list devices for HDHR servers")
 		return

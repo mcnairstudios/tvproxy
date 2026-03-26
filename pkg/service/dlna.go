@@ -13,7 +13,7 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/xmlutil"
 )
 
@@ -24,20 +24,20 @@ const didlHeader = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lit
 const emptyDIDL = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"></DIDL-Lite>`
 
 type DLNAService struct {
-	channelRepo      *repository.ChannelRepository
-	channelGroupRepo *repository.ChannelGroupRepository
-	userRepo         *repository.UserRepository
-	settingsService  *SettingsService
-	logoService      *LogoService
-	vodService       *VODService
-	config           *config.Config
-	log              zerolog.Logger
+	channelStore      store.ChannelStore
+	channelGroupStore store.ChannelGroupStore
+	userStore         store.UserStore
+	settingsService   *SettingsService
+	logoService       *LogoService
+	vodService        *VODService
+	config            *config.Config
+	log               zerolog.Logger
 }
 
 func NewDLNAService(
-	channelRepo *repository.ChannelRepository,
-	channelGroupRepo *repository.ChannelGroupRepository,
-	userRepo *repository.UserRepository,
+	channelStore store.ChannelStore,
+	channelGroupStore store.ChannelGroupStore,
+	userStore store.UserStore,
 	settingsService *SettingsService,
 	logoService *LogoService,
 	vodService *VODService,
@@ -45,9 +45,9 @@ func NewDLNAService(
 	log zerolog.Logger,
 ) *DLNAService {
 	return &DLNAService{
-		channelRepo:      channelRepo,
-		channelGroupRepo: channelGroupRepo,
-		userRepo:         userRepo,
+		channelStore:      channelStore,
+		channelGroupStore: channelGroupStore,
+		userStore:         userStore,
 		settingsService:  settingsService,
 		logoService:      logoService,
 		vodService:       vodService,
@@ -248,7 +248,7 @@ func (s *DLNAService) resolveUserGroupFilter(ctx context.Context, user *models.U
 	if user == nil || user.IsAdmin {
 		return nil
 	}
-	ids, err := s.userRepo.GetGroupIDsForUser(ctx, user.ID)
+	ids, err := s.userStore.GetGroupIDsForUser(ctx, user.ID)
 	if err != nil {
 		s.log.Warn().Err(err).Str("user_id", user.ID).Msg("failed to load user group filter")
 		return nil
@@ -360,7 +360,7 @@ func (s *DLNAService) browseGroup(ctx context.Context, baseURL, objectID, browse
 	if browseFlag == "BrowseMetadata" {
 		title := "Ungrouped"
 		if groupID != "ungrouped" {
-			group, err := s.channelGroupRepo.GetByID(ctx, groupID)
+			group, err := s.channelGroupStore.GetByID(ctx, groupID)
 			if err == nil {
 				title = group.Name
 			}
@@ -552,7 +552,7 @@ func (s *DLNAService) groupedChannelCounts(ctx context.Context, groupFilter map[
 	if err != nil {
 		return nil, 0, err
 	}
-	groups, err := s.channelGroupRepo.List(ctx)
+	groups, err := s.channelGroupStore.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing channel groups: %w", err)
 	}
@@ -584,11 +584,11 @@ func (s *DLNAService) groupedChannelCounts(ctx context.Context, groupFilter map[
 }
 
 func (s *DLNAService) listChannels(ctx context.Context) ([]models.Channel, error) {
-	return s.channelRepo.List(ctx)
+	return s.channelStore.List(ctx)
 }
 
 func (s *DLNAService) getChannel(ctx context.Context, id string) (*models.Channel, error) {
-	return s.channelRepo.GetByID(ctx, id)
+	return s.channelStore.GetByID(ctx, id)
 }
 
 func extractAction(soapAction string) string {

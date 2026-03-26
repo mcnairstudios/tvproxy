@@ -10,7 +10,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 type TokenClaims struct {
@@ -21,7 +21,7 @@ type TokenClaims struct {
 }
 
 type AuthService struct {
-	userRepo      *repository.UserRepository
+	userStore     store.UserStore
 	jwtSecret     []byte
 	accessExpiry  time.Duration
 	refreshExpiry time.Duration
@@ -29,13 +29,13 @@ type AuthService struct {
 }
 
 func NewAuthService(
-	userRepo *repository.UserRepository,
+	userStore store.UserStore,
 	jwtSecret string,
 	accessExpiry time.Duration,
 	refreshExpiry time.Duration,
 ) *AuthService {
 	return &AuthService{
-		userRepo:      userRepo,
+		userStore:     userStore,
 		jwtSecret:     []byte(jwtSecret),
 		accessExpiry:  accessExpiry,
 		refreshExpiry: refreshExpiry,
@@ -43,7 +43,7 @@ func NewAuthService(
 }
 
 func (s *AuthService) Login(ctx context.Context, username, password string) (accessToken, refreshToken string, err error) {
-	user, err := s.userRepo.GetByUsername(ctx, username)
+	user, err := s.userStore.GetByUsername(ctx, username)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid credentials")
 	}
@@ -80,7 +80,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 		return "", fmt.Errorf("token is not a refresh token")
 	}
 
-	user, err := s.userRepo.GetByID(ctx, claims.UserID)
+	user, err := s.userStore.GetByID(ctx, claims.UserID)
 	if err != nil {
 		return "", fmt.Errorf("user no longer exists: %w", err)
 	}
@@ -124,7 +124,7 @@ func (s *AuthService) CreateUser(ctx context.Context, username, password string,
 		IsAdmin:      isAdmin,
 	}
 
-	if err := s.userRepo.Create(ctx, user); err != nil {
+	if err := s.userStore.Create(ctx, user); err != nil {
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
 
@@ -132,7 +132,7 @@ func (s *AuthService) CreateUser(ctx context.Context, username, password string,
 }
 
 func (s *AuthService) ListUsers(ctx context.Context) ([]models.User, error) {
-	users, err := s.userRepo.List(ctx)
+	users, err := s.userStore.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing users: %w", err)
 	}
@@ -140,7 +140,7 @@ func (s *AuthService) ListUsers(ctx context.Context) ([]models.User, error) {
 }
 
 func (s *AuthService) GetUser(ctx context.Context, id string) (*models.User, error) {
-	user, err := s.userRepo.GetByID(ctx, id)
+	user, err := s.userStore.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("getting user: %w", err)
 	}
@@ -156,7 +156,7 @@ func (s *AuthService) UpdateUser(ctx context.Context, user *models.User, newPass
 		user.PasswordHash = string(hash)
 	}
 
-	if err := s.userRepo.Update(ctx, user); err != nil {
+	if err := s.userStore.Update(ctx, user); err != nil {
 		return fmt.Errorf("updating user: %w", err)
 	}
 
@@ -164,14 +164,14 @@ func (s *AuthService) UpdateUser(ctx context.Context, user *models.User, newPass
 }
 
 func (s *AuthService) DeleteUser(ctx context.Context, id string) error {
-	if err := s.userRepo.Delete(ctx, id); err != nil {
+	if err := s.userStore.Delete(ctx, id); err != nil {
 		return fmt.Errorf("deleting user: %w", err)
 	}
 	return nil
 }
 
 func (s *AuthService) FindFirstAdmin(ctx context.Context) (*models.User, error) {
-	return s.userRepo.GetFirstAdmin(ctx)
+	return s.userStore.GetFirstAdmin(ctx)
 }
 
 func (s *AuthService) SetInviteExpiry(d time.Duration) {
@@ -192,14 +192,14 @@ func (s *AuthService) CreateInvite(ctx context.Context, username string) (*model
 		InviteToken:     &token,
 		InviteExpiresAt: &expires,
 	}
-	if err := s.userRepo.Create(ctx, user); err != nil {
+	if err := s.userStore.Create(ctx, user); err != nil {
 		return nil, fmt.Errorf("creating invite: %w", err)
 	}
 	return user, nil
 }
 
 func (s *AuthService) AcceptInvite(ctx context.Context, token, password string) error {
-	user, err := s.userRepo.GetByInviteToken(ctx, token)
+	user, err := s.userStore.GetByInviteToken(ctx, token)
 	if err != nil {
 		return fmt.Errorf("invalid invite token")
 	}
@@ -213,14 +213,14 @@ func (s *AuthService) AcceptInvite(ctx context.Context, token, password string) 
 	user.PasswordHash = string(hash)
 	user.InviteToken = nil
 	user.InviteExpiresAt = nil
-	if err := s.userRepo.Update(ctx, user); err != nil {
+	if err := s.userStore.Update(ctx, user); err != nil {
 		return fmt.Errorf("accepting invite: %w", err)
 	}
 	return nil
 }
 
 func (s *AuthService) AuthenticateBasicAuth(ctx context.Context, username, password string) (*models.User, error) {
-	user, err := s.userRepo.GetByUsername(ctx, username)
+	user, err := s.userStore.GetByUsername(ctx, username)
 	if err != nil {
 		return nil, fmt.Errorf("invalid credentials")
 	}

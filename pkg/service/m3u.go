@@ -14,26 +14,25 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/m3u"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/xtream"
 )
 
 type M3UService struct {
-	m3uAccountRepo *repository.M3UAccountRepository
-	streamStore    store.StreamStore
-	channelRepo    *repository.ChannelRepository
-	logoService    *LogoService
-	config         *config.Config
-	httpClient     *http.Client
-	log            zerolog.Logger
+	m3uAccountStore store.M3UAccountStore
+	streamStore     store.StreamStore
+	channelStore    store.ChannelStore
+	logoService     *LogoService
+	config          *config.Config
+	httpClient      *http.Client
+	log             zerolog.Logger
 	StatusTracker
 }
 
 func NewM3UService(
-	m3uAccountRepo *repository.M3UAccountRepository,
+	m3uAccountStore store.M3UAccountStore,
 	streamStore store.StreamStore,
-	channelRepo *repository.ChannelRepository,
+	channelStore store.ChannelStore,
 	logoService *LogoService,
 	cfg *config.Config,
 	httpClient *http.Client,
@@ -43,9 +42,9 @@ func NewM3UService(
 		httpClient = http.DefaultClient
 	}
 	return &M3UService{
-		m3uAccountRepo: m3uAccountRepo,
-		streamStore:    streamStore,
-		channelRepo:    channelRepo,
+		m3uAccountStore: m3uAccountStore,
+		streamStore:     streamStore,
+		channelStore:    channelStore,
 		logoService:    logoService,
 		config:         cfg,
 		httpClient:     httpClient,
@@ -57,14 +56,14 @@ func NewM3UService(
 func (s *M3UService) Log() *zerolog.Logger { return &s.log }
 
 func (s *M3UService) CreateAccount(ctx context.Context, account *models.M3UAccount) error {
-	if err := s.m3uAccountRepo.Create(ctx, account); err != nil {
+	if err := s.m3uAccountStore.Create(ctx, account); err != nil {
 		return fmt.Errorf("creating m3u account: %w", err)
 	}
 	return nil
 }
 
 func (s *M3UService) GetAccount(ctx context.Context, id string) (*models.M3UAccount, error) {
-	account, err := s.m3uAccountRepo.GetByID(ctx, id)
+	account, err := s.m3uAccountStore.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("getting m3u account: %w", err)
 	}
@@ -72,7 +71,7 @@ func (s *M3UService) GetAccount(ctx context.Context, id string) (*models.M3UAcco
 }
 
 func (s *M3UService) ListAccounts(ctx context.Context) ([]models.M3UAccount, error) {
-	accounts, err := s.m3uAccountRepo.List(ctx)
+	accounts, err := s.m3uAccountStore.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing m3u accounts: %w", err)
 	}
@@ -80,7 +79,7 @@ func (s *M3UService) ListAccounts(ctx context.Context) ([]models.M3UAccount, err
 }
 
 func (s *M3UService) UpdateAccount(ctx context.Context, account *models.M3UAccount) error {
-	if err := s.m3uAccountRepo.Update(ctx, account); err != nil {
+	if err := s.m3uAccountStore.Update(ctx, account); err != nil {
 		return fmt.Errorf("updating m3u account: %w", err)
 	}
 	return nil
@@ -93,14 +92,14 @@ func (s *M3UService) DeleteAccount(ctx context.Context, id string) error {
 	if err := s.streamStore.Save(); err != nil {
 		s.log.Error().Err(err).Msg("failed to save stream store after account delete")
 	}
-	if err := s.m3uAccountRepo.Delete(ctx, id); err != nil {
+	if err := s.m3uAccountStore.Delete(ctx, id); err != nil {
 		return fmt.Errorf("deleting m3u account: %w", err)
 	}
 	return nil
 }
 
 func (s *M3UService) RefreshAccount(ctx context.Context, accountID string) error {
-	account, err := s.m3uAccountRepo.GetByID(ctx, accountID)
+	account, err := s.m3uAccountStore.GetByID(ctx, accountID)
 	if err != nil {
 		return fmt.Errorf("getting account: %w", err)
 	}
@@ -108,12 +107,12 @@ func (s *M3UService) RefreshAccount(ctx context.Context, accountID string) error
 	s.Set(accountID, RefreshStatus{State: "running", Message: "Refreshing..."})
 
 	if err := s.refreshAccount(ctx, account); err != nil {
-		s.m3uAccountRepo.UpdateLastError(ctx, account.ID, err.Error())
+		s.m3uAccountStore.UpdateLastError(ctx, account.ID, err.Error())
 		s.Set(accountID, RefreshStatus{State: "error", Message: err.Error()})
 		return err
 	}
 
-	s.m3uAccountRepo.UpdateLastError(ctx, account.ID, "")
+	s.m3uAccountStore.UpdateLastError(ctx, account.ID, "")
 	s.Set(accountID, RefreshStatus{State: "done", Message: "Refresh complete"})
 	return nil
 }
@@ -224,8 +223,8 @@ func (s *M3UService) upsertAndFinalize(ctx context.Context, account *models.M3UA
 		return fmt.Errorf("deleting stale streams: %w", err)
 	}
 
-	if len(deletedIDs) > 0 && s.channelRepo != nil {
-		if err := s.channelRepo.RemoveStreamMappings(ctx, deletedIDs); err != nil {
+	if len(deletedIDs) > 0 && s.channelStore != nil {
+		if err := s.channelStore.RemoveStreamMappings(ctx, deletedIDs); err != nil {
 			s.log.Error().Err(err).Int("count", len(deletedIDs)).Msg("failed to clean up channel stream mappings")
 		}
 	}
@@ -236,10 +235,10 @@ func (s *M3UService) upsertAndFinalize(ctx context.Context, account *models.M3UA
 	s.log.Info().Int("count", len(streams)).Msg("upserted streams")
 
 	now := time.Now()
-	if err := s.m3uAccountRepo.UpdateLastRefreshed(ctx, account.ID, now); err != nil {
+	if err := s.m3uAccountStore.UpdateLastRefreshed(ctx, account.ID, now); err != nil {
 		return fmt.Errorf("updating last refreshed: %w", err)
 	}
-	if err := s.m3uAccountRepo.UpdateStreamCount(ctx, account.ID, len(streams)); err != nil {
+	if err := s.m3uAccountStore.UpdateStreamCount(ctx, account.ID, len(streams)); err != nil {
 		return fmt.Errorf("updating stream count: %w", err)
 	}
 
@@ -256,7 +255,7 @@ func (s *M3UService) upsertAndFinalize(ctx context.Context, account *models.M3UA
 }
 
 func (s *M3UService) RefreshAllAccounts(ctx context.Context) error {
-	accounts, err := s.m3uAccountRepo.List(ctx)
+	accounts, err := s.m3uAccountStore.List(ctx)
 	if err != nil {
 		return fmt.Errorf("listing accounts: %w", err)
 	}

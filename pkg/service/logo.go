@@ -18,14 +18,13 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 const placeholderLogo = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Crect width='200' height='200' rx='20' fill='%23374151'/%3E%3Ctext x='100' y='115' font-family='sans-serif' font-size='80' fill='%239CA3AF' text-anchor='middle'%3ETV%3C/text%3E%3C/svg%3E`
 
 type LogoService struct {
-	repo           *repository.LogoRepository
+	store          store.LogoStore
 	config         *config.Config
 	httpClient     *http.Client
 	logosDir       string
@@ -41,7 +40,7 @@ type LogoService struct {
 }
 
 func NewLogoService(
-	repo *repository.LogoRepository,
+	logoStore store.LogoStore,
 	cfg *config.Config,
 	log zerolog.Logger,
 ) *LogoService {
@@ -51,7 +50,7 @@ func NewLogoService(
 		timeout = cfg.Settings.Network.LogoDownloadTimeout
 	}
 	return &LogoService{
-		repo:            repo,
+		store:           logoStore,
 		config:          cfg,
 		httpClient:      &http.Client{Timeout: timeout},
 		logosDir:        filepath.Join(staticRoot, "logos"),
@@ -92,7 +91,7 @@ func (s *LogoService) buildStreamLogoCache() {
 }
 
 func (s *LogoService) Create(ctx context.Context, logo *models.Logo) error {
-	if err := s.repo.Create(ctx, logo); err != nil {
+	if err := s.store.Create(ctx, logo); err != nil {
 		return err
 	}
 	s.rev.Bump()
@@ -101,19 +100,19 @@ func (s *LogoService) Create(ctx context.Context, logo *models.Logo) error {
 }
 
 func (s *LogoService) Update(ctx context.Context, logo *models.Logo) error {
-	old, err := s.repo.GetByID(ctx, logo.ID)
+	old, err := s.store.GetByID(ctx, logo.ID)
 	if err != nil {
 		return err
 	}
 	urlChanged := old.URL != logo.URL
-	if err := s.repo.Update(ctx, logo); err != nil {
+	if err := s.store.Update(ctx, logo); err != nil {
 		return err
 	}
 	s.rev.Bump()
 	if urlChanged {
 		if old.CachedFilename != "" {
 			os.Remove(filepath.Join(s.logosDir, old.CachedFilename))
-			s.repo.UpdateCachedFilename(ctx, logo.ID, "")
+			s.store.UpdateCachedFilename(ctx, logo.ID, "")
 		}
 		go s.downloadLogo(context.Background(), logo.ID, logo.URL)
 	}
@@ -121,11 +120,11 @@ func (s *LogoService) Update(ctx context.Context, logo *models.Logo) error {
 }
 
 func (s *LogoService) Delete(ctx context.Context, id string) error {
-	logo, err := s.repo.GetByID(ctx, id)
+	logo, err := s.store.GetByID(ctx, id)
 	if err == nil && logo.CachedFilename != "" {
 		os.Remove(filepath.Join(s.logosDir, logo.CachedFilename))
 	}
-	if err := s.repo.Delete(ctx, id); err != nil {
+	if err := s.store.Delete(ctx, id); err != nil {
 		return err
 	}
 	s.rev.Bump()
@@ -133,19 +132,19 @@ func (s *LogoService) Delete(ctx context.Context, id string) error {
 }
 
 func (s *LogoService) List(ctx context.Context) ([]models.Logo, error) {
-	return s.repo.List(ctx)
+	return s.store.List(ctx)
 }
 
 func (s *LogoService) GetByID(ctx context.Context, id string) (*models.Logo, error) {
-	return s.repo.GetByID(ctx, id)
+	return s.store.GetByID(ctx, id)
 }
 
 func (s *LogoService) GetByURL(ctx context.Context, url string) (*models.Logo, error) {
-	return s.repo.GetByURL(ctx, url)
+	return s.store.GetByURL(ctx, url)
 }
 
 func (s *LogoService) CacheAll(ctx context.Context) {
-	logos, err := s.repo.List(ctx)
+	logos, err := s.store.List(ctx)
 	if err != nil {
 		s.log.Error().Err(err).Msg("failed to list logos for caching")
 		return
@@ -192,7 +191,7 @@ func (s *LogoService) downloadLogo(ctx context.Context, id, url string) {
 	}
 	f.Close()
 
-	if err := s.repo.UpdateCachedFilename(context.Background(), id, filename); err != nil {
+	if err := s.store.UpdateCachedFilename(context.Background(), id, filename); err != nil {
 		s.log.Error().Err(err).Msg("failed to update cached filename in db")
 	}
 }
@@ -232,6 +231,12 @@ func (s *LogoService) resolveUncached(url string) string {
 }
 
 func (s *LogoService) ResolveChannel(ch models.Channel) string {
+	if ch.LogoID != nil && ch.Logo == "" {
+		if logo, err := s.store.GetByID(context.Background(), *ch.LogoID); err == nil {
+			ch.Logo = logo.URL
+			ch.LogoCached = logo.CachedFilename
+		}
+	}
 	if ch.LogoCached != "" {
 		return "/static/logos/" + ch.LogoCached
 	}
@@ -243,6 +248,12 @@ func (s *LogoService) ResolveChannel(ch models.Channel) string {
 
 func (s *LogoService) ResolveChannelLogos(channels []models.Channel) {
 	for i := range channels {
+		if channels[i].LogoID != nil && channels[i].Logo == "" {
+			if logo, err := s.store.GetByID(context.Background(), *channels[i].LogoID); err == nil {
+				channels[i].Logo = logo.URL
+				channels[i].LogoCached = logo.CachedFilename
+			}
+		}
 		channels[i].Logo = s.ResolveChannel(channels[i])
 	}
 }

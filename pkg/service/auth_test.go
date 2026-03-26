@@ -2,40 +2,26 @@ package service
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gavinmcnair/tvproxy/pkg/database"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
-func setupTestDB(t *testing.T) *database.DB {
+func newTestAuthService(t *testing.T) *AuthService {
 	t.Helper()
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
-	db, err := database.New(context.Background(), dbPath, log)
-	require.NoError(t, err)
-	t.Cleanup(func() { db.Close() })
-	return db
-}
-
-func newTestAuthService(t *testing.T) (*AuthService, *database.DB) {
-	t.Helper()
-	db := setupTestDB(t)
-	userRepo := repository.NewUserRepository(db)
-	authService := NewAuthService(userRepo, "test-jwt-secret-key", 15*time.Minute, 7*24*time.Hour)
-	return authService, db
+	userStore := store.NewUserStore(filepath.Join(dir, "users.json"))
+	authService := NewAuthService(userStore, "test-jwt-secret-key", 15*time.Minute, 7*24*time.Hour)
+	return authService
 }
 
 func TestCreateUser(t *testing.T) {
-	authService, db := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	user, err := authService.CreateUser(ctx, "testuser", "password123", false)
@@ -50,14 +36,13 @@ func TestCreateUser(t *testing.T) {
 	assert.False(t, user.CreatedAt.IsZero())
 	assert.False(t, user.UpdatedAt.IsZero())
 
-	var storedUsername string
-	err = db.QueryRowContext(ctx, "SELECT username FROM users WHERE id = ?", user.ID).Scan(&storedUsername)
+	fetched, err := authService.GetUser(ctx, user.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "testuser", storedUsername)
+	assert.Equal(t, "testuser", fetched.Username)
 }
 
 func TestCreateUserAdmin(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	user, err := authService.CreateUser(ctx, "adminuser", "adminpass", true)
@@ -68,7 +53,7 @@ func TestCreateUserAdmin(t *testing.T) {
 }
 
 func TestCreateUserDuplicateUsername(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	_, err := authService.CreateUser(ctx, "testuser", "password123", false)
@@ -79,7 +64,7 @@ func TestCreateUserDuplicateUsername(t *testing.T) {
 }
 
 func TestLogin(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	_, err := authService.CreateUser(ctx, "testuser", "password123", false)
@@ -93,7 +78,7 @@ func TestLogin(t *testing.T) {
 }
 
 func TestLoginWrongPassword(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	_, err := authService.CreateUser(ctx, "testuser", "password123", false)
@@ -107,7 +92,7 @@ func TestLoginWrongPassword(t *testing.T) {
 }
 
 func TestLoginNonExistentUser(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	accessToken, refreshToken, err := authService.Login(ctx, "noone", "password123")
@@ -118,7 +103,7 @@ func TestLoginNonExistentUser(t *testing.T) {
 }
 
 func TestValidateToken(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	user, err := authService.CreateUser(ctx, "testuser", "password123", true)
@@ -145,7 +130,7 @@ func TestValidateToken(t *testing.T) {
 }
 
 func TestValidateTokenInvalid(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 
 	claims, err := authService.ValidateToken("this.is.not.a.valid.token")
 	assert.Error(t, err)
@@ -153,24 +138,24 @@ func TestValidateTokenInvalid(t *testing.T) {
 }
 
 func TestValidateTokenWrongSecret(t *testing.T) {
-	db := setupTestDB(t)
-	userRepo := repository.NewUserRepository(db)
+	dir := t.TempDir()
+	userStore := store.NewUserStore(filepath.Join(dir, "users.json"))
 	ctx := context.Background()
 
-	authService1 := NewAuthService(userRepo, "secret-one", 15*time.Minute, 7*24*time.Hour)
+	authService1 := NewAuthService(userStore, "secret-one", 15*time.Minute, 7*24*time.Hour)
 	_, err := authService1.CreateUser(ctx, "testuser", "password123", false)
 	require.NoError(t, err)
 	accessToken, _, err := authService1.Login(ctx, "testuser", "password123")
 	require.NoError(t, err)
 
-	authService2 := NewAuthService(userRepo, "secret-two", 15*time.Minute, 7*24*time.Hour)
+	authService2 := NewAuthService(userStore, "secret-two", 15*time.Minute, 7*24*time.Hour)
 	claims, err := authService2.ValidateToken(accessToken)
 	assert.Error(t, err)
 	assert.Nil(t, claims)
 }
 
 func TestRefreshToken(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	_, err := authService.CreateUser(ctx, "testuser", "password123", true)
@@ -194,7 +179,7 @@ func TestRefreshToken(t *testing.T) {
 }
 
 func TestRefreshTokenWithAccessTokenFails(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	_, err := authService.CreateUser(ctx, "testuser", "password123", false)
@@ -209,7 +194,7 @@ func TestRefreshTokenWithAccessTokenFails(t *testing.T) {
 }
 
 func TestRefreshTokenInvalid(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	_, err := authService.RefreshToken(ctx, "invalid-token")
@@ -217,7 +202,7 @@ func TestRefreshTokenInvalid(t *testing.T) {
 }
 
 func TestListUsers(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	_, err := authService.CreateUser(ctx, "user1", "pass1", false)
@@ -233,7 +218,7 @@ func TestListUsers(t *testing.T) {
 }
 
 func TestGetUser(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	created, err := authService.CreateUser(ctx, "testuser", "password123", false)
@@ -246,7 +231,7 @@ func TestGetUser(t *testing.T) {
 }
 
 func TestUpdateUser(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	user, err := authService.CreateUser(ctx, "testuser", "password123", false)
@@ -270,7 +255,7 @@ func TestUpdateUser(t *testing.T) {
 }
 
 func TestUpdateUserWithoutPasswordChange(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	user, err := authService.CreateUser(ctx, "testuser", "password123", false)
@@ -285,7 +270,7 @@ func TestUpdateUserWithoutPasswordChange(t *testing.T) {
 }
 
 func TestDeleteUser(t *testing.T) {
-	authService, _ := newTestAuthService(t)
+	authService := newTestAuthService(t)
 	ctx := context.Background()
 
 	user, err := authService.CreateUser(ctx, "testuser", "password123", false)

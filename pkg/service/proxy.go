@@ -18,7 +18,6 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
@@ -48,7 +47,7 @@ type channelConnection struct {
 }
 
 type ProxyService struct {
-	channelRepo       *repository.ChannelRepository
+	channelStore      store.ChannelStore
 	streamStore       store.StreamReader
 	streamProfileRepo store.ProfileStore
 	clientService     *ClientService
@@ -62,7 +61,7 @@ type ProxyService struct {
 }
 
 func NewProxyService(
-	channelRepo *repository.ChannelRepository,
+	channelStore store.ChannelStore,
 	streamStore store.StreamReader,
 	streamProfileRepo store.ProfileStore,
 	clientService *ClientService,
@@ -75,7 +74,7 @@ func NewProxyService(
 		httpClient = http.DefaultClient
 	}
 	return &ProxyService{
-		channelRepo:       channelRepo,
+		channelStore:      channelStore,
 		streamStore:       streamStore,
 		streamProfileRepo: streamProfileRepo,
 		clientService:     clientService,
@@ -117,7 +116,7 @@ func writeStreamHeaders(w http.ResponseWriter, contentType string) {
 }
 
 func (s *ProxyService) ProxyStream(ctx context.Context, w http.ResponseWriter, r *http.Request, channelID string, profileOverride string) error {
-	channel, err := s.channelRepo.GetByIDLite(ctx, channelID)
+	channel, err := s.channelStore.GetByIDLite(ctx, channelID)
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrChannelNotFound, channelID)
 	}
@@ -203,7 +202,7 @@ func (s *ProxyService) resolveProfile(ctx context.Context, r *http.Request, chan
 }
 
 func (s *ProxyService) ResolveContentType(ctx context.Context, r *http.Request, channelID string, profileOverride string) string {
-	channel, err := s.channelRepo.GetByIDLite(ctx, channelID)
+	channel, err := s.channelStore.GetByIDLite(ctx, channelID)
 	if err != nil {
 		return "video/mp2t"
 	}
@@ -236,7 +235,7 @@ func (s *ProxyService) tryJoinExisting(channelID string, c *streamClient, r *htt
 }
 
 func (s *ProxyService) startUpstream(ctx context.Context, r *http.Request, channelID string, c *streamClient, mode string, profile *models.StreamProfile) error {
-	channelStreams, err := s.channelRepo.GetStreams(ctx, channelID)
+	channelStreams, err := s.channelStore.GetStreams(ctx, channelID)
 	if err != nil {
 		return fmt.Errorf("getting channel streams: %w", err)
 	}
@@ -278,7 +277,7 @@ func (s *ProxyService) startUpstream(ctx context.Context, r *http.Request, chann
 			continue
 		}
 
-		if err := s.channelRepo.ResetFailCount(ctx, channelID); err != nil {
+		if err := s.channelStore.ResetFailCount(ctx, channelID); err != nil {
 			s.log.Warn().Err(err).Str("channel_id", channelID).Msg("failed to reset fail count on stream start")
 		}
 

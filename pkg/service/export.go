@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
@@ -39,33 +38,33 @@ type ExportUser struct {
 }
 
 type ExportService struct {
-	channelRepo       *repository.ChannelRepository
-	channelGroupRepo  *repository.ChannelGroupRepository
+	channelStore      store.ChannelStore
+	channelGroupStore store.ChannelGroupStore
 	streamProfileRepo store.ProfileStore
 	clientStore       store.ClientStore
-	m3uAccountRepo    *repository.M3UAccountRepository
-	epgSourceRepo     *repository.EPGSourceRepository
+	m3uAccountStore   store.M3UAccountStore
+	epgSourceStore    store.EPGSourceStore
 	settingsService   *SettingsService
 	authService       *AuthService
 }
 
 func NewExportService(
-	channelRepo *repository.ChannelRepository,
-	channelGroupRepo *repository.ChannelGroupRepository,
+	channelStore store.ChannelStore,
+	channelGroupStore store.ChannelGroupStore,
 	streamProfileRepo store.ProfileStore,
 	clientStore store.ClientStore,
-	m3uAccountRepo *repository.M3UAccountRepository,
-	epgSourceRepo *repository.EPGSourceRepository,
+	m3uAccountStore store.M3UAccountStore,
+	epgSourceStore store.EPGSourceStore,
 	settingsService *SettingsService,
 	authService *AuthService,
 ) *ExportService {
 	return &ExportService{
-		channelRepo:       channelRepo,
-		channelGroupRepo:  channelGroupRepo,
+		channelStore:      channelStore,
+		channelGroupStore: channelGroupStore,
 		streamProfileRepo: streamProfileRepo,
 		clientStore:       clientStore,
-		m3uAccountRepo:    m3uAccountRepo,
-		epgSourceRepo:     epgSourceRepo,
+		m3uAccountStore:   m3uAccountStore,
+		epgSourceStore:    epgSourceStore,
 		settingsService:   settingsService,
 		authService:       authService,
 	}
@@ -78,7 +77,7 @@ func (s *ExportService) Export(ctx context.Context, scope string) (*ExportData, 
 		ExportedAt: time.Now(),
 	}
 
-	groups, err := s.channelGroupRepo.List(ctx)
+	groups, err := s.channelGroupStore.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("exporting channel groups: %w", err)
 	}
@@ -89,7 +88,7 @@ func (s *ExportService) Export(ctx context.Context, scope string) (*ExportData, 
 		groupNameMap[g.ID] = g.Name
 	}
 
-	channels, err := s.channelRepo.List(ctx)
+	channels, err := s.channelStore.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("exporting channels: %w", err)
 	}
@@ -118,7 +117,7 @@ func (s *ExportService) Export(ctx context.Context, scope string) (*ExportData, 
 		if ch.StreamProfileID != nil {
 			ec.ProfileName = profileNameMap[*ch.StreamProfileID]
 		}
-		streams, _ := s.channelRepo.GetStreams(ctx, ch.ID)
+		streams, _ := s.channelStore.GetStreams(ctx, ch.ID)
 		for _, st := range streams {
 			ec.StreamIDs = append(ec.StreamIDs, st.StreamID)
 		}
@@ -146,13 +145,13 @@ func (s *ExportService) Export(ctx context.Context, scope string) (*ExportData, 
 			data.Users = append(data.Users, ExportUser{Username: u.Username, IsAdmin: u.IsAdmin})
 		}
 
-		accounts, err := s.m3uAccountRepo.List(ctx)
+		accounts, err := s.m3uAccountStore.List(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("exporting m3u accounts: %w", err)
 		}
 		data.M3UAccounts = accounts
 
-		sources, err := s.epgSourceRepo.List(ctx)
+		sources, err := s.epgSourceStore.List(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("exporting epg sources: %w", err)
 		}
@@ -169,7 +168,7 @@ func (s *ExportService) Import(ctx context.Context, data *ExportData) (int, erro
 
 	var imported int
 
-	existingGroups, _ := s.channelGroupRepo.List(ctx)
+	existingGroups, _ := s.channelGroupStore.List(ctx)
 	groupNameToID := make(map[string]string)
 	for _, g := range existingGroups {
 		groupNameToID[g.Name] = g.ID
@@ -179,7 +178,7 @@ func (s *ExportService) Import(ctx context.Context, data *ExportData) (int, erro
 			continue
 		}
 		ng := &models.ChannelGroup{Name: g.Name, SortOrder: g.SortOrder, IsEnabled: g.IsEnabled}
-		if err := s.channelGroupRepo.Create(ctx, ng); err == nil {
+		if err := s.channelGroupStore.Create(ctx, ng); err == nil {
 			groupNameToID[ng.Name] = ng.ID
 			imported++
 		}
@@ -212,7 +211,7 @@ func (s *ExportService) Import(ctx context.Context, data *ExportData) (int, erro
 		}
 	}
 
-	existingChannels, _ := s.channelRepo.List(ctx)
+	existingChannels, _ := s.channelStore.List(ctx)
 	channelNameSet := make(map[string]bool, len(existingChannels))
 	for _, c := range existingChannels {
 		channelNameSet[c.Name] = true
@@ -236,14 +235,14 @@ func (s *ExportService) Import(ctx context.Context, data *ExportData) (int, erro
 				ch.StreamProfileID = &pid
 			}
 		}
-		if err := s.channelRepo.Create(ctx, ch); err == nil {
+		if err := s.channelStore.Create(ctx, ch); err == nil {
 			imported++
 			if len(ec.StreamIDs) > 0 {
 				priorities := make([]int, len(ec.StreamIDs))
 				for i := range priorities {
 					priorities[i] = i
 				}
-				s.channelRepo.AssignStreams(ctx, ch.ID, ec.StreamIDs, priorities)
+				s.channelStore.AssignStreams(ctx, ch.ID, ec.StreamIDs, priorities)
 			}
 		}
 	}
@@ -256,7 +255,7 @@ func (s *ExportService) Import(ctx context.Context, data *ExportData) (int, erro
 	}
 
 	if len(data.M3UAccounts) > 0 {
-		existingAccounts, _ := s.m3uAccountRepo.List(ctx)
+		existingAccounts, _ := s.m3uAccountStore.List(ctx)
 		accountNameSet := make(map[string]bool, len(existingAccounts))
 		for _, a := range existingAccounts {
 			accountNameSet[a.Name] = true
@@ -271,14 +270,14 @@ func (s *ExportService) Import(ctx context.Context, data *ExportData) (int, erro
 				MaxStreams: a.MaxStreams, IsEnabled: a.IsEnabled,
 				RefreshInterval: a.RefreshInterval,
 			}
-			if err := s.m3uAccountRepo.Create(ctx, na); err == nil {
+			if err := s.m3uAccountStore.Create(ctx, na); err == nil {
 				imported++
 			}
 		}
 	}
 
 	if len(data.EPGSources) > 0 {
-		existingSources, _ := s.epgSourceRepo.List(ctx)
+		existingSources, _ := s.epgSourceStore.List(ctx)
 		sourceNameSet := make(map[string]bool, len(existingSources))
 		for _, st := range existingSources {
 			sourceNameSet[st.Name] = true
@@ -288,7 +287,7 @@ func (s *ExportService) Import(ctx context.Context, data *ExportData) (int, erro
 				continue
 			}
 			ns := &models.EPGSource{Name: st.Name, URL: st.URL, IsEnabled: st.IsEnabled}
-			if err := s.epgSourceRepo.Create(ctx, ns); err == nil {
+			if err := s.epgSourceStore.Create(ctx, ns); err == nil {
 				imported++
 			}
 		}

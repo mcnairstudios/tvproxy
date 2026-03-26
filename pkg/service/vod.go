@@ -17,7 +17,6 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/session"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
@@ -53,7 +52,7 @@ type recordingState struct {
 
 type VODService struct {
 	config            *config.Config
-	channelRepo       *repository.ChannelRepository
+	channelStore      store.ChannelStore
 	streamStore       store.StreamReader
 	streamProfileRepo store.ProfileStore
 	settingsService   *SettingsService
@@ -67,7 +66,7 @@ type VODService struct {
 }
 
 func NewVODService(
-	channelRepo *repository.ChannelRepository,
+	channelStore store.ChannelStore,
 	streamStore store.StreamReader,
 	streamProfileRepo store.ProfileStore,
 	settingsService *SettingsService,
@@ -79,7 +78,7 @@ func NewVODService(
 ) *VODService {
 	return &VODService{
 		config:            cfg,
-		channelRepo:       channelRepo,
+		channelStore:      channelStore,
 		streamStore:       streamStore,
 		streamProfileRepo: streamProfileRepo,
 		settingsService:   settingsService,
@@ -92,7 +91,7 @@ func NewVODService(
 }
 
 func (s *VODService) resolveStreamForChannel(ctx context.Context, channelID string) (streamURL, streamName, channelName, streamID string, err error) {
-	channel, err := s.channelRepo.GetByID(ctx, channelID)
+	channel, err := s.channelStore.GetByID(ctx, channelID)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("channel not found: %w", err)
 	}
@@ -100,7 +99,7 @@ func (s *VODService) resolveStreamForChannel(ctx context.Context, channelID stri
 		return "", "", "", "", fmt.Errorf("channel %s is disabled", channelID)
 	}
 
-	channelStreams, err := s.channelRepo.GetStreams(ctx, channelID)
+	channelStreams, err := s.channelStore.GetStreams(ctx, channelID)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("getting channel streams: %w", err)
 	}

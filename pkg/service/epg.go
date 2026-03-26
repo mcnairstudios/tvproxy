@@ -11,22 +11,21 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/xmltv"
 )
 
 type EPGService struct {
-	epgSourceRepo *repository.EPGSourceRepository
-	epgStore      store.EPGStore
-	config        *config.Config
-	httpClient    *http.Client
-	log           zerolog.Logger
+	epgSourceStore store.EPGSourceStore
+	epgStore       store.EPGStore
+	config         *config.Config
+	httpClient     *http.Client
+	log            zerolog.Logger
 	StatusTracker
 }
 
 func NewEPGService(
-	epgSourceRepo *repository.EPGSourceRepository,
+	epgSourceStore store.EPGSourceStore,
 	epgStore store.EPGStore,
 	cfg *config.Config,
 	httpClient *http.Client,
@@ -36,7 +35,7 @@ func NewEPGService(
 		httpClient = http.DefaultClient
 	}
 	return &EPGService{
-		epgSourceRepo: epgSourceRepo,
+		epgSourceStore: epgSourceStore,
 		epgStore:      epgStore,
 		config:        cfg,
 		httpClient:    httpClient,
@@ -48,14 +47,14 @@ func NewEPGService(
 func (s *EPGService) Log() *zerolog.Logger { return &s.log }
 
 func (s *EPGService) CreateSource(ctx context.Context, source *models.EPGSource) error {
-	if err := s.epgSourceRepo.Create(ctx, source); err != nil {
+	if err := s.epgSourceStore.Create(ctx, source); err != nil {
 		return fmt.Errorf("creating epg source: %w", err)
 	}
 	return nil
 }
 
 func (s *EPGService) GetSource(ctx context.Context, id string) (*models.EPGSource, error) {
-	source, err := s.epgSourceRepo.GetByID(ctx, id)
+	source, err := s.epgSourceStore.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("getting epg source: %w", err)
 	}
@@ -63,7 +62,7 @@ func (s *EPGService) GetSource(ctx context.Context, id string) (*models.EPGSourc
 }
 
 func (s *EPGService) ListSources(ctx context.Context) ([]models.EPGSource, error) {
-	sources, err := s.epgSourceRepo.List(ctx)
+	sources, err := s.epgSourceStore.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing epg sources: %w", err)
 	}
@@ -71,7 +70,7 @@ func (s *EPGService) ListSources(ctx context.Context) ([]models.EPGSource, error
 }
 
 func (s *EPGService) UpdateSource(ctx context.Context, source *models.EPGSource) error {
-	if err := s.epgSourceRepo.Update(ctx, source); err != nil {
+	if err := s.epgSourceStore.Update(ctx, source); err != nil {
 		return fmt.Errorf("updating epg source: %w", err)
 	}
 	return nil
@@ -94,14 +93,14 @@ func (s *EPGService) DeleteSource(ctx context.Context, id string) error {
 		s.log.Error().Err(err).Msg("failed to save epg store after source delete")
 	}
 
-	if err := s.epgSourceRepo.Delete(ctx, id); err != nil {
+	if err := s.epgSourceStore.Delete(ctx, id); err != nil {
 		return fmt.Errorf("deleting epg source: %w", err)
 	}
 	return nil
 }
 
 func (s *EPGService) RefreshSource(ctx context.Context, sourceID string) error {
-	source, err := s.epgSourceRepo.GetByID(ctx, sourceID)
+	source, err := s.epgSourceStore.GetByID(ctx, sourceID)
 	if err != nil {
 		return fmt.Errorf("getting source: %w", err)
 	}
@@ -109,12 +108,12 @@ func (s *EPGService) RefreshSource(ctx context.Context, sourceID string) error {
 	s.Set(sourceID, RefreshStatus{State: "running", Message: "Refreshing..."})
 
 	if err := s.refreshSource(ctx, source); err != nil {
-		s.epgSourceRepo.UpdateLastError(ctx, source.ID, err.Error())
+		s.epgSourceStore.UpdateLastError(ctx, source.ID, err.Error())
 		s.Set(sourceID, RefreshStatus{State: "error", Message: err.Error()})
 		return err
 	}
 
-	s.epgSourceRepo.UpdateLastError(ctx, source.ID, "")
+	s.epgSourceStore.UpdateLastError(ctx, source.ID, "")
 	s.Set(sourceID, RefreshStatus{State: "done", Message: "Refresh complete"})
 	return nil
 }
@@ -224,7 +223,7 @@ func (s *EPGService) refreshSource(ctx context.Context, source *models.EPGSource
 	source.LastRefreshed = &now
 	source.ChannelCount = len(tv.Channels)
 	source.ProgramCount = programCount
-	if err := s.epgSourceRepo.Update(ctx, source); err != nil {
+	if err := s.epgSourceStore.Update(ctx, source); err != nil {
 		return fmt.Errorf("updating epg source: %w", err)
 	}
 
@@ -238,7 +237,7 @@ func (s *EPGService) refreshSource(ctx context.Context, source *models.EPGSource
 }
 
 func (s *EPGService) RefreshAllSources(ctx context.Context) error {
-	sources, err := s.epgSourceRepo.List(ctx)
+	sources, err := s.epgSourceStore.List(ctx)
 	if err != nil {
 		return fmt.Errorf("listing sources: %w", err)
 	}

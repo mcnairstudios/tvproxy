@@ -12,7 +12,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/gavinmcnair/tvproxy/pkg/repository"
+	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
 const (
@@ -35,18 +35,18 @@ const (
 )
 
 type HDHRDiscoverWorker struct {
-	hdhrDeviceRepo *repository.HDHRDeviceRepository
-	baseURL        string
-	log            zerolog.Logger
-	retryDelay     time.Duration
+	hdhrStore  store.HDHRDeviceStore
+	baseURL    string
+	log        zerolog.Logger
+	retryDelay time.Duration
 }
 
-func NewHDHRDiscoverWorker(hdhrDeviceRepo *repository.HDHRDeviceRepository, baseURL string, retryDelay time.Duration, log zerolog.Logger) *HDHRDiscoverWorker {
+func NewHDHRDiscoverWorker(hdhrStore store.HDHRDeviceStore, baseURL string, retryDelay time.Duration, log zerolog.Logger) *HDHRDiscoverWorker {
 	if retryDelay <= 0 {
 		retryDelay = 2 * time.Second
 	}
 	return &HDHRDiscoverWorker{
-		hdhrDeviceRepo: hdhrDeviceRepo,
+		hdhrStore: hdhrStore,
 		baseURL:        baseURL,
 		log:            log.With().Str("worker", "hdhr_discover").Logger(),
 		retryDelay:     retryDelay,
@@ -168,7 +168,7 @@ func (w *HDHRDiscoverWorker) handleDiscoverRequest(ctx context.Context, conn *ne
 		requestedID = binary.BigEndian.Uint32(di)
 	}
 
-	devices, err := w.hdhrDeviceRepo.List(ctx)
+	devices, err := w.hdhrStore.List(ctx)
 	if err != nil {
 		return
 	}
