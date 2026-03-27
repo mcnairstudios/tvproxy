@@ -27,28 +27,32 @@ make logs           # docker compose logs -f
 cmd/tvproxy/main.go     — entry point, DI wiring, router setup
 pkg/
   config/               — env-based config
-  database/             — SQLite connection, sequential migrations (applied on startup)
-  defaults/             — JSON client defaults (embedded, mountable override at /data/clients.json)
+  database/             — SQLite connection (migration tracking only)
+  defaults/             — JSON client/settings defaults (embedded, mountable override at /config/)
   ffmpeg/               — stream profile arg composition (compose.go)
   handler/              — HTTP handlers + integration_test.go (mirrors main.go wiring)
+  hls/                  — HLS downstream remuxer (mp4→HLS segments for Safari/iPhone)
+  httputil/             — shared HTTP utilities (headers, fetch, decompress)
+  logocache/            — logo caching proxy (GET /logo?url= endpoint)
   m3u/                  — M3U playlist parser
   middleware/           — JWT auth middleware
   models/               — all data models (single file: models.go)
   openapi/              — OpenAPI spec
-  repository/           — database access layer (one file per entity)
-  service/              — business logic (proxy, auth, m3u refresh, EPG, HDHR, etc.)
+  service/              — business logic (proxy, auth, m3u, EPG, HDHR, reset, backup, etc.)
   session/              — Kafka-style session manager (ffmpeg lifecycle, consumer tracking, file tailing)
+  store/                — JSON-backed in-memory stores (one per entity + streams.gob + epg.gob)
   worker/               — background workers (M3U refresh, EPG refresh, SSDP, HDHR discovery)
   xmltv/                — XMLTV EPG parser
   xtream/               — Xtream Codes API client
 web/dist/app.js         — vanilla JS SPA (single file, embedded via Go embed.FS)
-entrypoint.sh           — Docker entrypoint (UID/GID handling, GPU device group detection)
+entrypoint.sh           — Docker entrypoint (UID/GID, GPU detection, /defaults→/config copy)
 ```
 
 ## Key Architecture
 
-- **DI**: Manual injection — main.go wires repos -> services -> handlers. No framework.
-- **Database**: SQLite via modernc.org/sqlite (pure Go, no CGO). Migrations are sequential in pkg/database/migrations.go, applied on startup. Supports both SQL and Go-function migrations.
+- **DI**: Manual injection — main.go wires stores -> services -> handlers. No framework.
+- **Data Storage**: All data in JSON files in /config directory. SQLite retained only for migration tracking table. pkg/repository/ deleted. All CRUD through pkg/store/ interfaces.
+- **Docker paths**: /defaults (embedded defaults), /config (active data, mounted volume), /record (recordings).
 - **Frontend**: Single vanilla JS file (web/dist/app.js). No build step. Embedded via Go's embed.FS.
 - **Stream profiles**: Dropdown-driven composition (source_type + hwaccel + video_codec + container -> custom_args). `custom_args` is the single source of truth — dropdowns compose initial args, users can then edit directly. Composition logic in pkg/ffmpeg/compose.go.
 - **Proxy**: Profile resolution chain: (1) `?profile=Name` query param, (2) client header detection, (3) default "proxy" fallback. If custom_args is empty (Direct profiles), uses HTTP passthrough. Otherwise spawns ffmpeg with the stored args.
