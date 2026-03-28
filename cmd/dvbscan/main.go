@@ -363,12 +363,15 @@ func stripRTPHeader(pkt []byte) ([]byte, error) {
 
 // scanResult is the output of scanning one transponder.
 type scanResult struct {
-	tp        transponder
-	channels  []channel
-	nitMuxes  []transponder
-	networkID uint16
-	elapsed   time.Duration
-	err       error
+	tp          transponder
+	channels    []channel
+	nitMuxes    []transponder
+	networkID   uint16
+	elapsed     time.Duration
+	err         error
+	patReceived bool // PAT was received — confirms the mux is on air
+	nitComplete bool // all NIT sections received (complete mux list)
+	signalOnly  bool // was scanned in signal-only mode (pids=0)
 }
 
 // buildPMTURL replaces pids=0,16,17 with pids=0,16,17,<pmtPIDs...>
@@ -490,6 +493,7 @@ func scanTransponder(parentCtx context.Context, host string, tp transponder, tim
 	svcTypes := map[uint16]uint8{}
 	svcEncrypted := map[uint16]bool{}
 	pmtData := map[uint16]*astits.PMTData{} // serviceID → PMT
+	result.signalOnly = (pids == "0")
 	patDone, nitDone, sdtReceived := false, false, false
 	nitMuxSeen := map[string]bool{}
 	nitSectionsSeen := map[uint8]bool{}
@@ -520,6 +524,7 @@ func scanTransponder(parentCtx context.Context, host string, tp transponder, tim
 				}
 			}
 			patDone = true
+			result.patReceived = true
 		}
 
 		// Accumulate all SDT packets — PID 17 carries table 0x42 (current TS) and
@@ -566,6 +571,7 @@ func scanTransponder(parentCtx context.Context, host string, tp transponder, tim
 					nitSectionsSeen[secNum] = true
 					if len(nitSectionsSeen) > int(nitLastSection) {
 						nitDone = true
+						result.nitComplete = true
 					}
 				}
 			}
@@ -607,9 +613,14 @@ func scanTransponder(parentCtx context.Context, host string, tp transponder, tim
 			}
 		}
 
-		// For SI-only scans (pids=0,16,17) PMT PIDs are never sent; break on PAT+NIT.
-		// For full scans, also require all PMTs and at least one SDT batch.
-		if pids != "all" {
+		// pids=0: signal-only — just confirm the mux is on air via PAT.
+		// pids=0,16,17: SI-only — wait for complete NIT.
+		// pids=all: full scan — wait for PAT + NIT + SDT + all PMTs.
+		if pids == "0" {
+			if patDone {
+				break
+			}
+		} else if pids != "all" {
 			if patDone && nitDone {
 				break
 			}
@@ -730,7 +741,7 @@ var defaultSeeds = map[string][]transponder{
 		{FreqMHz: 498, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
 		{FreqMHz: 506, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
 		{FreqMHz: 522, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 530, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
+		{FreqMHz: 529.833, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
 		{FreqMHz: 538, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
 		{FreqMHz: 546, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
 		{FreqMHz: 554, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
@@ -799,8 +810,9 @@ func workerCount(caps map[string]int) int {
 }
 
 type workItem struct {
-	tp      transponder
-	timeout time.Duration
+	tp         transponder
+	timeout    time.Duration
+	signalOnly bool // use pids=0 (PAT-only confirmation, no NIT)
 }
 
 // discoverMuxes finds all live muxes via NIT BFS using a parallel worker pool.
@@ -846,7 +858,11 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 		go func() {
 			defer wg.Done()
 			for item := range work {
-				resultsCh <- scanTransponder(context.Background(), host, item.tp, item.timeout, "0,16,17", verbose)
+				pids := "0,16,17"
+				if item.signalOnly {
+					pids = "0"
+				}
+				resultsCh <- scanTransponder(context.Background(), host, item.tp, item.timeout, pids, verbose)
 			}
 		}()
 	}
@@ -867,9 +883,13 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 	// retrying in a slow pass).
 	runPool := func(initial []workItem, prevScanned map[string]bool, retryOnFail bool) (found []transponder, failedSeeds []transponder, nitMentioned map[string]bool) {
 		nitMentioned = map[string]bool{}
-		// Pre-mark all initial items so BFS doesn't re-enqueue them.
+		discoveryComplete := false // true once any result has a complete NIT
+		// Track which keys are initial seeds so only seeds go to pass 2 (not BFS muxes).
+		initialKeys := map[string]bool{}
 		for _, item := range initial {
-			prevScanned[muxKey(item.tp)] = true
+			k := muxKey(item.tp)
+			prevScanned[k] = true
+			initialKeys[k] = true
 		}
 		pending := make([]workItem, len(initial))
 		copy(pending, initial)
@@ -877,9 +897,21 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 
 		enqueue := func(tp transponder, timeout time.Duration) {
 			k := muxKey(tp)
+			nitMentioned[k] = true
 			if !prevScanned[k] {
 				prevScanned[k] = true
-				pending = append(pending, workItem{tp, timeout})
+				// T2/S2/C2 hardware needs the full timeout to lock.
+				// Non-T2 muxes lock quickly; seedTimeout is enough to get NIT data.
+				// Once discoveryComplete, non-T2 BFS only need PAT (signalOnly).
+				var t time.Duration
+				var signalOnly bool
+				if strings.HasSuffix(tp.System, "2") {
+					t = timeout
+				} else {
+					t = seedTimeout
+					signalOnly = discoveryComplete
+				}
+				pending = append(pending, workItem{tp, t, signalOnly})
 			}
 		}
 
@@ -898,20 +930,31 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 			r := <-resultsCh
 			inFlight--
 
-			noSignal := r.err != nil || (len(r.nitMuxes) == 0 && r.networkID == 0)
+			var noSignal bool
+			if r.signalOnly {
+				noSignal = r.err != nil || !r.patReceived
+			} else {
+				noSignal = r.err != nil || (len(r.nitMuxes) == 0 && r.networkID == 0)
+			}
 			elapsed := r.elapsed.Round(time.Millisecond)
 
 			if noSignal {
 				fmt.Fprintf(os.Stderr, "  %s → no signal (%s)\n", r.tp, elapsed)
-				if retryOnFail {
+				if retryOnFail && initialKeys[muxKey(r.tp)] {
 					failedSeeds = append(failedSeeds, r.tp)
 				}
 			} else {
-				fmt.Fprintf(os.Stderr, "  %s → signal, NIT has %d muxes (%s)\n", r.tp, len(r.nitMuxes), elapsed)
+				if r.signalOnly {
+					fmt.Fprintf(os.Stderr, "  %s → signal (%s)\n", r.tp, elapsed)
+				} else {
+					fmt.Fprintf(os.Stderr, "  %s → signal, NIT has %d muxes (%s)\n", r.tp, len(r.nitMuxes), elapsed)
+				}
 				found = append(found, r.tp)
+				if r.nitComplete {
+					discoveryComplete = true
+				}
 				for _, m := range r.nitMuxes {
-					nitMentioned[muxKey(m)] = true
-				enqueue(m, muxTimeout)
+					enqueue(m, muxTimeout)
 				}
 			}
 
@@ -929,7 +972,7 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 	fmt.Fprintf(os.Stderr, "  Pass 1 (fast %s, %d workers)...\n", seedTimeout, workers)
 	var pass1 []workItem
 	for _, seed := range allSeeds {
-		pass1 = append(pass1, workItem{seed, seedTimeout})
+		pass1 = append(pass1, workItem{seed, seedTimeout, false})
 	}
 	found1, failed1, nitMentioned := runPool(pass1, scanned, true)
 
@@ -943,7 +986,7 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 	var pass2 []workItem
 	for _, seed := range failed1 {
 		if nitMentioned[muxKey(seed)] || strings.HasSuffix(seed.System, "2") {
-			pass2 = append(pass2, workItem{seed, muxTimeout})
+			pass2 = append(pass2, workItem{seed, muxTimeout, false})
 		}
 	}
 	if len(pass2) > 0 {
@@ -993,8 +1036,6 @@ func main() {
 		caps["dvbt"] = caps["dvbt2"]
 	}
 
-	// Step 2: NIT discovery — all system types in parallel
-	fmt.Fprintf(os.Stderr, "\nNIT discovery (all types in parallel)...\n")
 	// Step 2: BFS mux discovery via NIT
 	fmt.Fprintf(os.Stderr, "\nDiscovering muxes via NIT...\n")
 	muxes := discoverMuxes(rtspHost, caps, *seedTimeout, *muxTimeout, *verbose)
@@ -1067,7 +1108,14 @@ func main() {
 }
 
 // muxKey returns a stable string key for a transponder.
+// DVB-T/T2 frequencies from NIT may differ by a few hundred kHz from the seed
+// (e.g. NIT reports 529.833 MHz while the seed is 530 MHz for the same mux).
+// Round DVB-T/T2 to the nearest MHz to deduplicate these. DVB-S/C keep full
+// precision because their transponders can be legitimately 1 MHz apart.
 func muxKey(t transponder) string {
+	if t.System == "dvbt" || t.System == "dvbt2" {
+		return fmt.Sprintf("%.0f/%s", t.FreqMHz, t.System)
+	}
 	return fmt.Sprintf("%g/%s", t.FreqMHz, t.System)
 }
 
