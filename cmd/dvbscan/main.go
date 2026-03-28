@@ -761,93 +761,54 @@ type nitResult struct {
 	err       error
 }
 
-// discoverNIT runs NIT seed scans for all active system types simultaneously.
-// maxParallel limits how many seed scans run at once across ALL types (0 = unlimited).
-func discoverNIT(host string, caps map[string]int, nitTimeout time.Duration, maxParallel int, verbose bool) []nitResult {
-	type task struct {
-		sys   string
-		count int
-	}
-	var tasks []task
-	for sys, count := range caps {
-		if count > 0 {
+// typeOrder controls the order system types are scanned during NIT discovery.
+// dvbt2 goes first so it gets uncontested tuner access before dvbt starts.
+var typeOrder = []string{"dvbt2", "dvbt", "dvbs2", "dvbs", "dvbc", "dvbc2"}
+
+// discoverNIT scans every seed for every active system type, serially, one at a time.
+// dvbt2 runs before dvbt so they never compete for tuners.
+// All mux results from all seeds are merged — no early exit.
+func discoverNIT(host string, caps map[string]int, nitTimeout time.Duration, verbose bool) []nitResult {
+	// Build ordered type list: typeOrder first, then anything else.
+	seen := map[string]bool{}
+	var types []string
+	for _, sys := range typeOrder {
+		if caps[sys] > 0 {
 			if _, ok := defaultSeeds[sys]; ok {
-				tasks = append(tasks, task{sys, count})
+				types = append(types, sys)
+				seen[sys] = true
+			}
+		}
+	}
+	for sys, count := range caps {
+		if count > 0 && !seen[sys] {
+			if _, ok := defaultSeeds[sys]; ok {
+				types = append(types, sys)
 			}
 		}
 	}
 
-	// Global semaphore across all types; nil means unlimited.
-	var globalSem chan struct{}
-	if maxParallel > 0 {
-		globalSem = make(chan struct{}, maxParallel)
+	var results []nitResult
+	for _, sys := range types {
+		seeds := defaultSeeds[sys]
+		fmt.Fprintf(os.Stderr, "  [%s] trying %d seeds serially\n", sys, len(seeds))
+		for _, seed := range seeds {
+			r := scanTransponder(context.Background(), host, seed, nitTimeout, "0,16,17", verbose)
+			if r.err != nil || (len(r.nitMuxes) == 0 && r.networkID == 0) {
+				fmt.Fprintf(os.Stderr, "  [%s] %s → no signal\n", sys, seed)
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "  [%s] %s → %d ch, network 0x%04x, NIT has %d muxes\n",
+				sys, seed, len(r.channels), r.networkID, len(r.nitMuxes))
+			results = append(results, nitResult{
+				sys:       sys,
+				seed:      seed,
+				networkID: r.networkID,
+				nitMuxes:  r.nitMuxes,
+				channels:  len(r.channels),
+			})
+		}
 	}
-
-	results := make([]nitResult, len(tasks))
-	var outerWg sync.WaitGroup
-
-	for i, t := range tasks {
-		outerWg.Add(1)
-		go func(idx int, sys string, count int) {
-			defer outerWg.Done()
-			seeds := defaultSeeds[sys]
-			label := count
-			if maxParallel > 0 && maxParallel < count {
-				label = maxParallel
-			}
-			fmt.Fprintf(os.Stderr, "  [%s] trying %d seeds (max %d concurrent)\n", sys, len(seeds), label)
-
-			sysCtx, sysCancel := context.WithCancel(context.Background())
-			found := make(chan nitResult, 1)
-			var innerWg sync.WaitGroup
-			for _, seed := range seeds {
-				innerWg.Add(1)
-				go func(seed transponder) {
-					defer innerWg.Done()
-					if globalSem != nil {
-						select {
-						case globalSem <- struct{}{}:
-							defer func() { <-globalSem }()
-						case <-sysCtx.Done():
-							return
-						}
-					}
-					r := scanTransponder(sysCtx, host, seed, nitTimeout, "0,16,17", verbose)
-					if r.err != nil || (len(r.nitMuxes) == 0 && r.networkID == 0) {
-						if verbose {
-							fmt.Fprintf(os.Stderr, "  [%s] %s → no signal\n", sys, seed)
-						}
-						return
-					}
-					nr := nitResult{
-						sys:       sys,
-						seed:      seed,
-						networkID: r.networkID,
-						nitMuxes:  r.nitMuxes,
-						channels:  len(r.channels),
-					}
-					fmt.Fprintf(os.Stderr, "  [%s] %s → %d ch, network 0x%04x, NIT has %d muxes\n",
-						sys, seed, nr.channels, nr.networkID, len(nr.nitMuxes))
-					select {
-					case found <- nr:
-					default:
-					}
-				}(seed)
-			}
-			go func() { innerWg.Wait(); close(found) }()
-
-			if nr, ok := <-found; ok {
-				sysCancel()
-				results[idx] = nr
-			} else {
-				results[idx] = nitResult{sys: sys, err: fmt.Errorf("no signal on any seed")}
-			}
-			sysCancel()
-			innerWg.Wait()
-		}(i, t.sys, t.count)
-	}
-
-	outerWg.Wait()
 	return results
 }
 
@@ -861,7 +822,6 @@ func main() {
 	jsonOut := flag.Bool("json", false, "Output results as JSON")
 	baseline := flag.String("baseline", "", "Path to save/load baseline JSON for per-mux comparison")
 	nitOnly := flag.Bool("nit-only", false, "Run NIT discovery only, print mux list, then exit")
-	nitParallel := flag.Int("nit-parallel", 0, "Max concurrent NIT seed scans across all types (0 = unlimited)")
 	flag.Parse()
 
 	rtspHost := *host
@@ -888,7 +848,7 @@ func main() {
 
 	// Step 2: NIT discovery — all system types in parallel
 	fmt.Fprintf(os.Stderr, "\nNIT discovery (all types in parallel)...\n")
-	nitResults := discoverNIT(rtspHost, caps, *nitTimeout, *nitParallel, *verbose)
+	nitResults := discoverNIT(rtspHost, caps, *nitTimeout, *verbose)
 
 	// Step 3: build networks — group NIT results by network_id to detect overlap
 	type network struct {
