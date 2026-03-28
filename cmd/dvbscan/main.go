@@ -743,11 +743,6 @@ var defaultSeeds = map[string][]transponder{
 		{FreqMHz: 522, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
 		{FreqMHz: 529.833, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
 		{FreqMHz: 538, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 546, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 554, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 562, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 570, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 578, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
 	},
 	// dvbt2 seeds: 256qam only — 64qam seeds lock to DVB-T signal and win incorrectly.
 	"dvbt2": {
@@ -911,7 +906,8 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 					t = seedTimeout
 					signalOnly = discoveryComplete
 				}
-				pending = append(pending, workItem{tp, t, signalOnly})
+				// Prepend so BFS muxes run before remaining seeds — no extra round.
+			pending = append([]workItem{{tp, t, signalOnly}}, pending...)
 			}
 		}
 
