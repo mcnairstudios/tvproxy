@@ -367,6 +367,7 @@ type scanResult struct {
 	channels    []channel
 	nitMuxes    []transponder
 	networkID   uint16
+	networkName string // from NIT network_name descriptor (tag 0x40)
 	elapsed     time.Duration
 	err         error
 	patReceived bool // PAT was received — confirms the mux is on air
@@ -554,6 +555,12 @@ func scanTransponder(parentCtx context.Context, host string, tp transponder, tim
 		if d.NIT != nil {
 			if result.networkID == 0 {
 				result.networkID = d.NIT.NetworkID
+				for _, desc := range d.NIT.NetworkDescriptors {
+					if desc.NetworkName != nil {
+						result.networkName = dvbString(desc.NetworkName.Name)
+						break
+					}
+				}
 			}
 			if d.NIT.NetworkID != result.networkID {
 				goto afterNIT
@@ -731,36 +738,29 @@ func fetchSatIPCaps(httpBase string) (map[string]int, error) {
 	return caps, nil
 }
 
-// defaultSeeds returns seed transponders to try for each system type.
-var defaultSeeds = map[string][]transponder{
-	"dvbt": {
-		{FreqMHz: 490, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 514, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 474, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 482, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 498, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 506, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 522, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 529.833, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-		{FreqMHz: 538, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8},
-	},
-	// dvbt2 seeds: 256qam only — 64qam seeds lock to DVB-T signal and win incorrectly.
-	"dvbt2": {
-		{FreqMHz: 545.8, System: "dvbt2", Modulation: "256qam", BandwidthMHz: 8},
-		{FreqMHz: 562, System: "dvbt2", Modulation: "256qam", BandwidthMHz: 8},
-		{FreqMHz: 578, System: "dvbt2", Modulation: "256qam", BandwidthMHz: 8},
-	},
-	"dvbs2": {
-		// Astra 28.2E — common UK satellite (Sky/Freesat)
-		{FreqMHz: 10773, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 23000, Polarization: "h"},
-		{FreqMHz: 10847, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 23000, Polarization: "h"},
-		{FreqMHz: 11778, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 27500, Polarization: "h"},
-	},
-	"dvbc": {
-		{FreqMHz: 114, System: "dvbc", Modulation: "256qam", SymbolRateKS: 6952},
-		{FreqMHz: 138, System: "dvbc", Modulation: "256qam", SymbolRateKS: 6952},
-		{FreqMHz: 162, System: "dvbc", Modulation: "256qam", SymbolRateKS: 6952},
-	},
+// defaultSeeds holds seed transponders for each system type.
+// DVB-T/T2: full UHF sweep, channels 21–68 (474–850 MHz, 8 MHz steps) — works at any European transmitter.
+// DVB-T2: 256qam only — 64qam seeds lock to DVB-T signal and win incorrectly.
+// DVB-S2: populated after flag parsing from europeanSatellites (see satellites.go).
+var defaultSeeds map[string][]transponder
+
+func init() {
+	dvbt := make([]transponder, 0, 48)
+	dvbt2 := make([]transponder, 0, 48)
+	for ch := 21; ch <= 68; ch++ {
+		freq := float64(474 + (ch-21)*8)
+		dvbt = append(dvbt, transponder{FreqMHz: freq, System: "dvbt", Modulation: "64qam", BandwidthMHz: 8})
+		dvbt2 = append(dvbt2, transponder{FreqMHz: freq, System: "dvbt2", Modulation: "256qam", BandwidthMHz: 8})
+	}
+	defaultSeeds = map[string][]transponder{
+		"dvbt":  dvbt,
+		"dvbt2": dvbt2,
+		"dvbc": {
+			{FreqMHz: 114, System: "dvbc", Modulation: "256qam", SymbolRateKS: 6952},
+			{FreqMHz: 138, System: "dvbc", Modulation: "256qam", SymbolRateKS: 6952},
+			{FreqMHz: 162, System: "dvbc", Modulation: "256qam", SymbolRateKS: 6952},
+		},
+	}
 }
 
 // scanGroup is a set of muxes that can be scanned in parallel on the same physical signal source.
@@ -823,7 +823,42 @@ type workItem struct {
 // Workers are fed items from a pending queue as they finish, so tuners are
 // never overloaded and minisatip never sees more concurrent sessions than it
 // has hardware for.
-func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout time.Duration, verbose bool) []transponder {
+// detectSatellite probes one seed per known satellite in parallel.
+// The first seed that returns a NIT response wins; all others are cancelled.
+// Returns the satellite identifier (e.g. "S28.2E"), its NIT network name, and
+// its full seed list for use in BFS discovery.
+func detectSatellite(host string, timeout time.Duration, verbose bool) (id, networkName string, seeds []transponder) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type result struct {
+		id          string
+		networkName string
+	}
+	ch := make(chan result, len(satelliteDetectionSeeds))
+
+	for satID, seed := range satelliteDetectionSeeds {
+		go func(satID string, seed transponder) {
+			r := scanTransponder(ctx, host, seed, timeout, "0,16,17", verbose)
+			if r.networkID != 0 {
+				ch <- result{satID, r.networkName}
+			} else {
+				ch <- result{}
+			}
+		}(satID, seed)
+	}
+
+	for range satelliteDetectionSeeds {
+		r := <-ch
+		if r.id != "" {
+			cancel()
+			return r.id, r.networkName, europeanSatellites[r.id]
+		}
+	}
+	return "", "", nil
+}
+
+func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout time.Duration, verbose bool) ([]transponder, string) {
 	// Build ordered seed list across all active types.
 	seen := map[string]bool{}
 	var allSeeds []transponder
@@ -876,6 +911,8 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 	// Returns found muxes, failed initial seeds, and the set of all mux keys
 	// mentioned in any NIT response (used to decide which seeds are worth
 	// retrying in a slow pass).
+	var detectedNetwork string // first network name seen across all passes
+
 	runPool := func(initial []workItem, prevScanned map[string]bool, retryOnFail bool) (found []transponder, failedSeeds []transponder, nitMentioned map[string]bool) {
 		nitMentioned = map[string]bool{}
 		discoveryComplete := false // true once any result has a complete NIT
@@ -946,6 +983,9 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 					fmt.Fprintf(os.Stderr, "  %s → signal, NIT has %d muxes (%s)\n", r.tp, len(r.nitMuxes), elapsed)
 				}
 				found = append(found, r.tp)
+				if detectedNetwork == "" && r.networkName != "" {
+					detectedNetwork = r.networkName
+				}
 				if r.nitComplete {
 					discoveryComplete = true
 				}
@@ -994,7 +1034,7 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 	close(work)
 	wg.Wait()
 
-	return allFound
+	return allFound, detectedNetwork
 }
 
 func main() {
@@ -1008,7 +1048,15 @@ func main() {
 	jsonOut := flag.Bool("json", false, "Output results as JSON")
 	baseline := flag.String("baseline", "", "Path to save/load baseline JSON for per-mux comparison")
 	nitOnly := flag.Bool("nit-only", false, "Run NIT discovery only, print mux list, then exit")
+	satellite := flag.String("satellite", "", fmt.Sprintf("Satellite for DVB-S/S2 scanning (auto-detected if omitted). Supported: %s", satelliteList()))
 	flag.Parse()
+
+	if *satellite != "" {
+		if _, ok := europeanSatellites[*satellite]; !ok {
+			fmt.Fprintf(os.Stderr, "unknown satellite %q — supported: %s\n", *satellite, satelliteList())
+			os.Exit(1)
+		}
+	}
 
 	rtspHost := *host
 	httpHost := strings.Split(rtspHost, ":")[0]
@@ -1027,6 +1075,30 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "\n")
 
+	// Step 1b: DVB-S satellite identification
+	hasSat := caps["dvbs2"] > 0 || caps["dvbs"] > 0
+	if hasSat {
+		if *satellite != "" {
+			defaultSeeds["dvbs2"] = europeanSatellites[*satellite]
+			fmt.Fprintf(os.Stderr, "Satellite: %s (manual)\n", *satellite)
+		} else {
+			fmt.Fprintf(os.Stderr, "Detecting satellite...")
+			satID, satNetwork, satSeeds := detectSatellite(rtspHost, *seedTimeout, *verbose)
+			if satID != "" {
+				label := satID
+				if satNetwork != "" {
+					label += " — " + satNetwork
+				}
+				fmt.Fprintf(os.Stderr, " %s\n", label)
+				defaultSeeds["dvbs2"] = satSeeds
+			} else {
+				fmt.Fprintf(os.Stderr, " none detected\n")
+				delete(caps, "dvbs2")
+				delete(caps, "dvbs")
+			}
+		}
+	}
+
 	// DVB-T2 hardware handles DVB-T too
 	if caps["dvbt2"] > 0 && caps["dvbt"] == 0 {
 		caps["dvbt"] = caps["dvbt2"]
@@ -1034,7 +1106,10 @@ func main() {
 
 	// Step 2: BFS mux discovery via NIT
 	fmt.Fprintf(os.Stderr, "\nDiscovering muxes via NIT...\n")
-	muxes := discoverMuxes(rtspHost, caps, *seedTimeout, *muxTimeout, *verbose)
+	muxes, networkName := discoverMuxes(rtspHost, caps, *seedTimeout, *muxTimeout, *verbose)
+	if networkName != "" {
+		fmt.Fprintf(os.Stderr, "Network: %s\n", networkName)
+	}
 
 	if len(muxes) == 0 {
 		fmt.Fprintf(os.Stderr, "\nNo muxes discovered.\n")
@@ -1352,6 +1427,7 @@ func printJSON(host string, channels []channel) {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
 	enc.Encode(out) //nolint
 }
 
