@@ -383,9 +383,9 @@ func buildPMTURL(base string, pmtPIDs []uint16) string {
 // scanTransponder tunes via SAT>IP RTSP and collects PAT + SDT + NIT + PMT (for stream metadata).
 // pids controls what Minisatip sends: "0,16,17" for SI-only (fast NIT), "all" for full metadata.
 // parentCtx allows callers to cancel this scan early (e.g. when a parallel race winner is found).
-func scanTransponder(parentCtx context.Context, host string, tp transponder, timeout time.Duration, pids string, verbose bool) scanResult {
+func scanTransponder(parentCtx context.Context, host string, tp transponder, timeout time.Duration, pids string, verbose bool) (result scanResult) {
 	start := time.Now()
-	result := scanResult{tp: tp}
+	result.tp = tp
 	defer func() { result.elapsed = time.Since(start) }()
 
 	c, err := dialRTSP(host, 5*time.Second)
@@ -492,6 +492,8 @@ func scanTransponder(parentCtx context.Context, host string, tp transponder, tim
 	pmtData := map[uint16]*astits.PMTData{} // serviceID → PMT
 	patDone, nitDone, sdtReceived := false, false, false
 	nitMuxSeen := map[string]bool{}
+	nitSectionsSeen := map[uint8]bool{}
+	nitLastSection := uint8(0)
 	pmtPending := map[uint16]bool{} // pmtPID → collected?
 
 	dmx := astits.NewDemuxer(ctx, pr, astits.DemuxerOptPacketSize(188))
@@ -542,13 +544,30 @@ func scanTransponder(parentCtx context.Context, host string, tp transponder, tim
 		// Accumulate NIT muxes. PID 16 carries NIT-actual (0x40) and NIT-other (0x41).
 		// Only collect muxes from the same network ID as the first NIT received;
 		// this avoids adding unreachable national-network muxes from NIT-other.
+		// Track section_number / last_section_number from the raw packet payload so
+		// we know when the full multi-section NIT table has been received.
 		if d.NIT != nil {
-			if !nitDone {
+			if result.networkID == 0 {
 				result.networkID = d.NIT.NetworkID
-				nitDone = true
 			}
 			if d.NIT.NetworkID != result.networkID {
 				goto afterNIT
+			}
+			// Extract section_number (byte 6) and last_section_number (byte 7)
+			// from the PSI section header in the raw first-packet payload.
+			// Layout after pointer_field: table_id(1), flags+len(2), tid_ext(2),
+			// version+cni(1), section_number(1), last_section_number(1).
+			if p := d.FirstPacket; p != nil && p.Header.PayloadUnitStartIndicator && len(p.Payload) >= 9 {
+				ptr := int(p.Payload[0])
+				base := 1 + ptr
+				if base+7 < len(p.Payload) {
+					secNum := p.Payload[base+6]
+					nitLastSection = p.Payload[base+7]
+					nitSectionsSeen[secNum] = true
+					if len(nitSectionsSeen) > int(nitLastSection) {
+						nitDone = true
+					}
+				}
 			}
 			for _, ts := range d.NIT.TransportStreams {
 				for _, desc := range ts.TransportDescriptors {
@@ -767,9 +786,36 @@ type nitResult struct {
 // typeOrder controls the order system types are tried as entry points.
 var typeOrder = []string{"dvbt2", "dvbt", "dvbs2", "dvbs", "dvbc", "dvbc2"}
 
-// discoverMuxes finds the entry point via seeds, then does BFS using each
-// mux's NIT to discover further muxes. No-signal muxes are skipped.
-// Returns the complete set of muxes that have signal.
+// workerCount derives the physical tuner count from minisatip caps.
+// All reported types share the same hardware pool, so take the max across all types.
+func workerCount(caps map[string]int) int {
+	max := 1
+	for _, n := range caps {
+		if n > max {
+			max = n
+		}
+	}
+	return max
+}
+
+type workItem struct {
+	tp      transponder
+	timeout time.Duration
+}
+
+// discoverMuxes finds all live muxes via NIT BFS using a parallel worker pool.
+//
+// Pass 1: all seeds scanned in parallel at seedTimeout (fast). Successes
+// trigger BFS: newly discovered muxes are queued at muxTimeout and processed
+// within the same pass. Failed seeds are collected for retry.
+//
+// Pass 2: failed seeds retried in parallel at muxTimeout. Successes again
+// trigger BFS within the same pass.
+//
+// At most workerCount(caps) scans run concurrently — one per physical tuner.
+// Workers are fed items from a pending queue as they finish, so tuners are
+// never overloaded and minisatip never sees more concurrent sessions than it
+// has hardware for.
 func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout time.Duration, verbose bool) []transponder {
 	// Build ordered seed list across all active types.
 	seen := map[string]bool{}
@@ -790,84 +836,127 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 		}
 	}
 
+	workers := workerCount(caps)
+	work := make(chan workItem, workers)
+	resultsCh := make(chan scanResult, workers)
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range work {
+				resultsCh <- scanTransponder(context.Background(), host, item.tp, item.timeout, "0,16,17", verbose)
+			}
+		}()
+	}
+
+	// runPool drains initial items (and any BFS muxes they discover) through
+	// the worker pool. Workers are fed one at a time as they become free, so
+	// at most workers scans run concurrently.
+	//
+	// prevScanned carries mux keys already handled in a prior pass so they are
+	// not scanned again. It is updated in place and can be passed to subsequent
+	// calls to share state across passes.
+	//
+	// retryOnFail: when true, initial seeds that produce no signal are returned
+	// in failedSeeds for the caller to retry at a longer timeout.
+	//
+	// Returns found muxes, failed initial seeds, and the set of all mux keys
+	// mentioned in any NIT response (used to decide which seeds are worth
+	// retrying in a slow pass).
+	runPool := func(initial []workItem, prevScanned map[string]bool, retryOnFail bool) (found []transponder, failedSeeds []transponder, nitMentioned map[string]bool) {
+		nitMentioned = map[string]bool{}
+		// Pre-mark all initial items so BFS doesn't re-enqueue them.
+		for _, item := range initial {
+			prevScanned[muxKey(item.tp)] = true
+		}
+		pending := make([]workItem, len(initial))
+		copy(pending, initial)
+		inFlight := 0
+
+		enqueue := func(tp transponder, timeout time.Duration) {
+			k := muxKey(tp)
+			if !prevScanned[k] {
+				prevScanned[k] = true
+				pending = append(pending, workItem{tp, timeout})
+			}
+		}
+
+		fill := func() {
+			// Safe: work buffer=workers, inFlight<workers guarantees space.
+			for inFlight < workers && len(pending) > 0 {
+				item := pending[0]
+				pending = pending[1:]
+				work <- item
+				inFlight++
+			}
+		}
+
+		fill()
+		for inFlight > 0 {
+			r := <-resultsCh
+			inFlight--
+
+			noSignal := r.err != nil || (len(r.nitMuxes) == 0 && r.networkID == 0)
+			elapsed := r.elapsed.Round(time.Millisecond)
+
+			if noSignal {
+				fmt.Fprintf(os.Stderr, "  %s → no signal (%s)\n", r.tp, elapsed)
+				if retryOnFail {
+					failedSeeds = append(failedSeeds, r.tp)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "  %s → signal, NIT has %d muxes (%s)\n", r.tp, len(r.nitMuxes), elapsed)
+				found = append(found, r.tp)
+				for _, m := range r.nitMuxes {
+					nitMentioned[muxKey(m)] = true
+					enqueue(m, muxTimeout)
+				}
+			}
+
+			fill()
+		}
+		return found, failedSeeds, nitMentioned
+	}
+
+	// Shared scanned map — passed through both passes so muxes found in pass 1
+	// are never re-scanned in pass 2.
 	scanned := map[string]bool{}
-	var found []transponder
-	var queue []transponder
 
-	enqueue := func(tp transponder) {
-		k := muxKey(tp)
-		if !scanned[k] {
-			scanned[k] = true
-			queue = append(queue, tp)
-		}
-	}
-
-	bfs := func(timeout time.Duration) {
-		for len(queue) > 0 {
-			tp := queue[0]
-			queue = queue[1:]
-			r := scanTransponder(context.Background(), host, tp, timeout, "0,16,17", verbose)
-			if r.err != nil || (len(r.nitMuxes) == 0 && r.networkID == 0) {
-				fmt.Fprintf(os.Stderr, "  %s → no signal (%s)\n", tp, r.elapsed.Round(time.Millisecond))
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "  %s → signal, NIT has %d muxes (%s)\n", tp, len(r.nitMuxes), r.elapsed.Round(time.Millisecond))
-			found = append(found, tp)
-			for _, m := range r.nitMuxes {
-				enqueue(m)
-			}
-		}
-	}
-
-	// Pass 1: try all seeds at seedTimeout (fast).
-	// Seeds that respond get BFS'd immediately.
-	// Seeds that fail are collected for retry.
-	fmt.Fprintf(os.Stderr, "  Pass 1 (fast, %s per seed)...\n", seedTimeout)
-	var failedSeeds []transponder
+	// Pass 1: seeds at seedTimeout (fast). BFS muxes from successes run at
+	// muxTimeout within this same pass.
+	fmt.Fprintf(os.Stderr, "  Pass 1 (fast %s, %d workers)...\n", seedTimeout, workers)
+	var pass1 []workItem
 	for _, seed := range allSeeds {
-		k := muxKey(seed)
-		if scanned[k] {
-			continue
-		}
-		r := scanTransponder(context.Background(), host, seed, seedTimeout, "0,16,17", verbose)
-		if r.err != nil || (len(r.nitMuxes) == 0 && r.networkID == 0) {
-			fmt.Fprintf(os.Stderr, "  %s → no signal (%s)\n", seed, r.elapsed.Round(time.Millisecond))
-			failedSeeds = append(failedSeeds, seed)
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "  %s → signal, NIT has %d muxes (%s)\n", seed, len(r.nitMuxes), r.elapsed.Round(time.Millisecond))
-		scanned[k] = true
-		found = append(found, seed)
-		for _, m := range r.nitMuxes {
-			enqueue(m)
-		}
-		bfs(muxTimeout)
+		pass1 = append(pass1, workItem{seed, seedTimeout})
 	}
+	found1, failed1, nitMentioned1 := runPool(pass1, scanned, true)
 
-	// Pass 2: retry failed seeds at muxTimeout (slower, catches weak/slow muxes).
-	if len(failedSeeds) > 0 {
-		fmt.Fprintf(os.Stderr, "  Pass 2 (slow retry, %s per seed)...\n", muxTimeout)
-		for _, seed := range failedSeeds {
-			k := muxKey(seed)
-			if scanned[k] {
-				continue
-			}
-			r := scanTransponder(context.Background(), host, seed, muxTimeout, "0,16,17", verbose)
-			if r.err != nil || (len(r.nitMuxes) == 0 && r.networkID == 0) {
-				fmt.Fprintf(os.Stderr, "  %s → no signal (%s)\n", seed, r.elapsed.Round(time.Millisecond))
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "  %s → signal, NIT has %d muxes (%s)\n", seed, len(r.nitMuxes), r.elapsed.Round(time.Millisecond))
-			scanned[k] = true
-			found = append(found, seed)
-			for _, m := range r.nitMuxes {
-				enqueue(m)
-			}
-			bfs(muxTimeout)
+	var allFound []transponder
+	allFound = append(allFound, found1...)
+
+	// Pass 2: retry seeds that are worth a slow scan:
+	//   (a) appeared in a NIT during pass 1 — known to be on the network
+	//   (b) T2/S2/C2 modulation types — hardware needs more time to lock,
+	//       so they fail the fast pass even when signal is present
+	var pass2 []workItem
+	for _, seed := range failed1 {
+		isSlowLock := strings.HasSuffix(seed.System, "2") // dvbt2, dvbs2, dvbc2
+		if nitMentioned1[muxKey(seed)] || isSlowLock {
+			pass2 = append(pass2, workItem{seed, muxTimeout})
 		}
 	}
+	if len(pass2) > 0 {
+		fmt.Fprintf(os.Stderr, "  Pass 2 (slow retry %s, %d workers, %d candidates)...\n", muxTimeout, workers, len(pass2))
+		found2, _, _ := runPool(pass2, scanned, false)
+		allFound = append(allFound, found2...)
+	}
 
-	return found
+	close(work)
+	wg.Wait()
+
+	return allFound
 }
 
 func main() {
