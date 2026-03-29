@@ -55,6 +55,7 @@ const (
 	tagSatelliteDelivery   = 0x43
 	tagCableDelivery       = 0x44
 	tagTerrestrialDelivery = 0x5a
+	tagExtT2Delivery       = 0x04 // extension descriptor tag for T2 delivery system (EN 300 468 §6.4.6.3)
 )
 
 // transponder holds the full tuning parameters for one multiplex.
@@ -207,6 +208,33 @@ func parseCableDelivery(b []byte) (transponder, bool) {
 		System:       "dvbc",
 		Modulation:   modulation,
 		SymbolRateKS: srKS,
+	}, true
+}
+
+// parseT2Delivery parses a T2 delivery system descriptor (extension tag 0x04).
+// EN 300 468 §6.4.6.3. b is desc.Extension.Unknown bytes (extension tag already consumed).
+// Layout: [0]=plp_id [1-2]=T2_system_id [3]=SISO_MISO(2)|bandwidth(4)|rsvd(2)
+//         [4]=guard(3)|mode(3)|other_freq(1)|tfs(1)  [5-6]=cell_id [7-10]=centre_frequency
+func parseT2Delivery(b []byte) (transponder, bool) {
+	if len(b) < 11 {
+		return transponder{}, false
+	}
+	bwCode := (b[3] >> 2) & 0x0F
+	bwMHz := [16]int{8, 7, 6, 5, 10, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}[bwCode]
+	if bwMHz == 0 {
+		bwMHz = 8
+	}
+	tfs := b[4] & 0x01
+	if tfs != 0 {
+		return transponder{}, false // TFS mode not supported
+	}
+	freqHz := uint64(binary.BigEndian.Uint32(b[7:11])) * 10
+	freqMHz := float64(freqHz) / 1e6
+	return transponder{
+		FreqMHz:      freqMHz,
+		System:       "dvbt2",
+		Modulation:   "256qam",
+		BandwidthMHz: bwMHz,
 	}, true
 }
 
@@ -584,21 +612,22 @@ func scanTransponder(parentCtx context.Context, host string, tp transponder, tim
 			}
 			for _, ts := range d.NIT.TransportStreams {
 				for _, desc := range ts.TransportDescriptors {
-					if desc.Unknown == nil {
-						continue
-					}
 					var mux transponder
 					var ok bool
-					switch desc.Unknown.Tag {
-					case tagTerrestrialDelivery:
-						mux, ok = parseTerrestrialDelivery(desc.Unknown.Content)
-					case tagSatelliteDelivery:
-						mux, ok = parseSatelliteDelivery(desc.Unknown.Content)
-					case tagCableDelivery:
-						mux, ok = parseCableDelivery(desc.Unknown.Content)
+					if desc.Unknown != nil {
+						switch desc.Unknown.Tag {
+						case tagTerrestrialDelivery:
+							mux, ok = parseTerrestrialDelivery(desc.Unknown.Content)
+						case tagSatelliteDelivery:
+							mux, ok = parseSatelliteDelivery(desc.Unknown.Content)
+						case tagCableDelivery:
+							mux, ok = parseCableDelivery(desc.Unknown.Content)
+						}
+					} else if desc.Extension != nil && desc.Extension.Tag == tagExtT2Delivery && desc.Extension.Unknown != nil {
+						mux, ok = parseT2Delivery(*desc.Extension.Unknown)
 					}
 					if ok {
-						k := fmt.Sprintf("%g/%s", mux.FreqMHz, mux.System)
+						k := muxKey(mux)
 						if !nitMuxSeen[k] {
 							nitMuxSeen[k] = true
 							result.nitMuxes = append(result.nitMuxes, mux)
@@ -1015,13 +1044,36 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 	var allFound []transponder
 	allFound = append(allFound, found1...)
 
-	// Pass 2: retry seeds that are worth a slow scan:
+	// Pass 2: retry seeds worth a slow scan. Three criteria:
 	//   (a) appeared in a NIT during pass 1 — confirmed on the network
-	//   (b) T2/S2/C2 types — hardware needs more time to lock regardless of NIT
-	// Seeds not meeting either condition are almost certainly dead frequencies.
+	//   (b) dvbt2: hardware locks slowly; restrict to seeds within the frequency
+	//       band of dvbt muxes found in pass 1 ± 2 channels (16 MHz). The T2 mux
+	//       is always allocated near the T cluster — no need to sweep the whole band.
+	//   (c) dvbs2/dvbc2: not frequency-bounded; retry all (small seed count).
+	const t2Margin = 16.0 // MHz
+	var minT, maxT float64
+	for _, f := range found1 {
+		if f.System == "dvbt" {
+			if minT == 0 || f.FreqMHz < minT {
+				minT = f.FreqMHz
+			}
+			if f.FreqMHz > maxT {
+				maxT = f.FreqMHz
+			}
+		}
+	}
 	var pass2 []workItem
 	for _, seed := range failed1 {
-		if nitMentioned[muxKey(seed)] || strings.HasSuffix(seed.System, "2") {
+		var keep bool
+		switch {
+		case nitMentioned[muxKey(seed)]:
+			keep = true
+		case seed.System == "dvbt2":
+			keep = minT > 0 && seed.FreqMHz >= minT-t2Margin && seed.FreqMHz <= maxT+t2Margin
+		case strings.HasSuffix(seed.System, "2"):
+			keep = true // dvbs2, dvbc2: small seed count, retry all
+		}
+		if keep {
 			pass2 = append(pass2, workItem{seed, muxTimeout, false})
 		}
 	}
