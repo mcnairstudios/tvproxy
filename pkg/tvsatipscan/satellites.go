@@ -1,24 +1,28 @@
-package main
+package tvsatipscan
 
 import (
 	"sort"
 	"strings"
 )
 
-// satelliteList returns a sorted comma-separated list of supported satellite identifiers.
-func satelliteList() string {
+// Satellites returns a sorted list of supported satellite identifiers.
+func Satellites() []string {
 	keys := make([]string, 0, len(europeanSatellites))
 	for k := range europeanSatellites {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	return strings.Join(keys, ", ")
+	return keys
+}
+
+func satelliteList() string {
+	return strings.Join(Satellites(), ", ")
 }
 
 // satelliteDetectionSeeds has one well-known transponder per satellite used for
 // auto-detection. All satellites are probed in parallel; the first NIT response
 // identifies the satellite. BFS then uses the full europeanSatellites seed list.
-var satelliteDetectionSeeds = map[string]transponder{
+var satelliteDetectionSeeds = map[string]Transponder{
 	"S28.2E": {FreqMHz: 10714, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 22000, Polarization: "h"},
 	"S19.2E": {FreqMHz: 10773, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 22000, Polarization: "h"},
 	"S13E":   {FreqMHz: 11200, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 27500, Polarization: "h"},
@@ -33,11 +37,11 @@ var satelliteDetectionSeeds = map[string]transponder{
 // least one will lock regardless of local signal conditions. Once any seed locks,
 // NIT BFS discovers all remaining transponders on the satellite automatically —
 // these lists do not need to be exhaustive.
-var europeanSatellites = map[string][]transponder{
-	"S28.2E": astra28E,  // UK / Ireland — Sky, Freesat, BBC, ITV
-	"S19.2E": astra19E,  // Germany, Austria, Switzerland, Netherlands — ARD, ZDF, RTL, Sky DE
+var europeanSatellites = map[string][]Transponder{
+	"S28.2E": astra28E,   // UK / Ireland — Sky, Freesat, BBC, ITV
+	"S19.2E": astra19E,   // Germany, Austria, Switzerland, Netherlands — ARD, ZDF, RTL, Sky DE
 	"S13E":   hotbird13E, // Pan-European — RAI, TF1, France Télévisions, many Eastern European
-	"S0.8W":  thor08W,   // Scandinavia — Canal Digital, TV2, SVT, NRK
+	"S0.8W":  thor08W,    // Scandinavia — Canal Digital, TV2, SVT, NRK
 	"S30W":   hispasat30W, // Spain, Portugal, Latin America — RTVE, RTP, Antena 3
 }
 
@@ -45,7 +49,7 @@ var europeanSatellites = map[string][]transponder{
 // Primary UK/Ireland satellite. Carries Sky UK, Freesat, BBC, ITV, Channel 4, Channel 5.
 // Low band: 10.7–11.7 GHz, 22000 kS/s, DVB-S2 QPSK
 // High band: 11.7–12.75 GHz, 27500 kS/s, DVB-S2 QPSK
-var astra28E = []transponder{
+var astra28E = []Transponder{
 	// Low band, horizontal
 	{FreqMHz: 10714, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 22000, Polarization: "h"},
 	{FreqMHz: 10803, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 22000, Polarization: "h"},
@@ -68,7 +72,7 @@ var astra28E = []transponder{
 // Primary satellite for Germany, Austria, Switzerland, Netherlands, Belgium.
 // Carries ARD, ZDF, RTL, ProSieben, Sat.1, Sky Deutschland, Canal+, and many others.
 // Low band: 22000 kS/s DVB-S2; high band: 27500 kS/s DVB-S/S2 mixed.
-var astra19E = []transponder{
+var astra19E = []Transponder{
 	// Low band, horizontal
 	{FreqMHz: 10773, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 22000, Polarization: "h"},
 	{FreqMHz: 10832, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 22000, Polarization: "h"},
@@ -96,7 +100,7 @@ var astra19E = []transponder{
 // Pan-European satellite visible across Europe, Middle East, and North Africa.
 // Carries RAI (Italy), TF1/France Télévisions, many Eastern European national broadcasters.
 // Primarily 27500 kS/s DVB-S/S2.
-var hotbird13E = []transponder{
+var hotbird13E = []Transponder{
 	// Horizontal
 	{FreqMHz: 10873, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 27500, Polarization: "h"},
 	{FreqMHz: 10971, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 27500, Polarization: "h"},
@@ -120,7 +124,7 @@ var hotbird13E = []transponder{
 // thor08W — Thor 6/7 at 0.8°W (Telenor/Intelsat)
 // Primary satellite for Scandinavia. Carries Canal Digital (NO/SE/DK/FI), TV2, SVT, NRK, DR.
 // Uses mixed symbol rates: 24500 and 28000 kS/s, DVB-S2.
-var thor08W = []transponder{
+var thor08W = []Transponder{
 	// Horizontal
 	{FreqMHz: 11012, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 24500, Polarization: "h"},
 	{FreqMHz: 11054, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 28000, Polarization: "h"},
@@ -138,7 +142,7 @@ var thor08W = []transponder{
 // Primary satellite for Spain and Portugal. Also serves Latin America.
 // Carries RTVE, Antena 3, Telecinco, RTP, SIC, and regional Spanish channels.
 // Primarily 27500 kS/s DVB-S2.
-var hispasat30W = []transponder{
+var hispasat30W = []Transponder{
 	// Horizontal
 	{FreqMHz: 11594, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 27500, Polarization: "h"},
 	{FreqMHz: 11678, System: "dvbs2", Modulation: "qpsk", SymbolRateKS: 27500, Polarization: "h"},
