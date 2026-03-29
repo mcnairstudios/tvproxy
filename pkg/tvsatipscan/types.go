@@ -32,6 +32,10 @@ func (t Transponder) String() string {
 // RTSPURL builds the SAT>IP tuning URL. pids is the PID list ("0,16,17" for
 // SI-only, "all" for full scan, or a custom comma-separated list).
 func (t Transponder) RTSPURL(host, pids string) string {
+	// "sdt" is an internal scan mode — map to SI-only PIDs for the actual request.
+	if pids == "sdt" {
+		pids = "0,16,17"
+	}
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "rtsp://%s/?freq=%g&msys=%s&mtype=%s&pids=%s",
 		host, t.FreqMHz, t.System, t.Modulation, pids)

@@ -354,13 +354,20 @@
   const streamsCache = new DataCache({
     label: 'Streams',
     loader: async () => {
-      const [streams, accounts] = await Promise.all([
+      const [streams, accounts, satipSources] = await Promise.all([
         api.get('/api/streams'),
         api.get('/api/m3u/accounts').catch(() => []),
+        api.get('/api/satip/sources').catch(() => []),
       ]);
       const nameMap = {};
       accounts.forEach(a => { nameMap[a.id] = a.name; });
-      streams.forEach(s => { s._display_name = (nameMap[s.m3u_account_id] || 'Unknown') + '/' + s.name; });
+      const satipMap = {};
+      satipSources.forEach(s => { satipMap[s.id] = s.name; });
+      streams.forEach(s => {
+        s._display_name = s.satip_source_id
+          ? (satipMap[s.satip_source_id] || 'SAT>IP') + '/' + s.name
+          : (nameMap[s.m3u_account_id] || 'Unknown') + '/' + s.name;
+      });
       for (var k in streamGroupsCache) delete streamGroupsCache[k];
       return streams;
     },
@@ -631,6 +638,7 @@
     { id: 'dashboard', label: 'Dashboard', icon: '\u2302', tip: 'Overview of your TVProxy system status', adminOnly: true },
     { section: 'Sources', adminOnly: true },
     { id: 'm3u-accounts', label: 'M3U Accounts', icon: '\u2630', tip: 'Add your SAT>IP or IPTV source M3U files', adminOnly: true },
+    { id: 'satip-sources', label: 'SAT>IP Sources', icon: '\ud83d\udce1', tip: 'Scan MiniSAT>IP devices for channels', adminOnly: true },
     { id: 'epg-sources', label: 'EPG Sources', icon: '\ud83d\udcc5', tip: 'Manage XMLTV EPG data sources for programme guides', adminOnly: true },
     { section: 'Channels' },
     { id: 'channels', label: 'Channels', icon: '\ud83d\udcfa', tip: 'Define your custom channels and assign streams and EPG data' },
@@ -1028,15 +1036,15 @@
 
   const streamGroupsCache = Object.create(null); // accountId -> { groups, sortedGroups, groupDisplay, groupSearch }
 
-  function buildStreamGroupsPage(accountId) {
+  function buildStreamGroupsPage(pageId, filterFn) {
     return async function(container) {
       container.innerHTML = '';
       container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...'));
 
       let groups, sortedGroups, groupDisplay, groupSearch;
 
-      if (streamGroupsCache[accountId]) {
-        var c = streamGroupsCache[accountId];
+      if (streamGroupsCache[pageId]) {
+        var c = streamGroupsCache[pageId];
         groups = c.groups;
         sortedGroups = c.sortedGroups;
         groupDisplay = c.groupDisplay;
@@ -1045,7 +1053,7 @@
         let allStreams;
         try {
           var cached = await streamsCache.getAll();
-          allStreams = cached.filter(function(s) { return s.m3u_account_id === accountId; });
+          allStreams = cached.filter(filterFn);
         } catch (err) {
           container.innerHTML = '';
           container.appendChild(h('p', { style: 'color: var(--danger)' }, 'Failed to load: ' + err.message));
@@ -1073,7 +1081,7 @@
           groupSearch[i] = groupDisplay[i].toLowerCase();
         }
 
-        streamGroupsCache[accountId] = { groups: groups, sortedGroups: sortedGroups, groupDisplay: groupDisplay, groupSearch: groupSearch };
+        streamGroupsCache[pageId] = { groups: groups, sortedGroups: sortedGroups, groupDisplay: groupDisplay, groupSearch: groupSearch };
       }
 
       let searchTerm = '';
@@ -1181,13 +1189,13 @@
       renderGroups();
 
       var cacheListener = DataCache.onChange(function() {
-        if (state.currentPage !== 'streams-' + accountId) {
+        if (state.currentPage !== pageId) {
           DataCache.offChange(cacheListener);
           return;
         }
         var cached = streamsCache._data;
         if (!cached) return;
-        var allStreams = cached.filter(function(s) { return s.m3u_account_id === accountId; });
+        var allStreams = cached.filter(filterFn);
         groups = Object.create(null);
         for (var i = 0; i < allStreams.length; i++) {
           var g = allStreams[i].group || '';
@@ -1205,16 +1213,19 @@
           groupDisplay[i] = sortedGroups[i] || '(No Group)';
           groupSearch[i] = groupDisplay[i].toLowerCase();
         }
-        streamGroupsCache[accountId] = { groups: groups, sortedGroups: sortedGroups, groupDisplay: groupDisplay, groupSearch: groupSearch };
+        streamGroupsCache[pageId] = { groups: groups, sortedGroups: sortedGroups, groupDisplay: groupDisplay, groupSearch: groupSearch };
         renderGroups();
       });
     };
   }
 
   async function rebuildStreamNav() {
-    const accounts = await api.get('/api/m3u/accounts').catch(() => []);
-    navItems = navItems.filter(n => !n.id || !n.id.startsWith('streams-'));
-    Object.keys(pages).forEach(k => { if (k.startsWith('streams-')) delete pages[k]; });
+    const [accounts, satipSources] = await Promise.all([
+      api.get('/api/m3u/accounts').catch(() => []),
+      api.get('/api/satip/sources').catch(() => []),
+    ]);
+    navItems = navItems.filter(n => !n.id || (!n.id.startsWith('streams-') && !n.id.startsWith('satip-streams-')));
+    Object.keys(pages).forEach(k => { if (k.startsWith('streams-') || k.startsWith('satip-streams-')) delete pages[k]; });
     const idx = navItems.findIndex(n => n.section === 'Streams');
     if (idx === -1) return;
     const accountNavItems = accounts.map(a => ({
@@ -1223,10 +1234,15 @@
       icon: '\u25b6',
       tip: 'Streams from ' + a.name,
     }));
-    navItems.splice(idx + 1, 0, ...accountNavItems);
     accounts.forEach(a => {
-      pages['streams-' + a.id] = buildStreamGroupsPage(a.id);
+      pages['streams-' + a.id] = buildStreamGroupsPage('streams-' + a.id, function(s) { return s.m3u_account_id === a.id; });
     });
+    const satipNavItems = satipSources.map(function(s) {
+      var pageId = 'satip-streams-' + s.id;
+      pages[pageId] = buildStreamGroupsPage(pageId, function(ss) { return ss.satip_source_id === s.id; });
+      return { id: pageId, label: s.name, icon: '\ud83d\udce1', tip: 'Streams from ' + s.name };
+    });
+    navItems.splice(idx + 1, 0, ...accountNavItems, ...satipNavItems);
     if (auth.isLoggedIn()) {
       const oldSidebar = document.querySelector('.sidebar');
       if (oldSidebar) {
@@ -1305,20 +1321,23 @@
     container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...'));
 
     try {
-      const [accounts, channels, groups, epgSources, devices] = await Promise.all([
+      const [accounts, satipSources, channels, groups, epgSources, devices] = await Promise.all([
         api.get('/api/m3u/accounts').catch(() => []),
+        api.get('/api/satip/sources').catch(() => []),
         channelsCache.getAll().catch(() => []),
         channelGroupsCache.getAll().catch(() => []),
         api.get('/api/epg/sources').catch(() => []),
         api.get('/api/hdhr/devices').catch(() => []),
       ]);
 
-      const streamCount = accounts.reduce((sum, a) => sum + (a.stream_count || 0), 0);
+      const streamCount = accounts.reduce((sum, a) => sum + (a.stream_count || 0), 0)
+        + satipSources.reduce((sum, s) => sum + (s.stream_count || 0), 0);
 
       container.innerHTML = '';
 
       const cards = [
         { label: 'M3U Accounts', value: accounts.length, icon: '\u2630', page: 'm3u-accounts' },
+        { label: 'SAT>IP Sources', value: satipSources.length, icon: '\ud83d\udce1', page: 'satip-sources' },
         { label: 'Streams', value: streamCount, icon: '\u25b6', page: accounts.length ? 'streams-' + accounts[0].id : 'dashboard' },
         { label: 'Channels', value: channels.length, icon: '\ud83d\udcfa', page: 'channels' },
         { label: 'Channel Groups', value: groups.length, icon: '\ud83d\udcc2', page: 'channels' },
@@ -3353,6 +3372,73 @@
       ],
     }),
 
+    'satip-sources': buildCrudPage({
+      title: 'SAT>IP Sources',
+      singular: 'SAT>IP Source',
+      apiPath: '/api/satip/sources',
+      create: true,
+      update: true,
+      columns: [
+        { key: 'name', label: 'Name', render: item => {
+          const wrap = h('span', null, item.name);
+          if (item.last_error) wrap.appendChild(h('div', { style: 'color:var(--danger);font-size:0.85em;margin-top:2px' }, item.last_error));
+          return wrap;
+        }},
+        { key: 'host', label: 'Host' },
+        { key: 'http_port', label: 'HTTP Port' },
+        { key: 'is_enabled', label: 'Enabled', render: item => item.is_enabled ? '\u2714' : '\u2718' },
+        { key: 'stream_count', label: 'Streams' },
+        { key: 'last_scanned', label: 'Last Scanned', render: item => item.last_scanned ? new Date(item.last_scanned).toLocaleString() : 'Never' },
+      ],
+      fields: [
+        { key: 'name', label: 'Name', placeholder: 'Home SAT>IP Server' },
+        { key: 'host', label: 'Host / IP Address', placeholder: '192.168.1.100' },
+        { key: 'http_port', label: 'HTTP Port', type: 'number', default: 8875, help: 'SAT>IP HTTP port (default 8875)' },
+        { key: 'is_enabled', label: 'Enabled', type: 'checkbox', default: true },
+      ],
+      rowActions: (item, reload) => [
+        {
+          label: 'Scan',
+          icon: '\u21BB',
+          handler: async () => {
+            try {
+              await api.post('/api/satip/sources/' + item.id + '/scan');
+              toast.success('Scan started for ' + item.name);
+              var pollCount = 0;
+              var pollTimer = setInterval(async () => {
+                try {
+                  var status = await api.get('/api/satip/sources/' + item.id + '/status');
+                  if (status.state === 'done' || status.state === 'error') {
+                    clearInterval(pollTimer);
+                    reload();
+                    if (status.state === 'done') toast.success(item.name + ': ' + status.message);
+                    else toast.error(item.name + ': ' + status.message);
+                  }
+                } catch (e) {}
+                if (++pollCount > 120) clearInterval(pollTimer);
+              }, 2000);
+            } catch (err) {
+              toast.error(err.message);
+            }
+          },
+        },
+        {
+          label: 'Clear',
+          icon: '\u{1F5D1}',
+          handler: async () => {
+            if (!confirm('Delete all streams for ' + item.name + '?')) return;
+            try {
+              await api.post('/api/satip/sources/' + item.id + '/clear');
+              toast.success('Streams cleared for ' + item.name);
+              reload();
+            } catch (err) {
+              toast.error(err.message);
+            }
+          },
+        },
+      ],
+    }),
+
     channels: buildCrudPage({
       title: 'Channels',
       singular: 'Channel',
@@ -3480,12 +3566,16 @@
           Promise.all([
             api.get('/api/channels/' + item.id + '/streams'),
             api.get('/api/m3u/accounts').catch(() => []),
-          ]).then(([streams, accounts]) => {
+            api.get('/api/satip/sources').catch(() => []),
+          ]).then(([streams, accounts, satipSources]) => {
             if (streams && streams.length > 0) {
               const nameMap = {};
               accounts.forEach(a => { nameMap[a.id] = a.name; });
+              const satipMap = {};
+              satipSources.forEach(s => { satipMap[s.id] = s.name; });
               const s = streams[0];
-              inputs._stream.value = (nameMap[s.m3u_account_id] || 'Unknown') + '/' + s.name;
+              const prefix = s.satip_source_id ? (satipMap[s.satip_source_id] || 'SAT>IP') : (nameMap[s.m3u_account_id] || 'Unknown');
+              inputs._stream.value = prefix + '/' + s.name;
               inputs._stream._selectedStreamId = s.id;
             }
           }).catch(() => {});

@@ -98,7 +98,39 @@ func (t *RoutingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return t.direct.RoundTrip(req)
 }
 
+var privateRanges []*net.IPNet
+
+func init() {
+	for _, cidr := range []string{
+		"127.0.0.0/8",
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"::1/128",
+		"fc00::/7",
+	} {
+		_, network, _ := net.ParseCIDR(cidr)
+		privateRanges = append(privateRanges, network)
+	}
+}
+
+func isPrivateIP(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, network := range privateRanges {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *RoutingTransport) shouldRoute(host string) bool {
+	if isPrivateIP(host) {
+		return false
+	}
 	if t.routeAll {
 		return true
 	}

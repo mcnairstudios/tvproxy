@@ -1,0 +1,210 @@
+[
+  {
+    "id": "1ba3d427-77c2-4954-850c-e0d3d3464f1f",
+    "name": "Plex",
+    "priority": 10,
+    "stream_profile_id": "eeb54a06-59b9-4055-b2b9-aeaa8bcfde01",
+    "is_enabled": true,
+    "match_rules": [
+      {
+        "id": "2d1cdd4f-4e2b-4c53-aeac-8917f8dcab9a",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "Lavf/"
+      },
+      {
+        "id": "5d0382e2-b92e-4ba1-8eb0-8e410a8538ec",
+        "client_id": "",
+        "header_name": "Icy-Metadata",
+        "match_type": "exists",
+        "match_value": ""
+      }
+    ],
+    "created_at": "2026-03-30T00:41:57.491593+01:00",
+    "updated_at": "2026-03-30T00:41:57.491593+01:00"
+  },
+  {
+    "id": "4d981a59-3b20-463b-8b72-9edd31cf0b83",
+    "name": "VLC",
+    "priority": 20,
+    "stream_profile_id": "df7d72ba-e0bc-4e8c-8b75-ef63349182cf",
+    "is_enabled": true,
+    "match_rules": [
+      {
+        "id": "be709e99-0281-4124-8da8-430857017d06",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "VLC/"
+      }
+    ],
+    "created_at": "2026-03-30T00:41:57.491593+01:00",
+    "updated_at": "2026-03-30T00:41:57.491593+01:00"
+  },
+  {
+    "id": "aeb44fa1-f6cb-40ba-9a5e-a9ebaf869c5b",
+    "name": "Skybox",
+    "priority": 25,
+    "stream_profile_id": "f892f6b8-1448-45db-a079-c4234db95c6d",
+    "is_enabled": true,
+    "match_rules": [
+      {
+        "id": "deecba66-2b0a-4fdf-a313-5488daf2ef66",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "libmpv"
+      },
+      {
+        "id": "3e95815f-fc2d-425b-9f91-4e4638faa996",
+        "client_id": "",
+        "header_name": "Icy-Metadata",
+        "match_type": "exists",
+        "match_value": ""
+      }
+    ],
+    "created_at": "2026-03-30T00:41:57.491593+01:00",
+    "updated_at": "2026-03-30T00:41:57.491593+01:00"
+  },
+  {
+    "id": "9f460e75-85fd-49fc-9886-3433ddd06012",
+    "name": "4XVR",
+    "priority": 30,
+    "stream_profile_id": "efe21624-4fe1-4815-8473-0d4a77734041",
+    "is_enabled": true,
+    "match_rules": [
+      {
+        "id": "c06c65c8-f40b-40ae-8bd9-ca8944d42a8a",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "Dalvik/2.1.0"
+      },
+      {
+        "id": "f750581c-1a33-43f5-88eb-4ad3c90d7294",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "Quest 3"
+      }
+    ],
+    "created_at": "2026-03-30T00:41:57.491593+01:00",
+    "updated_at": "2026-03-30T00:41:57.491593+01:00"
+  },
+  {
+    "id": "c955f015-5e17-4ba5-b255-6fd865b33b2d",
+    "name": "LG TV",
+    "priority": 40,
+    "stream_profile_id": "cac852b8-c98e-4685-94bb-39bd2c06a0a2",
+    "is_enabled": true,
+    "match_rules": [
+      {
+        "id": "6b15561e-3240-43cf-a5b0-b0901693d3d6",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "Web0S"
+      }
+    ],
+    "created_at": "2026-03-30T00:41:57.491593+01:00",
+    "updated_at": "2026-03-30T00:41:57.491593+01:00"
+  },
+  {
+    "id": "f9476b35-a465-4780-8b34-2cfcd086f23e",
+    "name": "Samsung TV",
+    "priority": 45,
+    "stream_profile_id": "0b7ab794-7365-49a8-abcf-04256f055642",
+    "is_enabled": true,
+    "match_rules": [
+      {
+        "id": "fec8df09-0d18-420f-b03d-636fdf51bbc1",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "SMART-TV"
+      }
+    ],
+    "created_at": "2026-03-30T00:41:57.491593+01:00",
+    "updated_at": "2026-03-30T00:41:57.491593+01:00"
+  },
+  {
+    "id": "f839ad3e-e371-4fb6-83f0-03aa23da8eb8",
+    "name": "Panasonic TV",
+    "priority": 46,
+    "stream_profile_id": "2c38113b-bbbf-48df-ab51-245a736f85a6",
+    "is_enabled": true,
+    "match_rules": [
+      {
+        "id": "4e6c4aaf-5523-47fe-b503-fa6813c34377",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "Viera"
+      }
+    ],
+    "created_at": "2026-03-30T00:41:57.491593+01:00",
+    "updated_at": "2026-03-30T00:41:57.491593+01:00"
+  },
+  {
+    "id": "8a293542-f607-4a09-b39d-ddf610df6e44",
+    "name": "iPhone",
+    "priority": 50,
+    "stream_profile_id": "920136ea-9301-42cd-9e4e-acbd2af8ba60",
+    "is_enabled": true,
+    "match_rules": [
+      {
+        "id": "e30bdd23-7c38-4138-85a4-ef59a8469f76",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "iPhone"
+      }
+    ],
+    "created_at": "2026-03-30T00:41:57.491593+01:00",
+    "updated_at": "2026-03-30T00:41:57.491593+01:00"
+  },
+  {
+    "id": "fd04b84f-c758-4943-a1f4-f8ec06eb87a1",
+    "name": "Safari",
+    "priority": 55,
+    "stream_profile_id": "3bfd185d-9f4b-43cb-9385-c406a79fac18",
+    "is_enabled": true,
+    "match_rules": [
+      {
+        "id": "bd129d18-6b8a-4264-b60a-206405ce2122",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "Version/"
+      },
+      {
+        "id": "0c7786f5-03ef-4d71-a187-e893da913f6d",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "Safari/"
+      }
+    ],
+    "created_at": "2026-03-30T00:41:57.491593+01:00",
+    "updated_at": "2026-03-30T00:41:57.491593+01:00"
+  },
+  {
+    "id": "a05d3b71-d9c7-4bff-a972-d6e3f25927d4",
+    "name": "Browser",
+    "priority": 100,
+    "stream_profile_id": "08f42d2e-a757-4948-abf0-6c209203e58b",
+    "is_enabled": true,
+    "match_rules": [
+      {
+        "id": "cafafd8b-c8a8-47de-bd9e-56932f79f87f",
+        "client_id": "",
+        "header_name": "User-Agent",
+        "match_type": "contains",
+        "match_value": "Mozilla/"
+      }
+    ],
+    "created_at": "2026-03-30T00:41:57.491593+01:00",
+    "updated_at": "2026-03-30T00:41:57.491593+01:00"
+  }
+]

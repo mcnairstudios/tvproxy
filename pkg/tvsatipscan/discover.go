@@ -57,11 +57,22 @@ func detectSatellite(host string, timeout time.Duration, verbose bool) (id, netw
 //
 // At most workerCount(caps) scans run concurrently — one per physical tuner.
 func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout time.Duration, verbose bool) ([]Transponder, string) {
+	// When both dvbt and dvbt2 are available, defer dvbt2 seeds from Pass 1.
+	// Pass 1 finds dvbt muxes first; Pass 2 retries dvbt2 only in that frequency band.
+	// This avoids scanning all 48 dvbt2 UHF seeds upfront when they will all return "no signal".
+	deferT2 := caps["dvbt2"] > 0 && caps["dvbt"] > 0
+	var deferredT2Seeds []Transponder
+
 	seen := map[string]bool{}
 	var allSeeds []Transponder
 	for _, sys := range typeOrder {
 		if caps[sys] > 0 {
 			if seeds, ok := defaultSeeds[sys]; ok {
+				if sys == "dvbt2" && deferT2 {
+					deferredT2Seeds = seeds
+					seen[sys] = true
+					continue
+				}
 				allSeeds = append(allSeeds, seeds...)
 				seen[sys] = true
 			}
@@ -222,6 +233,22 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 			keep = minT > 0 && seed.FreqMHz >= minT-t2Margin && seed.FreqMHz <= maxT+t2Margin
 		case strings.HasSuffix(seed.System, "2"):
 			keep = true // dvbs2, dvbc2: small seed count, retry all
+		}
+		if keep {
+			pass2 = append(pass2, workItem{seed, muxTimeout, false})
+		}
+	}
+	// Add deferred dvbt2 seeds (not in pass 1) for frequencies near found dvbt muxes.
+	for _, seed := range deferredT2Seeds {
+		k := muxKey(seed)
+		if scanned[k] {
+			continue
+		}
+		var keep bool
+		if nitMentioned[k] {
+			keep = true
+		} else if minT > 0 && seed.FreqMHz >= minT-t2Margin && seed.FreqMHz <= maxT+t2Margin {
+			keep = true
 		}
 		if keep {
 			pass2 = append(pass2, workItem{seed, muxTimeout, false})

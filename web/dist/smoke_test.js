@@ -103,6 +103,7 @@ realSetTimeout(async () => {
   // Test each page renderer
   const pageNames = [
     'm3u-accounts',
+    'satip-sources',
     'channels',        // has groupBy — this is the key one to test
     'channel-groups',
     'epg-sources',

@@ -23,9 +23,10 @@ type scanResult struct {
 	networkName string // from NIT network_name descriptor (tag 0x40)
 	elapsed     time.Duration
 	err         error
-	patReceived bool // PAT was received — confirms the mux is on air
-	nitComplete bool // all NIT sections received (complete mux list)
-	signalOnly  bool // was scanned in signal-only mode (pids=0)
+	patReceived bool                        // PAT was received — confirms the mux is on air
+	nitComplete bool                        // all NIT sections received (complete mux list)
+	signalOnly  bool                        // was scanned in signal-only mode (pids=0)
+	pmtData     map[uint16]*astits.PMTData  // serviceID → PMT (populated during full scan)
 }
 
 // buildPMTURL replaces pids=0,16,17 with pids=0,16,17,<pmtPIDs...>
@@ -275,11 +276,16 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 			}
 		}
 
-		// pids=0: signal-only — just confirm the mux is on air via PAT.
-		// pids=0,16,17: SI-only — wait for complete NIT.
-		// pids=all: full scan — wait for PAT + NIT + SDT + all PMTs.
+		// pids=0:       signal-only — just confirm the mux is on air via PAT.
+		// pids=0,16,17: discovery — wait for PAT + complete NIT.
+		// pids=sdt:     SI-only full scan — wait for PAT + SDT (no PMT/NIT needed).
+		// pids=all:     full scan — wait for PAT + SDT + all PMTs.
 		if pids == "0" {
 			if patDone {
+				break
+			}
+		} else if pids == "sdt" {
+			if patDone && sdtReceived {
 				break
 			}
 		} else if pids != "all" {
@@ -296,7 +302,7 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 					}
 				}
 			}
-			if patDone && nitDone && sdtReceived && allPMTDone {
+			if patDone && sdtReceived && allPMTDone {
 				break
 			}
 		}
@@ -333,6 +339,7 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 		}
 		result.channels = append(result.channels, ch)
 	}
+	result.pmtData = pmtData
 	c.teardown(controlURL, session)
 	sort.Slice(result.channels, func(i, j int) bool {
 		return result.channels[i].ServiceID < result.channels[j].ServiceID
@@ -341,6 +348,9 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 }
 
 // scanParallel scans multiple transponders with up to maxParallel concurrent sessions.
+// It uses a two-phase approach:
+//  1. SI-only scan (pids=0,16,17) to get service names and types quickly.
+//  2. Per-service PMT scan to get elementary stream PIDs for precise channel URLs.
 func scanParallel(host string, tps []Transponder, maxParallel int, timeout time.Duration, verbose bool) []scanResult {
 	if maxParallel < 1 {
 		maxParallel = 1
@@ -348,15 +358,62 @@ func scanParallel(host string, tps []Transponder, maxParallel int, timeout time.
 	sem := make(chan struct{}, maxParallel)
 	results := make([]scanResult, len(tps))
 	var wg sync.WaitGroup
+
+	// Phase 1: SI-only to get channel names and service types.
 	for i, tp := range tps {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(idx int, tp Transponder) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results[idx] = scanTransponder(context.Background(), host, tp, timeout, "all", verbose)
+			results[idx] = scanTransponder(context.Background(), host, tp, timeout, "sdt", verbose)
 		}(i, tp)
 	}
 	wg.Wait()
+
+	// Phase 2: for muxes that found services, fetch PMT data per service.
+	for i, r := range results {
+		if len(r.channels) == 0 {
+			continue
+		}
+		// Build a targeted PID list: PAT + all PMT PIDs discovered.
+		pmtPIDs := make([]uint16, 0, len(r.channels))
+		seen := map[uint16]bool{}
+		for _, ch := range r.channels {
+			if ch.PMTPID != 0 && !seen[ch.PMTPID] {
+				pmtPIDs = append(pmtPIDs, ch.PMTPID)
+				seen[ch.PMTPID] = true
+			}
+		}
+		if len(pmtPIDs) == 0 {
+			continue
+		}
+		pidStr := "0,16,17"
+		for _, p := range pmtPIDs {
+			pidStr += fmt.Sprintf(",%d", p)
+		}
+		r2 := scanTransponder(context.Background(), host, tps[i], timeout, pidStr, verbose)
+		// Merge PMT stream components into phase-1 channels.
+		for j, ch := range results[i].channels {
+			if pmt, ok := r2.pmtData[ch.ServiceID]; ok {
+				results[i].channels[j].PCRPID = pmt.PCRPID
+				results[i].channels[j].Streams = nil
+				for _, es := range pmt.ElementaryStreams {
+					comp := StreamComponent{
+						PID:        es.ElementaryPID,
+						StreamType: uint8(es.StreamType),
+						TypeName:   streamTypStr(uint8(es.StreamType)),
+					}
+					for _, desc := range es.ElementaryStreamDescriptors {
+						if desc.ISO639LanguageAndAudioType != nil {
+							comp.Language = string(desc.ISO639LanguageAndAudioType.Language[:])
+						}
+					}
+					results[i].channels[j].Streams = append(results[i].channels[j].Streams, comp)
+				}
+			}
+		}
+	}
+
 	return results
 }

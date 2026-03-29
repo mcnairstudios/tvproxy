@@ -134,6 +134,10 @@ func main() {
 	if err := scheduledRecStore.Load(); err != nil {
 		log.Fatal().Err(err).Msg("failed to load scheduled recording store")
 	}
+	satipSourceStore := store.NewSatIPSourceStore(filepath.Join(dataDir, "satip_sources.json"))
+	if err := satipSourceStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load satip source store")
+	}
 
 	authService := service.NewAuthService(userStore, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
 	authService.SetInviteExpiry(cfg.Settings.Auth.InviteTokenExpiry)
@@ -172,6 +176,7 @@ func main() {
 	logoCache := logocache.New(filepath.Join(dataDir, "static", "logocache"), cfg, logoTimeout)
 	logoService := service.NewLogoService(logoStore, logoCache, log)
 
+	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, log)
 	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, cfg, wgHTTPClient, log)
 	channelService := service.NewChannelService(channelStore, channelGroupStore, streamStore, log)
 	epgService := service.NewEPGService(epgSourceStore, epgStore, cfg, wgHTTPClient, log)
@@ -189,6 +194,7 @@ func main() {
 
 	authMW := middleware.NewAuthMiddleware(authService, cfg.APIKey, adminUserID)
 
+	satipHandler := handler.NewSatIPHandler(satipService)
 	authHandler := handler.NewAuthHandler(authService)
 	userHandler := handler.NewUserHandler(authService)
 	m3uAccountHandler := handler.NewM3UAccountHandler(m3uService)
@@ -323,6 +329,20 @@ func main() {
 				r.Put("/{id}", m3uAccountHandler.Update)
 				r.Delete("/{id}", m3uAccountHandler.Delete)
 				r.Post("/{id}/refresh", m3uAccountHandler.Refresh)
+			})
+		})
+
+		r.Route("/api/satip/sources", func(r chi.Router) {
+			r.Get("/", satipHandler.List)
+			r.Get("/{id}", satipHandler.Get)
+			r.Get("/{id}/status", satipHandler.ScanStatus)
+			r.Group(func(r chi.Router) {
+				r.Use(authMW.RequireAdmin)
+				r.Post("/", satipHandler.Create)
+				r.Put("/{id}", satipHandler.Update)
+				r.Delete("/{id}", satipHandler.Delete)
+				r.Post("/{id}/scan", satipHandler.Scan)
+				r.Post("/{id}/clear", satipHandler.Clear)
 			})
 		})
 

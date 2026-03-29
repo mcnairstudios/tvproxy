@@ -178,6 +178,13 @@ func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string) 
 			rwTimeout = m.config.Settings.Network.ReconnectRWTimeout
 		}
 		args = ffmpeg.InjectReconnect(args, inputURL, delayMax, rwTimeout)
+		if ffmpeg.IsRTSPURL(inputURL) {
+			args = ffmpeg.InjectRTSPTransport(args)
+			args = ffmpeg.InjectRTSPProbe(args)
+			args = ffmpeg.SoftenMaps(args)
+			args = ffmpeg.InjectAudioResync(args)
+			args = ffmpeg.InjectFPSMode(args)
+		}
 	}
 
 	args = append(args, "-progress", "pipe:2")

@@ -100,6 +100,8 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	testLogoCache := logocache.New(filepath.Join(dir, "static", "logocache"), cfg, 5*time.Second)
 	logoService := service.NewLogoService(logoStore, testLogoCache, log)
 
+	satipSourceStore := store.NewSatIPSourceStore(filepath.Join(dir, "satip_sources.json"))
+	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, log)
 	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, cfg, nil, log)
 	channelService := service.NewChannelService(channelStore, channelGroupStore, streamStore, log)
 	epgService := service.NewEPGService(epgSourceStore, epgStore, cfg, nil, log)
@@ -116,6 +118,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 
 	authMW := middleware.NewAuthMiddleware(authService, cfg.APIKey, adminUserID)
 
+	satipHandler := NewSatIPHandler(satipService)
 	authHandler := NewAuthHandler(authService)
 	userHandler := NewUserHandler(authService)
 	m3uAccountHandler := NewM3UAccountHandler(m3uService)
@@ -200,6 +203,20 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 				r.Put("/{id}", m3uAccountHandler.Update)
 				r.Delete("/{id}", m3uAccountHandler.Delete)
 				r.Post("/{id}/refresh", m3uAccountHandler.Refresh)
+			})
+		})
+
+		r.Route("/api/satip/sources", func(r chi.Router) {
+			r.Get("/", satipHandler.List)
+			r.Get("/{id}", satipHandler.Get)
+			r.Get("/{id}/status", satipHandler.ScanStatus)
+			r.Group(func(r chi.Router) {
+				r.Use(authMW.RequireAdmin)
+				r.Post("/", satipHandler.Create)
+				r.Put("/{id}", satipHandler.Update)
+				r.Delete("/{id}", satipHandler.Delete)
+				r.Post("/{id}/scan", satipHandler.Scan)
+				r.Post("/{id}/clear", satipHandler.Clear)
 			})
 		})
 
@@ -2923,5 +2940,94 @@ func TestIntegration_Activity(t *testing.T) {
 		var viewers []map[string]any
 		decodeResponse(t, rec, &viewers)
 		assert.Len(t, viewers, 0)
+	})
+}
+
+func TestIntegration_SatIPSourceCRUD(t *testing.T) {
+	env := setupFullEnv(t)
+
+	t.Run("list empty", func(t *testing.T) {
+		rec := doRequest(t, env, "GET", "/api/satip/sources/", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var sources []map[string]any
+		decodeResponse(t, rec, &sources)
+		assert.Len(t, sources, 0)
+	})
+
+	t.Run("create requires admin", func(t *testing.T) {
+		rec := doRequest(t, env, "POST", "/api/satip/sources/", map[string]any{
+			"name": "Test Source", "host": "192.168.1.100", "http_port": 8875, "is_enabled": true,
+		}, env.userToken)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+	})
+
+	var sourceID string
+	t.Run("create source", func(t *testing.T) {
+		rec := doRequest(t, env, "POST", "/api/satip/sources/", map[string]any{
+			"name": "Home SAT>IP", "host": "192.168.1.100", "http_port": 8875, "is_enabled": true,
+		}, env.adminToken)
+		assert.Equal(t, http.StatusCreated, rec.Code)
+		var source map[string]any
+		decodeResponse(t, rec, &source)
+		assert.Equal(t, "Home SAT>IP", source["name"])
+		assert.Equal(t, "192.168.1.100", source["host"])
+		assert.Equal(t, float64(8875), source["http_port"])
+		assert.Equal(t, true, source["is_enabled"])
+		assert.NotEmpty(t, source["id"])
+		sourceID = source["id"].(string)
+	})
+
+	t.Run("list returns created source", func(t *testing.T) {
+		rec := doRequest(t, env, "GET", "/api/satip/sources/", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var sources []map[string]any
+		decodeResponse(t, rec, &sources)
+		assert.Len(t, sources, 1)
+		assert.Equal(t, "Home SAT>IP", sources[0]["name"])
+	})
+
+	t.Run("get by id", func(t *testing.T) {
+		rec := doRequest(t, env, "GET", "/api/satip/sources/"+sourceID, nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var source map[string]any
+		decodeResponse(t, rec, &source)
+		assert.Equal(t, sourceID, source["id"])
+	})
+
+	t.Run("update source", func(t *testing.T) {
+		rec := doRequest(t, env, "PUT", "/api/satip/sources/"+sourceID, map[string]any{
+			"name": "Updated SAT>IP", "host": "192.168.1.200", "http_port": 8875, "is_enabled": false,
+		}, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var source map[string]any
+		decodeResponse(t, rec, &source)
+		assert.Equal(t, "Updated SAT>IP", source["name"])
+		assert.Equal(t, "192.168.1.200", source["host"])
+		assert.Equal(t, false, source["is_enabled"])
+	})
+
+	t.Run("scan status", func(t *testing.T) {
+		rec := doRequest(t, env, "GET", "/api/satip/sources/"+sourceID+"/status", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("create missing name returns 400", func(t *testing.T) {
+		rec := doRequest(t, env, "POST", "/api/satip/sources/", map[string]any{
+			"host": "192.168.1.100",
+		}, env.adminToken)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("delete source", func(t *testing.T) {
+		rec := doRequest(t, env, "DELETE", "/api/satip/sources/"+sourceID, nil, env.adminToken)
+		assert.Equal(t, http.StatusNoContent, rec.Code)
+	})
+
+	t.Run("list empty after delete", func(t *testing.T) {
+		rec := doRequest(t, env, "GET", "/api/satip/sources/", nil, env.adminToken)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var sources []map[string]any
+		decodeResponse(t, rec, &sources)
+		assert.Len(t, sources, 0)
 	})
 }

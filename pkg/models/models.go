@@ -30,10 +30,24 @@ type M3UAccount struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
+type SatIPSource struct {
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Host        string     `json:"host"`
+	HTTPPort    int        `json:"http_port"`
+	IsEnabled   bool       `json:"is_enabled"`
+	LastScanned *time.Time `json:"last_scanned,omitempty"`
+	StreamCount int        `json:"stream_count"`
+	LastError   string     `json:"last_error"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
 type Stream struct {
-	ID           string    `json:"id"`
-	M3UAccountID string    `json:"m3u_account_id"`
-	Name         string    `json:"name"`
+	ID            string    `json:"id"`
+	M3UAccountID  string    `json:"m3u_account_id"`
+	SatIPSourceID string    `json:"satip_source_id,omitempty"`
+	Name          string    `json:"name"`
 	URL          string    `json:"url"`
 	Group        string    `json:"group"`
 	Logo         string    `json:"logo,omitempty"`
@@ -205,11 +219,12 @@ type ActiveViewer struct {
 }
 
 type StreamSummary struct {
-	ID           string `json:"id"`
-	M3UAccountID string `json:"m3u_account_id"`
-	Name         string `json:"name"`
-	Group        string `json:"group"`
-	Logo         string `json:"logo,omitempty"`
+	ID            string `json:"id"`
+	M3UAccountID  string `json:"m3u_account_id"`
+	SatIPSourceID string `json:"satip_source_id,omitempty"`
+	Name          string `json:"name"`
+	Group         string `json:"group"`
+	Logo          string `json:"logo,omitempty"`
 }
 
 type GuideProgram struct {

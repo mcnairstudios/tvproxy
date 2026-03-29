@@ -63,11 +63,12 @@ func (s *StreamStoreImpl) ListSummaries(_ context.Context) ([]models.StreamSumma
 	summaries := make([]models.StreamSummary, len(items))
 	for i, st := range items {
 		summaries[i] = models.StreamSummary{
-			ID:           st.ID,
-			M3UAccountID: st.M3UAccountID,
-			Name:         st.Name,
-			Group:        st.Group,
-			Logo:         st.Logo,
+			ID:            st.ID,
+			M3UAccountID:  st.M3UAccountID,
+			SatIPSourceID: st.SatIPSourceID,
+			Name:          st.Name,
+			Group:         st.Group,
+			Logo:          st.Logo,
 		}
 	}
 	return summaries, nil
@@ -165,6 +166,68 @@ func (s *StreamStoreImpl) DeleteByAccountID(_ context.Context, accountID string)
 	}
 	s.rev.Bump()
 	return nil
+}
+
+func (s *StreamStoreImpl) ListBySatIPSourceID(_ context.Context, sourceID string) ([]models.Stream, error) {
+	s.mu.RLock()
+	var items []models.Stream
+	for _, v := range s.items {
+		if v.SatIPSourceID == sourceID {
+			items = append(items, v)
+		}
+	}
+	s.mu.RUnlock()
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+	return items, nil
+}
+
+func (s *StreamStoreImpl) CountBySatIPSourceID(_ context.Context, sourceID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, v := range s.items {
+		if v.SatIPSourceID == sourceID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *StreamStoreImpl) DeleteBySatIPSourceID(_ context.Context, sourceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, st := range s.items {
+		if st.SatIPSourceID == sourceID {
+			delete(s.items, id)
+		}
+	}
+	s.rev.Bump()
+	return nil
+}
+
+func (s *StreamStoreImpl) DeleteStaleBySatIPSourceID(_ context.Context, sourceID string, keepIDs []string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keep := make(map[string]struct{}, len(keepIDs))
+	for _, id := range keepIDs {
+		keep[id] = struct{}{}
+	}
+	var deleted []string
+	for id, st := range s.items {
+		if st.SatIPSourceID != sourceID {
+			continue
+		}
+		if _, shouldKeep := keep[id]; !shouldKeep {
+			delete(s.items, id)
+			deleted = append(deleted, id)
+		}
+	}
+	if len(deleted) > 0 {
+		s.rev.Bump()
+	}
+	return deleted, nil
 }
 
 func (s *StreamStoreImpl) Delete(_ context.Context, id string) error {

@@ -1,0 +1,14 @@
+[
+  {
+    "id": "d3d7659d-b6be-43bf-ba76-c37051f4d2ad",
+    "name": "Test SAT\u003eIP",
+    "host": "192.168.1.149",
+    "http_port": 8875,
+    "is_enabled": true,
+    "last_scanned": "2026-03-30T00:50:35.490468+01:00",
+    "stream_count": 174,
+    "last_error": "",
+    "created_at": "2026-03-29T00:49:27.421414Z",
+    "updated_at": "2026-03-30T00:50:35.490898+01:00"
+  }
+]

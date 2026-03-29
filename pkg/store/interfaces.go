@@ -16,14 +16,18 @@ type StreamReader interface {
 	List(ctx context.Context) ([]models.Stream, error)
 	ListSummaries(ctx context.Context) ([]models.StreamSummary, error)
 	ListByAccountID(ctx context.Context, accountID string) ([]models.Stream, error)
+	ListBySatIPSourceID(ctx context.Context, sourceID string) ([]models.Stream, error)
 	GetByID(ctx context.Context, id string) (*models.Stream, error)
 	CountByAccountID(ctx context.Context, accountID string) (int, error)
+	CountBySatIPSourceID(ctx context.Context, sourceID string) (int, error)
 }
 
 type StreamWriter interface {
 	BulkUpsert(ctx context.Context, streams []models.Stream) error
 	DeleteStaleByAccountID(ctx context.Context, accountID string, keepIDs []string) ([]string, error)
 	DeleteByAccountID(ctx context.Context, accountID string) error
+	DeleteStaleBySatIPSourceID(ctx context.Context, sourceID string, keepIDs []string) ([]string, error)
+	DeleteBySatIPSourceID(ctx context.Context, sourceID string) error
 	Delete(ctx context.Context, id string) error
 	Clear() error
 }
