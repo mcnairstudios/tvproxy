@@ -2491,11 +2491,7 @@
           session = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, request_headers: resp.request_headers };
         }
       } catch(e) {}
-      if (isAudioOnly(streamTracks)) {
-        openAudioPlayer(name, tvgId, session);
-      } else {
-        openVideoPlayer(name, '/stream/' + streamID + '?profile=Browser', tvgId, session, undefined, undefined, streamTracks);
-      }
+      openVideoPlayer(name, '/stream/' + streamID + '?profile=Browser', tvgId, session, undefined, undefined, streamTracks);
     } finally {
       playInProgress = false;
       document.body.style.cursor = '';
@@ -2531,174 +2527,43 @@
     }
   }
 
-  function openAudioPlayer(title, tvgId, dvr) {
+  function openVideoPlayer(title, url, tvgId, dvr, channelID, probeUrl, streamTracks) {
     if (activePlayerCleanup) { activePlayerCleanup(); activePlayerCleanup = null; }
     const playerCtx = new AbortController();
     let pollInterval = null;
-
-    function cleanup() {
-      activePlayerCleanup = null;
-      playerCtx.abort();
-      if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-      audio.pause();
-      audio.removeAttribute('src');
-      audio.load();
-      if (dvr) {
-        api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(() => {});
-      }
-      overlay.remove();
-    }
-    activePlayerCleanup = cleanup;
-
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:center;justify-content:center;';
-    const modal = document.createElement('div');
-    modal.style.cssText = 'background:var(--bg-card);border-radius:12px;padding:24px;width:320px;text-align:center;';
-
-    var logoUrl = tvgId ? '/logo?url=' + encodeURIComponent(tvgId) : '';
-    var logoEl = document.createElement('div');
-    logoEl.style.cssText = 'width:80px;height:80px;border-radius:50%;background:var(--bg-input);margin:0 auto 16px;display:flex;align-items:center;justify-content:center;overflow:hidden;';
-    if (logoUrl) {
-      var img = document.createElement('img');
-      img.src = logoUrl;
-      img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-      img.onerror = function() { logoEl.innerHTML = '<span style="font-size:32px;color:#666;">&#9835;</span>'; };
-      logoEl.appendChild(img);
-    } else {
-      logoEl.innerHTML = '<span style="font-size:32px;color:#666;">&#9835;</span>';
-    }
-    modal.appendChild(logoEl);
-
-    var titleEl = document.createElement('h3');
-    titleEl.style.cssText = 'margin:0 0 16px;color:#e0e0e0;font-size:16px;';
-    titleEl.textContent = title;
-    modal.appendChild(titleEl);
-
-    var statusEl = document.createElement('div');
-    statusEl.style.cssText = 'color:#999;font-size:12px;margin-bottom:16px;';
-    statusEl.textContent = 'Connecting...';
-    modal.appendChild(statusEl);
-
-    var audio = document.createElement('audio');
-    audio.volume = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
-    audio.addEventListener('volumechange', function() { localStorage.setItem('tvproxy_volume', String(audio.volume)); });
-
-    var controlsRow = document.createElement('div');
-    controlsRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:12px;';
-
-    var playBtn = document.createElement('button');
-    playBtn.style.cssText = 'background:var(--accent);border:none;color:#fff;width:48px;height:48px;border-radius:50%;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;';
-    playBtn.innerHTML = '&#9654;';
-    playBtn.onclick = function() {
-      if (audio.paused) { audio.play().catch(function() {}); }
-      else { audio.pause(); }
-    };
-    audio.onplay = function() { playBtn.innerHTML = '&#9646;&#9646;'; statusEl.style.color = '#4caf50'; statusEl.textContent = 'Playing'; };
-    audio.onpause = function() { playBtn.innerHTML = '&#9654;'; };
-    audio.onerror = function() { statusEl.style.color = '#ff6b6b'; statusEl.textContent = 'Playback error'; };
-    audio.onwaiting = function() { statusEl.textContent = 'Buffering...'; };
-
-    var volSlider = document.createElement('input');
-    volSlider.type = 'range'; volSlider.min = '0'; volSlider.max = '1'; volSlider.step = '0.05';
-    volSlider.value = String(audio.volume);
-    volSlider.style.cssText = 'width:100px;height:6px;accent-color:var(--accent);';
-    volSlider.oninput = function() { audio.volume = parseFloat(volSlider.value); };
-    audio.addEventListener('volumechange', function() { volSlider.value = String(audio.volume); });
-
-    controlsRow.appendChild(playBtn);
-    controlsRow.appendChild(volSlider);
-    modal.appendChild(controlsRow);
-
-    var closeBtn = document.createElement('button');
-    closeBtn.className = 'btn btn-sm';
-    closeBtn.style.cssText = 'margin-top:16px;';
-    closeBtn.textContent = 'Close';
-    closeBtn.onclick = cleanup;
-    modal.appendChild(closeBtn);
-
-    overlay.appendChild(modal);
-    overlay.onclick = function(e) { if (e.target === overlay) cleanup(); };
-    document.body.appendChild(overlay);
-
-    if (dvr) {
-      audio.src = '/vod/' + dvr.id + '/stream';
-      audio.play().catch(function() {});
-
-      pollInterval = setInterval(async function() {
-        if (playerCtx.signal.aborted) { clearInterval(pollInterval); return; }
-        try {
-          var resp = await fetch('/vod/' + dvr.id + '/status', { signal: playerCtx.signal });
-          if (resp.status === 404) { clearInterval(pollInterval); statusEl.style.color = '#ff6b6b'; statusEl.textContent = 'Session ended'; return; }
-          if (!resp.ok) return;
-          var st = await resp.json();
-          if (st.error) { statusEl.style.color = '#ff6b6b'; statusEl.textContent = st.error; clearInterval(pollInterval); }
-        } catch(e) {}
-      }, 3000);
-    }
-  }
-
-  function openVideoPlayer(title, url, tvgId, dvr, channelID, probeUrl, streamTracks) {
-    if (activePlayerCleanup) { activePlayerCleanup(); activePlayerCleanup = null; }
-    let mpegtsPlayer = null;
-    let retryCount = 0;
-    const MAX_RETRIES = 3;
-    let retryTimeout = null;
-    let statsInterval = null;
     let progInterval = null;
-    let dvrPollInterval = null;
-    let dvrPosInterval = null;
     let signalInterval = null;
     let signalData = null;
     let satipStreamUrl = null;
     let nowProgram = null;
-    let currentContainer = '';
-    let currentCodec = '';
-    let stallTimeout = null;
     let isRecording = false;
     let pollFailures = 0;
-    let audioSelect = null;
     let currentAudioIndex = 0;
-    let profileSelect = null;
     let currentProfile = 'Browser';
     let probeData = null;
-    const playerCtx = new AbortController();
     let isLive = !!channelID || !dvr || !dvr.duration;
     const dvrTracker = dvr ? createDVRTracker(isLive, isLive ? 0 : dvr.duration) : null;
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
+    let retryTimeout = null;
+    let vjsPlayer = null;
+    const audioOnly = isAudioOnly(streamTracks);
 
-    function destroyPlayer() {
-      if (mpegtsPlayer) {
-        try { mpegtsPlayer.pause(); } catch(e) {}
-        try { mpegtsPlayer.unload(); } catch(e) {}
-        try { mpegtsPlayer.detachMediaElement(); } catch(e) {}
-        try { mpegtsPlayer.destroy(); } catch(e) {}
-        mpegtsPlayer = null;
-      }
-    }
-
-    function clearDvrIntervals() {
-      if (dvrPollInterval) { clearInterval(dvrPollInterval); dvrPollInterval = null; }
-      if (dvrPosInterval) { clearInterval(dvrPosInterval); dvrPosInterval = null; }
-      if (signalInterval) { clearInterval(signalInterval); signalInterval = null; }
-    }
 
     function cleanup() {
       activePlayerCleanup = null;
       playerCtx.abort();
       if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
-      if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
+      if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
       if (progInterval) { clearInterval(progInterval); progInterval = null; }
-      clearDvrIntervals();
-      if (stallTimeout) { clearTimeout(stallTimeout); stallTimeout = null; }
-      destroyPlayer();
-      document.removeEventListener('fullscreenchange', onFullscreenChange);
-      if (dvr && !isRecording) {
-        api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(() => {});
+      if (signalInterval) { clearInterval(signalInterval); signalInterval = null; }
+      if (vjsPlayer) {
+        vjsPlayer.dispose();
+        vjsPlayer = null;
       }
-      video.oncanplay = null;
-      video.onerror = null;
-      video.pause();
-      video.removeAttribute('src');
-      video.load();
+      if (dvr && !isRecording) {
+        api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(function() {});
+      }
       overlay.remove();
       if (channelID && state.currentPage === 'channels') {
         document.dispatchEvent(new CustomEvent('tvproxy-reload-page'));
@@ -2707,388 +2572,234 @@
     activePlayerCleanup = cleanup;
 
     function fmtTime(secs) {
-      const h = Math.floor(secs / 3600);
-      const m = Math.floor((secs % 3600) / 60);
-      const s = Math.floor(secs % 60);
-      return h > 0 ? h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')
-                    : m + ':' + String(s).padStart(2,'0');
+      var h = Math.floor(secs / 3600);
+      var m = Math.floor((secs % 3600) / 60);
+      var s = Math.floor(secs % 60);
+      return h > 0 ? h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+                    : m + ':' + String(s).padStart(2, '0');
     }
 
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:' + (window.innerWidth <= 768 ? 'flex-start' : 'center') + ';justify-content:center;' + (window.innerWidth <= 768 ? 'padding-top:env(safe-area-inset-top);' : '');
-    const modal = document.createElement('div');
-    modal.style.cssText = 'background:var(--bg-card);border-radius:8px;padding:' + (window.innerWidth <= 768 ? '10px' : '16px') + ';max-width:800px;width:' + (window.innerWidth <= 768 ? '100%' : '90%') + ';position:relative;max-height:95vh;overflow-y:auto;' + (window.innerWidth <= 768 ? 'border-radius:0;margin:0;' : '');
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:' + (window.innerWidth <= 768 ? 'flex-start' : 'center') + ';justify-content:center;' + (window.innerWidth <= 768 ? 'padding-top:env(safe-area-inset-top);' : '');
+    var modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--bg-card);border-radius:8px;padding:' + (window.innerWidth <= 768 ? '8px' : '12px') + ';max-width:800px;width:' + (window.innerWidth <= 768 ? '100%' : '90%') + ';position:relative;' + (window.innerWidth <= 768 ? 'border-radius:0;margin:0;' : '');
 
-    const header = document.createElement('div');
+    var header = document.createElement('div');
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
-    const titleEl = document.createElement('h3');
+    var titleEl = document.createElement('h3');
     titleEl.style.cssText = 'margin:0;color:#e0e0e0;font-size:16px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
     titleEl.textContent = title;
-    const hdrBtns = document.createElement('div');
-    hdrBtns.style.cssText = 'display:flex;gap:6px;flex-shrink:0;';
-    const recordBtn = document.createElement('button');
+    var hdrRight = document.createElement('div');
+    hdrRight.style.cssText = 'display:flex;gap:6px;flex-shrink:0;align-items:center;';
+
+    var recordBtn = document.createElement('button');
     recordBtn.className = 'btn btn-sm';
     recordBtn.title = 'Record';
-    recordBtn.style.cssText = 'padding:4px 8px;line-height:0;';
-    recordBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 215.11" width="24" height="10" fill="currentColor"><path fill-rule="nonzero" d="M0 83.78V41.11c0-11.31 4.62-21.6 12.06-29.05h.05C19.55 4.63 29.82 0 41.11 0h41.53v23.53H41.11c-4.84 0-9.24 1.98-12.43 5.15-3.17 3.21-5.15 7.61-5.15 12.43v42.67H0zm418.09 13.78h-20.34c-.14-1.7-.51-3.22-1.14-4.59-.61-1.37-1.45-2.56-2.52-3.55-1.07-1-2.35-1.77-3.87-2.31-1.51-.54-3.24-.81-5.17-.81-3.35 0-6.19.81-8.51 2.45-2.34 1.63-4.08 3.98-5.28 7.03-1.18 3.06-1.78 6.72-1.78 11 0 4.52.61 8.31 1.83 11.34 1.2 3.05 2.96 5.33 5.28 6.85 2.3 1.53 5.08 2.29 8.33 2.29 1.84 0 3.5-.22 4.97-.7 1.48-.47 2.75-1.15 3.83-2.05 1.08-.88 1.96-1.96 2.64-3.21.69-1.27 1.15-2.69 1.39-4.28l20.34.15c-.24 3.11-1.12 6.29-2.62 9.53-1.53 3.23-3.68 6.23-6.45 8.95-2.78 2.73-6.21 4.93-10.29 6.58-4.1 1.66-8.84 2.49-14.25 2.49-6.77 0-12.85-1.45-18.23-4.37-5.36-2.91-9.61-7.19-12.73-12.84-3.11-5.64-4.67-12.56-4.67-20.73 0-8.23 1.59-15.15 4.76-20.78 3.18-5.64 7.46-9.91 12.84-12.82 5.38-2.89 11.39-4.33 18.03-4.33 4.67 0 8.95.63 12.88 1.91 3.92 1.27 7.36 3.14 10.31 5.57 2.96 2.44 5.34 5.44 7.13 8.99 1.81 3.57 2.9 7.63 3.29 12.24zm-132.13 46.15V69.85h53.23v16.16h-33.17v12.7h30.43v16.14h-30.43v12.7h33.03v16.16h-53.09zm-67.79 0V69.85h31.88c5.49 0 10.27 1 14.39 3 4.11 2 7.31 4.87 9.59 8.61 2.29 3.76 3.42 8.26 3.42 13.49 0 5.3-1.16 9.75-3.52 13.38-2.33 3.63-5.62 6.37-9.83 8.23-4.23 1.84-9.14 2.78-14.77 2.78h-19.04v-15.59h15.01c2.35 0 4.36-.29 6.02-.88 1.68-.59 2.97-1.54 3.86-2.83.91-1.3 1.35-2.99 1.35-5.09 0-2.11-.44-3.84-1.35-5.16-.89-1.34-2.18-2.34-3.86-2.96-1.66-.65-3.67-.97-6.02-.97h-7.08v57.85h-20.05zm43.27-33.9 18.47 33.9h-21.78l-18.03-33.9h21.34zm-178.8 105.3H41.11c-11.29 0-21.58-4.63-29.03-12.08C4.64 195.59 0 185.31 0 174v-42.73h23.53V174c0 4.81 1.99 9.2 5.18 12.39 3.2 3.2 7.6 5.19 12.4 5.19h41.53v23.53zM488.47 83.78V41.11c0-4.82-1.98-9.22-5.17-12.41a17.464 17.464 0 0 0-12.41-5.17h-41.53V0h41.53c11.29 0 21.56 4.63 29 12.06h.05C507.38 19.51 512 29.8 512 41.11v42.67h-23.53zm-59.11 107.8h41.53c4.8 0 9.2-1.99 12.4-5.19 3.19-3.19 5.18-7.58 5.18-12.39v-42.73H512V174c0 11.31-4.64 21.59-12.08 29.03-7.45 7.45-17.74 12.08-29.03 12.08h-41.53v-23.53z"/><circle cx="138.03" cy="106.79" r="44.12"/></svg>';
-    const recDot = recordBtn.querySelector('circle');
-    let recFlash = null;
+    recordBtn.style.cssText = 'padding:4px 8px;line-height:1;font-size:12px;';
+    recordBtn.textContent = '\u23FA';
     function startRecordingUI() {
       isRecording = true;
-      recDot.setAttribute('fill', '#e53935');
+      recordBtn.style.color = '#e53935';
       recordBtn.title = 'Stop Recording';
-      recFlash = recDot.animate([{ opacity: 1 }, { opacity: 0.3 }, { opacity: 1 }], { duration: 1200, iterations: Infinity });
     }
     function stopRecordingUI() {
       isRecording = false;
-      recDot.removeAttribute('fill');
+      recordBtn.style.color = '';
       recordBtn.title = 'Record';
-      if (recFlash) { recFlash.cancel(); recFlash = null; }
     }
-    async function switchProfile(profileName) {
+    recordBtn.onclick = function() {
+      if (!dvr) return;
       if (isRecording) {
-        toast.error('Cannot switch profile while recording');
-        if (profileSelect) profileSelect.value = currentProfile;
-        return;
+        api.del('/vod/' + dvr.id + '/recording').then(function() { stopRecordingUI(); }).catch(function() {});
+      } else {
+        api.post('/vod/' + dvr.id + '/recording').then(function() { startRecordingUI(); }).catch(function() {});
       }
-      currentProfile = profileName;
-      isBrowserProfile = profileName === 'Browser';
-      audioSelect = null;
-      currentAudioIndex = 0;
-      destroyPlayer();
-      try {
-        await api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(function() {});
-        var resp;
-        if (channelID) {
-          resp = await fetch('/channel/' + channelID + '/vod?profile=' + encodeURIComponent(profileName), { method: 'POST' }).then(function(r) { return r.json(); });
-        } else {
-          var streamID = url.split('/stream/')[1];
-          if (streamID) streamID = streamID.split('/')[0].split('?')[0];
-          resp = await fetch('/stream/' + streamID + '/vod?profile=' + encodeURIComponent(profileName), { method: 'POST' }).then(function(r) { return r.json(); });
-        }
-        if (resp.session_id) {
-          dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
-          if (dvrTracker) dvrTracker.reset();
-        }
-      } catch(e) {
-        toast.error('Profile switch failed: ' + e.message);
-      }
-      startPlayback();
-    }
-
-    async function switchAudioTrack(trackIndex) {
-      if (isRecording) {
-        toast.error('Cannot switch audio while recording');
-        if (audioSelect) audioSelect.value = currentAudioIndex;
-        return;
-      }
-      currentAudioIndex = trackIndex;
-      destroyPlayer();
-      try {
-        await api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(function() {});
-        var audioParam = trackIndex > 0 ? '&audio=' + trackIndex : '';
-        var resp;
-        if (channelID) {
-          resp = await fetch('/channel/' + channelID + '/vod?profile=' + encodeURIComponent(currentProfile) + audioParam, { method: 'POST' }).then(function(r) { return r.json(); });
-        } else {
-          var streamID = url.split('/stream/')[1];
-          if (streamID) streamID = streamID.split('/')[0].split('?')[0];
-          resp = await fetch('/stream/' + streamID + '/vod?profile=' + encodeURIComponent(currentProfile) + audioParam, { method: 'POST' }).then(function(r) { return r.json(); });
-        }
-        if (resp.session_id) {
-          dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
-          if (dvrTracker) dvrTracker.reset();
-        }
-      } catch(e) {
-        toast.error('Audio switch failed: ' + e.message);
-      }
-      startPlayback();
-    }
-
-    recordBtn.onclick = async function() {
-      if (!channelID) return;
-      if (isRecording) {
-        try {
-          await api.del('/api/vod/record/' + channelID);
-          stopRecordingUI();
-        } catch(e) { toast.error('Stop recording failed: ' + e.message); }
-        return;
-      }
-      var body = { program_title: nowProgram ? nowProgram.title : title, channel_name: title };
-      if (nowProgram && nowProgram.stop) body.stop_at = new Date(nowProgram.stop).toISOString();
-      try {
-        await api.post('/api/vod/record/' + channelID, body);
-        startRecordingUI();
-      } catch(e) { toast.error('Record failed: ' + e.message); }
     };
-    if (!channelID) recordBtn.style.display = 'none';
-    const statsBtn = document.createElement('button');
-    statsBtn.className = 'btn btn-sm'; statsBtn.title = 'Toggle stream statistics';
-    statsBtn.style.cssText = 'padding:4px 8px;line-height:0;';
-    statsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 294 294" width="14" height="14" fill="currentColor"><path d="M279,250H15c-8.284,0-15,6.716-15,15s6.716,15,15,15h264c8.284,0,15-6.716,15-15S287.284,250,279,250z"/><path d="M30.5,228h47c5.247,0,9.5-4.253,9.5-9.5v-130c0-5.247-4.253-9.5-9.5-9.5h-47c-5.247,0-9.5,4.253-9.5,9.5v130C21,223.747,25.253,228,30.5,228z"/><path d="M123.5,228h47c5.247,0,9.5-4.253,9.5-9.5v-195c0-5.247-4.253-9.5-9.5-9.5h-47c-5.247,0-9.5,4.253-9.5,9.5v195C114,223.747,118.253,228,123.5,228z"/><path d="M216.5,228h47c5.247,0,9.5-4.253,9.5-9.5v-105c0-5.247-4.253-9.5-9.5-9.5h-47c-5.247,0-9.5,4.253-9.5,9.5v105C207,223.747,211.253,228,216.5,228z"/></svg>';
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'btn btn-danger btn-sm btn-icon-circle'; closeBtn.textContent = '\u2715'; closeBtn.title = 'Close'; closeBtn.onclick = cleanup;
-    if (dvr) {
-      api.get('/api/settings').then(function(allSettings) {
-        var enabled = false;
-        if (Array.isArray(allSettings)) {
-          allSettings.forEach(function(s) {
-            if (s.key === 'vod_profile_selector' && s.value === 'true') enabled = true;
-          });
-        }
-        if (!enabled) return;
-        profileSelect = document.createElement('select');
-        profileSelect.className = 'btn btn-sm';
-        profileSelect.title = 'Stream Profile';
-        profileSelect.style.cssText = 'padding:2px 6px;font-size:12px;background:var(--bg-card);color:#e0e0e0;border:1px solid var(--border);border-radius:4px;cursor:pointer;max-width:140px;';
-        var defaultOpt = document.createElement('option');
-        defaultOpt.value = 'Browser';
-        defaultOpt.textContent = 'Browser';
-        profileSelect.appendChild(defaultOpt);
-        profileSelect.value = currentProfile;
-        profileSelect.onchange = function() { switchProfile(profileSelect.value); };
-        hdrBtns.insertBefore(profileSelect, recordBtn);
-        return api.get('/api/stream-profiles');
-      }).then(function(profiles) {
-        if (!profileSelect || !Array.isArray(profiles)) return;
-        profileSelect.innerHTML = '';
-        profiles.forEach(function(p) {
-          if (p.is_system && p.name === 'Direct') return;
-          var opt = document.createElement('option');
-          opt.value = p.name;
-          opt.textContent = p.name;
-          profileSelect.appendChild(opt);
-        });
-        profileSelect.value = currentProfile;
-      }).catch(function() {});
-    }
-    hdrBtns.appendChild(recordBtn);
-    hdrBtns.appendChild(statsBtn);
-    hdrBtns.appendChild(closeBtn);
 
-    if (streamTracks) {
-      var scanAudioTracks = streamTracks.filter(function(t) { return t.category === 'audio'; });
-      if (scanAudioTracks.length > 1) {
-        audioSelect = document.createElement('select');
-        audioSelect.className = 'btn btn-sm';
-        audioSelect.title = 'Audio Track';
-        audioSelect.style.cssText = 'padding:2px 6px;font-size:12px;background:var(--bg-card);color:#e0e0e0;border:1px solid var(--border);border-radius:4px;cursor:pointer;max-width:140px;';
-        scanAudioTracks.forEach(function(t, idx) {
-          var opt = document.createElement('option');
-          opt.value = idx;
-          var label = t.label || (t.language ? t.language.toUpperCase() : 'Track ' + (idx + 1));
-          if (t.audio_type === 3) label += ' [AD]';
-          else if (t.audio_type === 2) label += ' [HI]';
-          opt.textContent = label;
-          audioSelect.appendChild(opt);
-        });
-        currentAudioIndex = defaultAudioIndex(streamTracks);
-        audioSelect.value = currentAudioIndex;
-        audioSelect.onchange = function() { switchAudioTrack(parseInt(audioSelect.value, 10)); };
-        hdrBtns.insertBefore(audioSelect, recordBtn);
-      }
-    }
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'btn btn-sm';
+    closeBtn.style.cssText = 'padding:4px 8px;font-size:14px;line-height:1;';
+    closeBtn.textContent = '\u2715';
+    closeBtn.title = 'Close';
+    closeBtn.onclick = cleanup;
 
+    hdrRight.appendChild(recordBtn);
+    hdrRight.appendChild(closeBtn);
     header.appendChild(titleEl);
-    header.appendChild(hdrBtns);
+    header.appendChild(hdrRight);
     modal.appendChild(header);
 
-    const videoWrap = document.createElement('div');
-    videoWrap.style.cssText = 'position:relative;background:#000;border-radius:4px;overflow:hidden;';
-    const video = document.createElement('video');
-    video.style.cssText = 'width:100%;max-height:' + (window.innerWidth <= 768 ? '35vh' : '450px') + ';display:block;';
-    video.autoplay = true;
-    video.volume = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
-    video.addEventListener('volumechange', () => localStorage.setItem('tvproxy_volume', video.volume));
+    var playerWrap = document.createElement('div');
+    playerWrap.style.cssText = 'position:relative;background:#000;border-radius:4px;overflow:hidden;';
+    var videoEl = document.createElement('video');
+    videoEl.id = 'tvproxy-vjs-' + Date.now();
+    videoEl.className = 'video-js vjs-big-play-centered vjs-fluid';
+    if (audioOnly) videoEl.classList.add('vjs-audio');
+    videoEl.setAttribute('playsinline', '');
+    playerWrap.appendChild(videoEl);
+    modal.appendChild(playerWrap);
 
-    const statsOverlay = document.createElement('div');
-    statsOverlay.style.cssText = 'display:none;position:absolute;top:8px;left:8px;background:rgba(0,0,0,0.75);color:#fff;padding:8px 10px;border-radius:6px;font-size:11px;font-family:monospace;pointer-events:none;line-height:1.6;z-index:10;';
-    statsBtn.onclick = () => { statsOverlay.style.display = statsOverlay.style.display === 'none' ? 'block' : 'none'; };
-
-    videoWrap.appendChild(video);
-    videoWrap.appendChild(statsOverlay);
-    modal.appendChild(videoWrap);
-
-    const controls = document.createElement('div');
-    controls.style.cssText = 'background:var(--bg-card);padding:6px 0 0;';
-
-    const seekOuter = document.createElement('div');
-    seekOuter.style.cssText = 'height:6px;background:var(--border);border-radius:3px;cursor:pointer;position:relative;margin-top:20px;margin-bottom:6px;';
-    const seekBuf = document.createElement('div');
-    seekBuf.style.cssText = 'height:100%;background:rgba(76,175,80,0.3);border-radius:3px;width:0%;position:absolute;top:0;left:0;transition:width 1s linear;';
-    const seekPos = document.createElement('div');
-    seekPos.style.cssText = 'height:100%;background:var(--accent);border-radius:3px;width:0%;position:absolute;top:0;left:0;';
-    const epgMarker = document.createElement('div');
-    epgMarker.style.cssText = 'display:none;position:absolute;top:-2px;bottom:-2px;width:2px;background:#ffa726;border-radius:1px;z-index:2;pointer-events:none;';
-    seekOuter.appendChild(seekBuf);
-    seekOuter.appendChild(seekPos);
-    seekOuter.appendChild(epgMarker);
-    controls.appendChild(seekOuter);
-
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;color:#ccc;';
-
-    const playPauseBtn = document.createElement('button');
-    playPauseBtn.style.cssText = 'background:none;border:none;color:#ccc;font-size:16px;cursor:pointer;padding:0 2px;line-height:1;';
-    playPauseBtn.innerHTML = '&#9646;&#9646;';
-    playPauseBtn.onclick = () => {
-      if (video.paused) {
-        if (video.readyState < 2) {
-          retryCount = 0;
-          startPlayback();
-        } else {
-          video.play();
-        }
-      } else {
-        video.pause();
-      }
-    };
-    video.onpause = () => { playPauseBtn.innerHTML = '&#9654;'; };
-    video.onplay = () => { playPauseBtn.innerHTML = '&#9646;&#9646;'; };
-
-    const timeLabel = document.createElement('span');
-    timeLabel.style.cssText = 'font-family:monospace;font-size:11px;min-width:80px;';
-    timeLabel.textContent = '0:00';
-
-    const spacer = document.createElement('div');
-    spacer.style.cssText = 'flex:1;';
-
-    const liveBadge = document.createElement('span');
-    liveBadge.style.cssText = 'display:none;background:#e53935;color:#fff;font-size:10px;font-weight:bold;padding:1px 6px;border-radius:3px;cursor:pointer;';
-    liveBadge.textContent = 'LIVE';
-    liveBadge.title = 'Jump to live';
-
-    const volWrap = document.createElement('div');
-    volWrap.style.cssText = 'display:flex;align-items:center;gap:4px;';
-    const volIcon = document.createElement('span');
-    volIcon.style.cssText = 'font-size:14px;cursor:pointer;';
-    volIcon.textContent = '\u{1F50A}';
-    let savedVol = video.volume;
-    volIcon.onclick = () => {
-      if (video.volume > 0) { savedVol = video.volume; video.volume = 0; volIcon.textContent = '\u{1F507}'; }
-      else { video.volume = savedVol || 0.5; volIcon.textContent = '\u{1F50A}'; }
-    };
-    const volSlider = document.createElement('input');
-    volSlider.type = 'range'; volSlider.min = '0'; volSlider.max = '1'; volSlider.step = '0.05';
-    volSlider.value = video.volume;
-    volSlider.style.cssText = 'width:' + (window.innerWidth <= 768 ? '80px' : '60px') + ';height:' + (window.innerWidth <= 768 ? '6px' : '4px') + ';accent-color:var(--accent);';
-    volSlider.oninput = () => {
-      video.volume = parseFloat(volSlider.value);
-      volIcon.textContent = video.volume > 0 ? '\u{1F50A}' : '\u{1F507}';
-    };
-    video.addEventListener('volumechange', () => { volSlider.value = video.volume; });
-    volWrap.appendChild(volIcon);
-    volWrap.appendChild(volSlider);
-
-    const fsBtn = document.createElement('button');
-    fsBtn.style.cssText = 'background:none;border:none;color:#ccc;font-size:14px;cursor:pointer;padding:0 2px;';
-    fsBtn.innerHTML = '&#x26F6;';
-    fsBtn.title = 'Fullscreen';
-    fsBtn.onclick = () => {
-      if (document.fullscreenElement) document.exitFullscreen();
-      else videoWrap.requestFullscreen().catch(() => {});
-    };
-    function onFullscreenChange() {
-      if (document.fullscreenElement === videoWrap) {
-        video.style.maxHeight = '100vh';
-        videoWrap.style.borderRadius = '0';
-      } else {
-        video.style.maxHeight = window.innerWidth <= 768 ? '35vh' : '450px';
-        videoWrap.style.borderRadius = '4px';
-      }
-    }
-    document.addEventListener('fullscreenchange', onFullscreenChange);
-
-    btnRow.appendChild(playPauseBtn);
-    btnRow.appendChild(timeLabel);
-    btnRow.appendChild(spacer);
-    btnRow.appendChild(liveBadge);
-    btnRow.appendChild(volWrap);
-    btnRow.appendChild(fsBtn);
-    controls.appendChild(btnRow);
-    modal.appendChild(controls);
-
-    const statusEl = document.createElement('div');
+    var statusEl = document.createElement('div');
     statusEl.style.cssText = 'color:#999;font-size:12px;margin-top:6px;';
+    statusEl.textContent = 'Connecting...';
     modal.appendChild(statusEl);
 
     overlay.appendChild(modal);
-    overlay.onclick = (e) => { if (e.target === overlay) cleanup(); };
+    overlay.onclick = function(e) { if (e.target === overlay) cleanup(); };
     document.body.appendChild(overlay);
 
-    seekOuter.onclick = (e) => {
-      if (dvrTracker) return;
-      const rect = seekOuter.getBoundingClientRect();
-      if (rect.width === 0) return;
-      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      if (video.duration && isFinite(video.duration)) {
-        video.currentTime = pct * video.duration;
-      }
-    };
-
-    liveBadge.onclick = () => {
-      if (!dvr) return;
-      videoWrap.style.minHeight = videoWrap.offsetHeight + 'px';
-      destroyPlayer();
-      video.pause();
-      video.removeAttribute('src');
-      dvrTracker.reset();
-      video.src = '/vod/' + dvr.id + '/stream';
-      video.oncanplay = () => {
-        videoWrap.style.minHeight = '';
-        statusEl.style.color = '#4caf50';
-        currentContainer = 'fMP4';
-        updateStatusText();
-        if (channelID) api.del('/api/channels/' + channelID + '/fail').catch(() => {});
-      };
-      video.play().catch(() => {});
-    };
-
-    function getEpgTiming() {
-      if (!nowProgram || !nowProgram.start || !nowProgram.stop) return null;
-      const start = new Date(nowProgram.start).getTime();
-      const stop = new Date(nowProgram.stop).getTime();
-      const dur = (stop - start) / 1000;
-      if (dur <= 0) return null;
-      const elapsed = (Date.now() - start) / 1000;
-      return { duration: dur, elapsed: Math.max(0, Math.min(dur, elapsed)) };
+    var isBrowserProfile = url.includes('profile=Browser');
+    var useHLS = isBrowserProfile && dvr && (dvr.container === 'hls' || (/iPhone|iPad/.test(navigator.userAgent) || (/Safari\//.test(navigator.userAgent) && !/Chrome\//.test(navigator.userAgent))));
+    var streamSrc = '';
+    if (isBrowserProfile && dvr) {
+      streamSrc = useHLS ? '/vod/' + dvr.id + '/hls/live.m3u8' : '/vod/' + dvr.id + '/stream';
+    } else {
+      streamSrc = dvr ? '/vod/' + dvr.id + '/stream' : url;
     }
 
-    if (dvr && dvrTracker) {
-      dvrPollInterval = setInterval(async () => {
-        if (playerCtx.signal.aborted) { clearDvrIntervals(); return; }
+    var savedVol = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
+    vjsPlayer = videojs(videoEl.id, {
+      controls: true,
+      autoplay: true,
+      preload: 'auto',
+      fluid: !audioOnly,
+      aspectRatio: audioOnly ? undefined : '16:9',
+      audioOnlyMode: audioOnly,
+      liveui: isLive,
+      html5: {
+        vhs: { overrideNative: true },
+        nativeAudioTracks: false,
+        nativeVideoTracks: false
+      },
+      controlBar: {
+        volumePanel: { inline: true },
+        pictureInPictureToggle: false
+      }
+    });
+    vjsPlayer.volume(savedVol);
+    vjsPlayer.on('volumechange', function() { localStorage.setItem('tvproxy_volume', String(vjsPlayer.volume())); });
+
+    vjsPlayer.src({ src: streamSrc, type: useHLS ? 'application/x-mpegURL' : 'video/mp4' });
+
+    vjsPlayer.on('playing', function() {
+      retryCount = 0;
+      statusEl.style.color = '#4caf50';
+      updateStatusText();
+      if (channelID) api.del('/api/channels/' + channelID + '/fail').catch(function() {});
+    });
+    vjsPlayer.on('waiting', function() {
+      statusEl.style.color = '#ffa726';
+      statusEl.textContent = 'Buffering...';
+    });
+    vjsPlayer.on('error', function() {
+      if (channelID) api.post('/api/channels/' + channelID + '/fail').catch(function() {});
+      handleRetry();
+    });
+
+    function handleRetry() {
+      if (playerCtx.signal.aborted) return;
+      if (retryCount >= MAX_RETRIES) {
+        statusEl.style.color = '#ff6b6b';
+        statusEl.textContent = 'Source unavailable. ';
+        var retryLink = document.createElement('a');
+        retryLink.textContent = 'Retry';
+        retryLink.href = '#';
+        retryLink.style.cssText = 'color:#4fc3f7;cursor:pointer;text-decoration:underline;';
+        retryLink.onclick = function(e) { e.preventDefault(); retryCount = 0; restartPlayback(); };
+        statusEl.appendChild(retryLink);
+        return;
+      }
+      retryCount++;
+      statusEl.style.color = '#ffa726';
+      statusEl.textContent = 'Retrying... (' + retryCount + '/' + MAX_RETRIES + ')';
+      if (dvr && channelID) {
+        retryTimeout = setTimeout(async function() {
+          try {
+            await api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(function() {});
+            var audioParam = currentAudioIndex > 0 ? '&audio=' + currentAudioIndex : '';
+            var resp = await fetch('/channel/' + channelID + '/vod?profile=' + encodeURIComponent(currentProfile) + audioParam, { method: 'POST' }).then(function(r) { return r.json(); });
+            if (resp.session_id) {
+              dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
+              if (dvrTracker) dvrTracker.reset();
+              streamSrc = '/vod/' + dvr.id + '/stream';
+            }
+          } catch(e) {}
+          restartPlayback();
+        }, 2000);
+      } else {
+        retryTimeout = setTimeout(restartPlayback, 2000);
+      }
+    }
+
+    function restartPlayback() {
+      if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
+      if (vjsPlayer) {
+        vjsPlayer.src({ src: streamSrc, type: useHLS ? 'application/x-mpegURL' : 'video/mp4' });
+        vjsPlayer.play().catch(function() {});
+      }
+    }
+
+    function formatTime(d) {
+      return new Date(d).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    }
+
+    function buildStatusSuffix() {
+      if (!nowProgram) return '';
+      var suffix = ' \u2014 ' + nowProgram.title;
+      if (nowProgram.start && nowProgram.stop) {
+        suffix += ' (' + formatTime(nowProgram.start) + ' - ' + formatTime(nowProgram.stop) + ')';
+      }
+      return suffix;
+    }
+
+    function updateStatusText() {
+      var container = useHLS ? 'HLS' : 'fMP4';
+      statusEl.textContent = 'Playing (' + container + ')' + buildStatusSuffix();
+    }
+
+    function fetchNowPlaying() {
+      if (!tvgId || playerCtx.signal.aborted) return;
+      api.get('/api/epg/now?channel_id=' + encodeURIComponent(tvgId)).then(function(program) {
+        if (program && program.title) {
+          nowProgram = program;
+          updateStatusText();
+        }
+      }).catch(function() {});
+    }
+
+    fetchNowPlaying();
+    if (tvgId) {
+      progInterval = setInterval(fetchNowPlaying, 60000);
+    }
+
+    if (dvr) {
+      pollInterval = setInterval(async function() {
+        if (playerCtx.signal.aborted) { clearInterval(pollInterval); return; }
         try {
-          const resp = await fetch('/vod/' + dvr.id + '/status', { signal: playerCtx.signal });
+          var resp = await fetch('/vod/' + dvr.id + '/status', { signal: playerCtx.signal });
           if (resp.status === 404) {
-            clearDvrIntervals();
+            clearInterval(pollInterval);
             statusEl.style.color = '#ff6b6b';
             statusEl.textContent = 'Session ended';
             return;
           }
-          if (!resp.ok) {
-            pollFailures++;
-            if (pollFailures >= 3) {
-              clearDvrIntervals();
-            }
-            return;
-          }
+          if (!resp.ok) { pollFailures++; if (pollFailures >= 3) clearInterval(pollInterval); return; }
           pollFailures = 0;
-          const st = await resp.json();
+          var st = await resp.json();
           if (st.error && !st.recording) {
             statusEl.style.color = '#ff6b6b';
             statusEl.textContent = 'Source failed: ' + st.error;
-            clearDvrIntervals();
+            clearInterval(pollInterval);
             return;
           }
-          dvrTracker.updateBuffered(st.buffered);
+          if (dvrTracker) dvrTracker.updateBuffered(st.buffered);
           if (isLive && st.duration > 0 && !channelID) {
             isLive = false;
-            dvrTracker.setDuration(st.duration);
+            if (dvrTracker) dvrTracker.setDuration(st.duration);
             dvr.duration = st.duration;
           }
           if (st.profile && st.profile !== currentProfile) {
             currentProfile = st.profile;
-            if (profileSelect) profileSelect.value = currentProfile;
           }
           if (st.recording && !isRecording) {
             startRecordingUI();
@@ -3100,349 +2811,27 @@
           }
           if (st.stream_url && st.stream_url.startsWith('rtsp://') && !signalInterval) {
             satipStreamUrl = st.stream_url;
-            const pollSignal = async () => {
+            var pollSignal = async function() {
               if (playerCtx.signal.aborted || !satipStreamUrl) return;
-              try {
-                signalData = await api.get('/api/satip/signal?url=' + encodeURIComponent(satipStreamUrl));
-              } catch(e) {}
+              try { signalData = await api.get('/api/satip/signal?url=' + encodeURIComponent(satipStreamUrl)); } catch(e) {}
             };
             pollSignal();
             signalInterval = setInterval(pollSignal, 5000);
           }
-          if (st.audio_tracks && st.audio_tracks.length > 1 && !audioSelect) {
-            audioSelect = document.createElement('select');
-            audioSelect.className = 'btn btn-sm';
-            audioSelect.title = 'Audio Track';
-            audioSelect.style.cssText = 'padding:2px 6px;font-size:12px;background:var(--bg-card);color:#e0e0e0;border:1px solid var(--border);border-radius:4px;cursor:pointer;max-width:120px;';
-            st.audio_tracks.forEach(function(t) {
-              var opt = document.createElement('option');
-              opt.value = t.index;
-              var label = t.language ? t.language.toUpperCase() : 'Track ' + (t.index + 1);
-              if (t.codec) label += ' (' + t.codec + ')';
-              opt.textContent = label;
-              audioSelect.appendChild(opt);
-            });
-            audioSelect.value = st.audio_index || 0;
-            currentAudioIndex = st.audio_index || 0;
-            audioSelect.onchange = function() { switchAudioTrack(parseInt(audioSelect.value, 10)); };
-            hdrBtns.insertBefore(audioSelect, recordBtn);
-          }
-          var buf = st.buffered;
-          const epg = getEpgTiming();
-          if (isLive && epg) {
-            const bufStartPct = Math.max(0, ((epg.elapsed - buf) / epg.duration) * 100);
-            const bufWidthPct = Math.min(100 - bufStartPct, (buf / epg.duration) * 100);
-            seekBuf.style.left = bufStartPct + '%';
-            seekBuf.style.width = bufWidthPct + '%';
-            epgMarker.style.display = 'block';
-            epgMarker.style.left = Math.min(100, (epg.elapsed / epg.duration) * 100) + '%';
-          } else if (!isLive) {
-            seekBuf.style.left = '0%';
-            epgMarker.style.display = 'none';
-            const total = dvr.duration || buf;
-            if (total > 0) seekBuf.style.width = Math.min(100, (buf / total) * 100) + '%';
-            if (st.ready) {
-              seekBuf.style.width = '100%';
-              seekBuf.style.background = 'rgba(76,175,80,0.5)';
-            }
-          } else {
-            seekBuf.style.left = '0%';
-            seekBuf.style.width = '100%';
-            epgMarker.style.display = 'none';
-          }
         } catch(e) {
-          if (e.name === 'AbortError' || playerCtx.signal.aborted) {
-            clearDvrIntervals();
-            return;
-          }
+          if (e.name === 'AbortError' || playerCtx.signal.aborted) { clearInterval(pollInterval); return; }
           pollFailures++;
-          if (pollFailures >= 3) {
-            clearDvrIntervals();
-          }
+          if (pollFailures >= 3) clearInterval(pollInterval);
         }
       }, 2000);
-
-      dvrPosInterval = setInterval(() => {
-        if (playerCtx.signal.aborted) { clearDvrIntervals(); return; }
-        if (!video) return;
-        var d = dvrTracker.getDisplay(video.currentTime);
-        const epg = getEpgTiming();
-
-        if (isLive && epg) {
-          const viewerProgPos = epg.elapsed - dvrTracker.getBuffered() + d.pos;
-          seekPos.style.width = Math.min(100, Math.max(0, (viewerProgPos / epg.duration) * 100)) + '%';
-          const progRemain = Math.max(0, epg.duration - viewerProgPos);
-          timeLabel.textContent = fmtTime(viewerProgPos) + ' / ' + fmtTime(epg.duration) + ' (' + fmtTime(progRemain) + ' left)';
-          liveBadge.style.display = 'inline-block';
-        } else if (isLive) {
-          seekPos.style.width = d.pct + '%';
-          timeLabel.textContent = fmtTime(d.pos) + ' / ' + fmtTime(d.total);
-          liveBadge.style.display = 'inline-block';
-        } else {
-          seekPos.style.width = d.pct + '%';
-          timeLabel.textContent = fmtTime(d.pos) + ' / ' + fmtTime(d.total);
-        }
-      }, 500);
-    } else {
-      dvrPosInterval = setInterval(() => {
-        if (playerCtx.signal.aborted) { clearDvrIntervals(); return; }
-        if (!video || !video.duration || !isFinite(video.duration)) return;
-        var pct = (video.currentTime / video.duration) * 100;
-        seekPos.style.width = pct + '%';
-        seekBuf.style.width = '100%';
-        timeLabel.textContent = fmtTime(video.currentTime) + ' / ' + fmtTime(video.duration);
-      }, 500);
     }
-
-    function updateStats() {
-      if (playerCtx.signal.aborted) return;
-      var lines = [];
-      var res = (video.videoWidth && video.videoHeight) ? video.videoWidth + 'x' + video.videoHeight : null;
-      var buf = video.buffered.length > 0 ? (video.buffered.end(0) - video.currentTime).toFixed(1) + 's' : '0s';
-      var vi = probeData && probeData.video ? probeData.video : null;
-      var at = probeData && probeData.audio_tracks ? probeData.audio_tracks : [];
-      var activeAudio = at.length > 0 ? at[currentAudioIndex] || at[0] : null;
-
-      if (mpegtsPlayer && mpegtsPlayer.statisticsInfo) {
-        var stats = mpegtsPlayer.statisticsInfo;
-        var mi = mpegtsPlayer.mediaInfo || {};
-        lines.push('Resolution: ' + esc(res || '?'));
-        lines.push('Video: ' + esc(codecName(mi.videoCodec)) + (vi && vi.profile ? ' (' + esc(vi.profile) + ')' : ''));
-        lines.push('FPS: ' + esc('' + (vi && vi.fps ? vi.fps : (mi.fps || '?'))));
-        lines.push('Audio: ' + esc(codecName(mi.audioCodec)) + (activeAudio && activeAudio.language ? ' [' + esc(activeAudio.language) + ']' : ''));
-        if (activeAudio && activeAudio.channels) lines.push('Channels: ' + esc('' + activeAudio.channels) + 'ch' + (activeAudio.sample_rate ? ' @ ' + esc('' + activeAudio.sample_rate) + ' Hz' : ''));
-        if (vi && vi.color_space && vi.color_space !== 'unknown') lines.push('Color: ' + esc(vi.color_space) + (vi.color_transfer && vi.color_transfer !== 'unknown' ? '/' + esc(vi.color_transfer) : ''));
-        if (vi && vi.pix_fmt) lines.push('Pixel: ' + esc(vi.pix_fmt));
-        if (vi && vi.field_order && vi.field_order !== 'unknown' && vi.field_order !== 'progressive') lines.push('Scan: ' + esc(vi.field_order));
-        lines.push('Container: ' + esc(currentContainer || '?'));
-        lines.push('Buffer: ' + esc(buf));
-        lines.push('Speed: ' + (stats.speed != null ? (stats.speed / 1024).toFixed(2) + ' MB/s' : '?'));
-        lines.push('Dropped: ' + (stats.droppedFrames != null ? stats.droppedFrames : '?'));
-      } else {
-        lines.push('Resolution: ' + esc(res || (vi ? vi.codec : '?')));
-        if (vi) {
-          lines.push('Video: ' + esc(vi.codec) + (vi.profile ? ' (' + esc(vi.profile) + ')' : ''));
-          if (vi.fps) lines.push('FPS: ' + esc('' + vi.fps));
-          if (vi.bit_rate) lines.push('Video BR: ' + (parseInt(vi.bit_rate) / 1000).toFixed(0) + ' kbps');
-        }
-        if (activeAudio) {
-          lines.push('Audio: ' + esc(activeAudio.codec) + (activeAudio.language ? ' [' + esc(activeAudio.language) + ']' : '') + (activeAudio.profile ? ' (' + esc(activeAudio.profile) + ')' : ''));
-          if (activeAudio.channels) lines.push('Channels: ' + esc('' + activeAudio.channels) + 'ch' + (activeAudio.sample_rate ? ' @ ' + esc('' + activeAudio.sample_rate) + ' Hz' : ''));
-          if (activeAudio.bit_rate) lines.push('Audio BR: ' + (parseInt(activeAudio.bit_rate) / 1000).toFixed(0) + ' kbps');
-        }
-        if (vi && vi.color_space && vi.color_space !== 'unknown') lines.push('Color: ' + esc(vi.color_space) + (vi.color_transfer && vi.color_transfer !== 'unknown' ? '/' + esc(vi.color_transfer) : '') + (vi.color_primaries && vi.color_primaries !== 'unknown' ? '/' + esc(vi.color_primaries) : ''));
-        if (vi && vi.pix_fmt) lines.push('Pixel: ' + esc(vi.pix_fmt));
-        if (vi && vi.field_order && vi.field_order !== 'unknown' && vi.field_order !== 'progressive') lines.push('Scan: ' + esc(vi.field_order));
-        lines.push('Container: ' + esc(currentContainer || '?'));
-        lines.push('Buffer: ' + esc(buf));
-      }
-      if (probeData) lines.push('Duration: ' + (probeData.duration > 0 ? fmtTime(probeData.duration) : '\u221E'));
-      if (probeData && probeData.profile) lines.push('Profile: ' + esc(probeData.profile));
-      if (signalData) {
-        lines.push('');
-        var lockColor = signalData.lock ? '#4caf50' : '#ff6b6b';
-        var lvl = signalData.level_pct;
-        var qlt = signalData.quality_pct;
-        var lvlColor = lvl > 60 ? '#4caf50' : lvl > 30 ? '#ffb300' : '#ff6b6b';
-        var qltColor = qlt > 60 ? '#4caf50' : qlt > 30 ? '#ffb300' : '#ff6b6b';
-        function sigBar(pct, color) {
-          return '<span style="display:inline-block;width:60px;height:6px;background:#333;vertical-align:middle;border-radius:3px">'
-            + '<span style="display:block;width:' + pct + '%;height:100%;background:' + color + ';border-radius:3px"></span></span>';
-        }
-        lines.push('<b>SAT\u003eIP Signal</b>');
-        var tunerLabel = signalData.fe_id ? 'FE' + signalData.fe_id + ' — ' : '';
-        lines.push('Tuner: ' + esc(tunerLabel) + '<span style="color:' + lockColor + '">' + (signalData.lock ? 'Locked' : 'No Lock') + '</span>' + (signalData.active ? '' : ' <span style="color:#999">(idle)</span>'));
-        lines.push('Level: <span style="color:' + lvlColor + '">' + lvl + '%</span> ' + sigBar(lvl, lvlColor));
-        lines.push('Quality: <span style="color:' + qltColor + '">' + qlt + '%</span> ' + sigBar(qlt, qltColor));
-        if (signalData.ber != null) lines.push('BER: ' + signalData.ber);
-        if (signalData.freq_mhz) lines.push('Freq: ' + signalData.freq_mhz + ' MHz' + (signalData.bw_mhz ? ' / ' + signalData.bw_mhz + ' MHz' : ''));
-        if (signalData.msys) lines.push('System: ' + esc(signalData.msys.toUpperCase()) + (signalData.mtype ? ' ' + esc(signalData.mtype.toUpperCase()) : ''));
-        if (signalData.bitrate_kbps) lines.push('TS Bitrate: ' + (signalData.bitrate_kbps / 1000).toFixed(1) + ' Mbps');
-        if (signalData.server) lines.push('Server: ' + esc(signalData.server));
-      }
-      if (dvr && dvr.request_headers) {
-        lines.push('');
-        lines.push('<b>Request Headers</b>');
-        Object.keys(dvr.request_headers).sort().forEach(function(k) {
-          lines.push(esc(k) + ': ' + esc(dvr.request_headers[k]));
-        });
-      }
-      statsOverlay.innerHTML = lines.join('<br>');
-    }
-
-    function formatTime(d) {
-      return new Date(d).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    }
-
-    function buildStatusSuffix() {
-      if (!nowProgram) return '';
-      let suffix = ' \u2014 ' + nowProgram.title;
-      if (nowProgram.start && nowProgram.stop) {
-        suffix += ' (' + formatTime(nowProgram.start) + ' - ' + formatTime(nowProgram.stop) + ')';
-      }
-      return suffix;
-    }
-
-    function updateStatusText() {
-      let codecInfo = '';
-      if (currentCodec) {
-        codecInfo = currentContainer ? '(' + currentCodec + '/' + currentContainer + ')' : '(' + currentCodec + ')';
-      } else if (currentContainer) {
-        codecInfo = '(' + currentContainer + ')';
-      }
-      statusEl.textContent = 'Playing' + (codecInfo ? ' ' + codecInfo : '') + buildStatusSuffix();
-    }
-
-    function fetchNowPlaying() {
-      if (!tvgId || playerCtx.signal.aborted) return;
-      api.get('/api/epg/now?channel_id=' + encodeURIComponent(tvgId)).then(program => {
-        if (program && program.title) {
-          nowProgram = program;
-          updateStatusText();
-        }
-      }).catch(() => {});
-    }
-
-    fetchNowPlaying();
-    if (tvgId) {
-      progInterval = setInterval(fetchNowPlaying, 60000);
-    }
-
-    let isBrowserProfile = url.includes('profile=Browser');
-
-    function startPlayback() {
-      destroyPlayer();
-      if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
-      if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
-      currentContainer = '';
-      currentCodec = '';
-      nowProgram = null;
-      video.removeAttribute('src');
-
-      var useHLS = isBrowserProfile && dvr && (dvr.container === 'hls' || (/iPhone|iPad/.test(navigator.userAgent) || (/Safari\//.test(navigator.userAgent) && !/Chrome\//.test(navigator.userAgent))));
-
-      if (isBrowserProfile) {
-        statusEl.style.color = '#999';
-        statusEl.textContent = 'Connecting...';
-        video.src = dvr ? (useHLS ? '/vod/' + dvr.id + '/hls/live.m3u8' : '/vod/' + dvr.id + '/stream') : url;
-        video.oncanplay = () => {
-          statusEl.style.color = '#4caf50';
-          currentContainer = useHLS ? 'HLS' : 'fMP4';
-          retryCount = 0;
-          updateStatusText();
-          fetchNowPlaying();
-          if (channelID) api.del('/api/channels/' + channelID + '/fail').catch(() => {});
-        };
-        video.play().catch(() => handleRetry());
-        statsInterval = setInterval(updateStats, 2000);
-      } else if (typeof mpegts !== 'undefined' && mpegts.isSupported()) {
-        statusEl.style.color = '#999';
-        statusEl.textContent = 'Connecting...';
-        mpegtsPlayer = mpegts.createPlayer({
-          type: 'mse', isLive: true, url: url,
-        }, {
-          enableStashBuffer: true, stashInitialSize: 4096, liveBufferLatency: 2.0,
-        });
-        mpegtsPlayer.attachMediaElement(video);
-        mpegtsPlayer.load();
-        mpegtsPlayer.play();
-        mpegtsPlayer.on(mpegts.Events.ERROR, (errorType, errorDetail) => {
-          console.warn('mpegts.js error:', errorType, errorDetail);
-          if (errorType === 'NetworkError' || errorType === 'MediaError') handleRetry();
-          else { statusEl.style.color = '#ff6b6b'; statusEl.textContent = 'Error: ' + errorDetail; }
-        });
-        mpegtsPlayer.on(mpegts.Events.MEDIA_INFO, () => {
-          retryCount = 0;
-          if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
-          statusEl.style.color = '#4caf50';
-          const mi = mpegtsPlayer.mediaInfo || {};
-          currentCodec = codecName(mi.videoCodec);
-          currentContainer = 'MPEG-TS';
-          updateStatusText();
-          fetchNowPlaying();
-        });
-        statsInterval = setInterval(updateStats, 2000);
-      } else {
-        statusEl.style.color = '#999';
-        statusEl.textContent = 'Connecting...';
-        video.src = url;
-        video.play().catch(() => {
-          statusEl.style.color = '#ff6b6b';
-          statusEl.textContent = 'Playback failed.';
-        });
-      }
-    }
-
-    function handleRetry() {
-      if (playerCtx.signal.aborted) return;
-      if (retryCount >= MAX_RETRIES) {
-        statusEl.style.color = '#ff6b6b';
-        statusEl.textContent = 'Source unavailable. ';
-        const retryBtn = document.createElement('a');
-        retryBtn.textContent = 'Retry';
-        retryBtn.href = '#';
-        retryBtn.style.cssText = 'color:#4fc3f7;cursor:pointer;text-decoration:underline;';
-        retryBtn.onclick = (e) => { e.preventDefault(); retryCount = 0; handleRetry(); };
-        statusEl.appendChild(retryBtn);
-        destroyPlayer();
-        return;
-      }
-      retryCount++;
-      statusEl.style.color = '#ffa726';
-      statusEl.textContent = 'Retrying... (' + retryCount + '/' + MAX_RETRIES + ')';
-      destroyPlayer();
-      if (dvr && channelID) {
-        retryTimeout = setTimeout(async () => {
-          try {
-            await api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(() => {});
-            var audioParam = currentAudioIndex > 0 ? '&audio=' + currentAudioIndex : '';
-            const resp = await fetch('/channel/' + channelID + '/vod?profile=' + encodeURIComponent(currentProfile) + audioParam, { method: 'POST' }).then(r => r.json());
-            if (resp.session_id) {
-              dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
-              if (dvrTracker) dvrTracker.reset();
-            }
-          } catch(e) {}
-          startPlayback();
-        }, 2000);
-      } else {
-        retryTimeout = setTimeout(startPlayback, 2000);
-      }
-    }
-
-    video.addEventListener('waiting', () => {
-      statusEl.style.color = '#ffa726';
-      statusEl.textContent = 'Buffering...';
-      if (stallTimeout) clearTimeout(stallTimeout);
-      stallTimeout = setTimeout(() => {
-        if (!video.paused && video.readyState < 3 && dvr) {
-          handleRetry();
-        }
-      }, dvr ? 5000 : 30000);
-    });
-    video.addEventListener('playing', () => {
-      if (stallTimeout) { clearTimeout(stallTimeout); stallTimeout = null; }
-      statusEl.style.color = '#4caf50';
-      updateStatusText();
-    });
-
-    video.onerror = () => {
-      if (!mpegtsPlayer) {
-        if (channelID) api.post('/api/channels/' + channelID + '/fail').catch(() => {});
-        statusEl.style.color = '#ff6b6b';
-        statusEl.textContent = 'Source error';
-        handleRetry();
-      }
-    };
 
     if (probeUrl) {
       api.get(probeUrl).then(function(pd) {
         if (pd) probeData = { video: pd.video || null, audio_tracks: pd.audio_tracks || [], duration: pd.duration || 0, profile: '' };
       }).catch(function() {});
     }
-
-    startPlayback();
   }
-
   async function findOrCreateLogoByUrl(url, name, inputs) {
     const logos = await logosCache.getAll();
     const found = logos.find(l => l.url === url);

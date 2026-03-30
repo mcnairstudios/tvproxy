@@ -8,22 +8,11 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>TVProxy</title>
   <link rel="stylesheet" href="app.css">
+  <link href="https://vjs.zencdn.net/8.23.8/video-js.min.css" rel="stylesheet" />
 </head>
 <body>
   <div id="app"></div>
-  <script>
-    // Polyfill crypto.randomUUID for non-secure contexts (HTTP on LAN)
-    // Required by mpegts.js — only available natively in HTTPS/localhost
-    if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
-      crypto.randomUUID = function() {
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-          var r = Math.random() * 16 | 0;
-          return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-        });
-      };
-    }
-  </script>
-  <script src="https://cdn.jsdelivr.net/npm/mpegts.js/dist/mpegts.js"></script>
+  <script src="https://vjs.zencdn.net/8.23.8/video.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
