@@ -73,7 +73,6 @@ func (r *Remuxer) Start(ctx context.Context) error {
 		"-seg_duration", "2",
 		"-window_size", "5",
 		"-extra_window_size", "5",
-		"-remove_at_exit", "1",
 		"-use_timeline", "1",
 		"-use_template", "1",
 		"-init_seg_name", "init-stream$RepresentationID$.$ext$",

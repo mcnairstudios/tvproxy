@@ -449,7 +449,7 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dashDir := filepath.Join(sess.TempDir, "dash")
+	dashDir := filepath.Join(os.TempDir(), "tvproxy-dash", channelID)
 	remuxer, err := h.dashManager.GetOrStart(context.Background(), channelID, sess.FilePath, dashDir)
 	if err != nil {
 		h.log.Error().Err(err).Str("channel_id", channelID).Msg("failed to start dash remuxer")
@@ -466,7 +466,8 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/dash+xml")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-cache, no-store")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	http.ServeFile(w, r, remuxer.ManifestPath())
 }
 
@@ -485,12 +486,13 @@ func (h *VODHandler) DASHSegment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	segPath := filepath.Join(sess.TempDir, "dash", segment)
+	segPath := filepath.Join(os.TempDir(), "tvproxy-dash", channelID, segment)
 	if _, err := os.Stat(segPath); err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-cache, no-store")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	http.ServeFile(w, r, segPath)
 }

@@ -2716,7 +2716,7 @@
             if (resp.session_id) {
               dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
               if (dvrTracker) dvrTracker.reset();
-              streamSrc = '/vod/' + dvr.id + '/stream';
+              streamSrc = '/vod/' + dvr.id + '/dash/manifest.mpd';
             }
           } catch(e) {}
           restartPlayback();

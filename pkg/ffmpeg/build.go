@@ -72,7 +72,7 @@ func composeBuildArgs(opts BuildOptions) string {
 	parts = append(parts, buildAudioFlags(opts.Probe, opts.Container, s)...)
 
 	switch opts.Container {
-	case "mp4", "hls", "":
+	case "mp4", "":
 		parts = append(parts, "-f", "mp4", "-movflags", s.MP4Movflags)
 	case "mpegts":
 		parts = append(parts, "-f", "mpegts")

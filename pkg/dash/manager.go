@@ -2,6 +2,7 @@ package dash
 
 import (
 	"context"
+	"os"
 	"sync"
 
 	"github.com/rs/zerolog"
@@ -51,6 +52,7 @@ func (m *Manager) Stop(channelID string) {
 
 	if ok {
 		r.Stop()
+		os.RemoveAll(r.OutputDir())
 		m.log.Info().Str("channel_id", channelID).Msg("dash remuxer stopped")
 	}
 }
@@ -66,6 +68,7 @@ func (m *Manager) Shutdown() {
 
 	for _, r := range remuxers {
 		r.Stop()
+		os.RemoveAll(r.OutputDir())
 	}
 	m.log.Info().Int("count", len(remuxers)).Msg("dash manager shutdown complete")
 }

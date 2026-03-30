@@ -24,7 +24,7 @@ var (
 	validSourceTypes = map[string]bool{"satip": true, "m3u": true}
 	validHWAccels    = map[string]bool{"default": true, "none": true, "qsv": true, "nvenc": true, "vaapi": true, "videotoolbox": true}
 	validVideoCodecs = map[string]bool{"default": true, "copy": true, "h264": true, "h265": true, "av1": true}
-	validContainers  = map[string]bool{"mpegts": true, "matroska": true, "mp4": true, "webm": true, "hls": true}
+	validContainers  = map[string]bool{"mpegts": true, "matroska": true, "mp4": true, "webm": true}
 	validFPSModes    = map[string]bool{"auto": true, "cfr": true}
 )
 

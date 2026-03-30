@@ -27,6 +27,16 @@ clients_data.json
 profiles.json
 satip_sources.json
 users.json
+channels.json
+channel_groups.json
+core_settings.json
+epg_sources.json
+hdhr_devices.json
+logos.json
+m3u_accounts.json
+scheduled_recordings.json
 dvbscan
+dvbscan-bin
 *.bak
+TESTING.md
 .claude/worktrees/
