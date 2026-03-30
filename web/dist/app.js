@@ -2466,7 +2466,8 @@
   let activePlayerCleanup = null;
   let playInProgress = false;
 
-  function isAudioOnly(streamTracks) {
+  function isAudioOnly(streamTracks, streamGroup) {
+    if (streamGroup && streamGroup.toLowerCase() === 'radio') return true;
     if (!streamTracks || !streamTracks.length) return false;
     return !streamTracks.some(function(t) { return t.category === 'video'; });
   }
@@ -2478,9 +2479,13 @@
     try {
       if (activePlayerCleanup) { activePlayerCleanup(); activePlayerCleanup = null; }
       var streamTracks = null;
+      var streamGroup = null;
       if (streamsCache._data) {
         var s = streamsCache._data.find(function(s) { return s.id === streamID; });
-        if (s && s.tracks) streamTracks = s.tracks;
+        if (s) {
+          if (s.tracks) streamTracks = s.tracks;
+          if (s.group) streamGroup = s.group;
+        }
       }
       var defaultAudio = defaultAudioIndex(streamTracks);
       var audioParam = defaultAudio > 0 ? '&audio=' + defaultAudio : '';
@@ -2491,7 +2496,7 @@
           session = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, request_headers: resp.request_headers };
         }
       } catch(e) {}
-      openVideoPlayer(name, '/stream/' + streamID + '?profile=Browser', tvgId, session, undefined, undefined, streamTracks);
+      openVideoPlayer(name, '/stream/' + streamID + '?profile=Browser', tvgId, session, undefined, undefined, streamTracks, streamGroup);
     } finally {
       playInProgress = false;
       document.body.style.cursor = '';
@@ -2527,7 +2532,7 @@
     }
   }
 
-  function openVideoPlayer(title, url, tvgId, dvr, channelID, probeUrl, streamTracks) {
+  function openVideoPlayer(title, url, tvgId, dvr, channelID, probeUrl, streamTracks, streamGroup) {
     if (activePlayerCleanup) { activePlayerCleanup(); activePlayerCleanup = null; }
     const playerCtx = new AbortController();
     let pollInterval = null;
@@ -2548,7 +2553,7 @@
     let retryTimeout = null;
     let statsInterval = null;
     let vjsPlayer = null;
-    const audioOnly = isAudioOnly(streamTracks);
+    const audioOnly = isAudioOnly(streamTracks, streamGroup);
 
 
     function cleanup() {
