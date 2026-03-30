@@ -1,4 +1,4 @@
-package hls
+package dash
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 type Remuxer struct {
 	inputPath    string
 	outputDir    string
-	playlistPath string
+	manifestPath string
 	cmd          *exec.Cmd
 	cancel       context.CancelFunc
 	done         chan struct{}
@@ -30,7 +30,7 @@ func NewRemuxer(inputPath, outputDir string, log zerolog.Logger) *Remuxer {
 	return &Remuxer{
 		inputPath:    inputPath,
 		outputDir:    outputDir,
-		playlistPath: filepath.Join(outputDir, "live.m3u8"),
+		manifestPath: filepath.Join(outputDir, "manifest.mpd"),
 		done:         make(chan struct{}),
 		ready:        make(chan struct{}),
 		log:          log,
@@ -39,26 +39,28 @@ func NewRemuxer(inputPath, outputDir string, log zerolog.Logger) *Remuxer {
 
 func (r *Remuxer) Start(ctx context.Context) error {
 	if err := os.MkdirAll(r.outputDir, 0755); err != nil {
-		return fmt.Errorf("creating hls output dir: %w", err)
+		return fmt.Errorf("creating dash output dir: %w", err)
 	}
 
 	rctx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
-
-	segPattern := filepath.Join(r.outputDir, "seg_%05d.mp4")
 
 	r.cmd = exec.CommandContext(rctx, "ffmpeg",
 		"-y", "-hide_banner", "-loglevel", "warning",
 		"-re",
 		"-i", r.inputPath,
 		"-c", "copy",
-		"-f", "hls",
-		"-hls_segment_type", "fmp4",
-		"-hls_time", "4",
-		"-hls_list_size", "10",
-		"-hls_flags", "delete_segments+append_list+program_date_time",
-		"-hls_segment_filename", segPattern,
-		r.playlistPath,
+		"-f", "dash",
+		"-seg_duration", "2",
+		"-window_size", "5",
+		"-extra_window_size", "5",
+		"-remove_at_exit", "1",
+		"-use_timeline", "1",
+		"-use_template", "1",
+		"-init_seg_name", "init-$RepresentationID$.$ext$",
+		"-media_seg_name", "chunk-$RepresentationID$-$Number%05d$.$ext$",
+		"-utc_timing_url", "",
+		r.manifestPath,
 	)
 	r.cmd.Cancel = func() error {
 		return r.cmd.Process.Signal(syscall.SIGTERM)
@@ -67,11 +69,11 @@ func (r *Remuxer) Start(ctx context.Context) error {
 
 	if err := r.cmd.Start(); err != nil {
 		cancel()
-		return fmt.Errorf("starting hls remuxer: %w", err)
+		return fmt.Errorf("starting dash remuxer: %w", err)
 	}
 
 	go r.run()
-	go r.waitForPlaylist()
+	go r.waitForManifest()
 
 	return nil
 }
@@ -85,15 +87,15 @@ func (r *Remuxer) run() {
 	r.readyOnce.Do(func() { close(r.ready) })
 }
 
-func (r *Remuxer) waitForPlaylist() {
+func (r *Remuxer) waitForManifest() {
 	for {
 		select {
 		case <-r.done:
 			return
 		default:
-			if _, err := os.Stat(r.playlistPath); err == nil {
+			if _, err := os.Stat(r.manifestPath); err == nil {
 				r.readyOnce.Do(func() {
-					r.log.Info().Str("playlist", r.playlistPath).Msg("hls playlist ready")
+					r.log.Info().Str("manifest", r.manifestPath).Msg("dash manifest ready")
 					close(r.ready)
 				})
 				return
@@ -113,11 +115,11 @@ func (r *Remuxer) WaitReady(ctx context.Context) error {
 		if r.err != nil {
 			return r.err
 		}
-		return fmt.Errorf("remuxer exited before playlist was ready")
+		return fmt.Errorf("remuxer exited before manifest was ready")
 	}
 }
 
-func (r *Remuxer) PlaylistPath() string { return r.playlistPath }
+func (r *Remuxer) ManifestPath() string { return r.manifestPath }
 func (r *Remuxer) OutputDir() string    { return r.outputDir }
 
 func (r *Remuxer) IsDone() bool {

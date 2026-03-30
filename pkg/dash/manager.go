@@ -1,4 +1,4 @@
-package hls
+package dash
 
 import (
 	"context"
@@ -16,7 +16,7 @@ type Manager struct {
 func NewManager(log zerolog.Logger) *Manager {
 	return &Manager{
 		remuxers: make(map[string]*Remuxer),
-		log:      log.With().Str("component", "hls_manager").Logger(),
+		log:      log.With().Str("component", "dash_manager").Logger(),
 	}
 }
 
@@ -37,7 +37,7 @@ func (m *Manager) GetOrStart(ctx context.Context, channelID, inputPath, outputDi
 	}
 
 	m.remuxers[channelID] = r
-	m.log.Info().Str("channel_id", channelID).Str("input", inputPath).Msg("hls remuxer started")
+	m.log.Info().Str("channel_id", channelID).Str("input", inputPath).Msg("dash remuxer started")
 	return r, nil
 }
 
@@ -51,7 +51,7 @@ func (m *Manager) Stop(channelID string) {
 
 	if ok {
 		r.Stop()
-		m.log.Info().Str("channel_id", channelID).Msg("hls remuxer stopped")
+		m.log.Info().Str("channel_id", channelID).Msg("dash remuxer stopped")
 	}
 }
 
@@ -67,5 +67,5 @@ func (m *Manager) Shutdown() {
 	for _, r := range remuxers {
 		r.Stop()
 	}
-	m.log.Info().Int("count", len(remuxers)).Msg("hls manager shutdown complete")
+	m.log.Info().Int("count", len(remuxers)).Msg("dash manager shutdown complete")
 }

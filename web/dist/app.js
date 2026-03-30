@@ -2662,14 +2662,7 @@
     overlay.onclick = function(e) { if (e.target === overlay) cleanup(); };
     document.body.appendChild(overlay);
 
-    var isBrowserProfile = url.includes('profile=Browser');
-    var useHLS = isBrowserProfile && dvr && (dvr.container === 'hls' || (/iPhone|iPad/.test(navigator.userAgent) || (/Safari\//.test(navigator.userAgent) && !/Chrome\//.test(navigator.userAgent))));
-    var streamSrc = '';
-    if (isBrowserProfile && dvr) {
-      streamSrc = useHLS ? '/vod/' + dvr.id + '/hls/live.m3u8' : '/vod/' + dvr.id + '/stream';
-    } else {
-      streamSrc = dvr ? '/vod/' + dvr.id + '/stream' : url;
-    }
+    var streamSrc = dvr ? '/vod/' + dvr.id + '/dash/manifest.mpd' : url;
 
     var savedVol = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
     vjsPlayer = videojs(videoEl.id, {
@@ -2688,11 +2681,7 @@
     vjsPlayer.volume(savedVol);
     vjsPlayer.on('volumechange', function() { localStorage.setItem('tvproxy_volume', String(vjsPlayer.volume())); });
 
-    if (useHLS) {
-      vjsPlayer.src({ src: streamSrc, type: 'application/x-mpegURL' });
-    } else {
-      vjsPlayer.src({ src: streamSrc, type: 'video/mp4' });
-    }
+    vjsPlayer.src({ src: streamSrc, type: 'application/dash+xml' });
     vjsPlayer.ready(function() {
       vjsPlayer.play().catch(function() {});
     });
@@ -2750,7 +2739,7 @@
     function restartPlayback() {
       if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
       if (vjsPlayer) {
-        vjsPlayer.src({ src: streamSrc, type: useHLS ? 'application/x-mpegURL' : 'video/mp4' });
+        vjsPlayer.src({ src: streamSrc, type: 'application/dash+xml' });
         vjsPlayer.play().catch(function() {});
       }
     }
@@ -2769,7 +2758,7 @@
     }
 
     function updateStatusText() {
-      var container = useHLS ? 'HLS' : 'fMP4';
+      var container = 'DASH';
       statusEl.textContent = 'Playing (' + container + ')' + buildStatusSuffix();
     }
 
@@ -3551,7 +3540,7 @@
         { key: 'source_type', label: 'Source', render: item => ({direct:'Direct',satip:'SAT>IP',m3u:'M3U'})[item.source_type] || item.source_type },
         { key: 'hwaccel', label: 'HW Accel', render: item => ({'default':'Global Default',none:'None (Software)',qsv:'Intel QSV',nvenc:'NVIDIA NVENC',vaapi:'VAAPI (AMD/Intel)',videotoolbox:'VideoToolbox (macOS)'})[item.hwaccel] || item.hwaccel },
         { key: 'video_codec', label: 'Codec', render: item => ({'default':'Global Default',copy:'Copy',h264:'H.264',h265:'H.265',av1:'AV1'})[item.video_codec] || item.video_codec },
-        { key: 'container', label: 'Container/Delivery', render: item => ({mpegts:'MPEG-TS',matroska:'Matroska',mp4:'MP4',webm:'WebM',hls:'HLS'})[item.container] || item.container },
+        { key: 'container', label: 'Container/Delivery', render: item => ({mpegts:'MPEG-TS',matroska:'Matroska',mp4:'MP4',webm:'WebM'})[item.container] || item.container },
         { key: 'is_default', label: 'Default', render: item => {
           const badges = [];
           if (item.is_system) badges.push(h('span', { className: 'badge badge-info', style: 'margin-right:4px' }, 'System'));
@@ -3593,7 +3582,6 @@
           { value: 'mpegts', label: 'MPEG-TS (HDHR/Plex)' },
           { value: 'matroska', label: 'Matroska (VLC)' },
           { value: 'mp4', label: 'MP4 (Browser)' },
-          { value: 'hls', label: 'HLS (Safari/iPhone)' },
           { value: 'webm', label: 'WebM (Browser, requires Opus audio)' },
         ], showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
         { key: 'deinterlace', label: 'Deinterlace', type: 'checkbox', default: false, help: 'Apply yadif deinterlace filter (only when transcoding, not copy).', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' && (form.video_codec || 'default') !== 'copy' },

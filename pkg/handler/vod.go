@@ -13,7 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 
-	"github.com/gavinmcnair/tvproxy/pkg/hls"
+	"github.com/gavinmcnair/tvproxy/pkg/dash"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
@@ -21,15 +21,15 @@ import (
 type VODHandler struct {
 	vodService    *service.VODService
 	clientService *service.ClientService
-	hlsManager    *hls.Manager
+	dashManager   *dash.Manager
 	log           zerolog.Logger
 }
 
-func NewVODHandler(vodService *service.VODService, clientService *service.ClientService, hlsManager *hls.Manager, log zerolog.Logger) *VODHandler {
+func NewVODHandler(vodService *service.VODService, clientService *service.ClientService, dashManager *dash.Manager, log zerolog.Logger) *VODHandler {
 	return &VODHandler{
 		vodService:    vodService,
 		clientService: clientService,
-		hlsManager:    hlsManager,
+		dashManager:   dashManager,
 		log:           log.With().Str("handler", "vod").Logger(),
 	}
 }
@@ -235,8 +235,8 @@ func (h *VODHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.vodService.StopWatching(channelID, consumerID)
-	if h.vodService.ConsumerCount(channelID) == 0 && h.hlsManager != nil {
-		h.hlsManager.Stop(channelID)
+	if h.vodService.ConsumerCount(channelID) == 0 && h.dashManager != nil {
+		h.dashManager.Stop(channelID)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -435,11 +435,11 @@ func (h *VODHandler) StreamCompletedRecording(w http.ResponseWriter, r *http.Req
 	serveTranscodedOrFile(w, r, reader, contentType)
 }
 
-func (h *VODHandler) HLSPlaylist(w http.ResponseWriter, r *http.Request) {
+func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "sessionID")
 
-	if h.hlsManager == nil {
-		respondError(w, http.StatusNotImplemented, "hls not available")
+	if h.dashManager == nil {
+		respondError(w, http.StatusNotImplemented, "dash not available")
 		return
 	}
 
@@ -449,28 +449,28 @@ func (h *VODHandler) HLSPlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hlsDir := filepath.Join(sess.TempDir, "hls")
-	remuxer, err := h.hlsManager.GetOrStart(context.Background(), channelID, sess.FilePath, hlsDir)
+	dashDir := filepath.Join(sess.TempDir, "dash")
+	remuxer, err := h.dashManager.GetOrStart(context.Background(), channelID, sess.FilePath, dashDir)
 	if err != nil {
-		h.log.Error().Err(err).Str("channel_id", channelID).Msg("failed to start hls remuxer")
-		respondError(w, http.StatusInternalServerError, "hls remuxer failed")
+		h.log.Error().Err(err).Str("channel_id", channelID).Msg("failed to start dash remuxer")
+		respondError(w, http.StatusInternalServerError, "dash remuxer failed")
 		return
 	}
 
 	waitCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	if err := remuxer.WaitReady(waitCtx); err != nil {
-		h.log.Error().Err(err).Str("channel_id", channelID).Msg("hls playlist not ready")
-		respondError(w, http.StatusServiceUnavailable, "hls not ready")
+		h.log.Error().Err(err).Str("channel_id", channelID).Msg("dash manifest not ready")
+		respondError(w, http.StatusServiceUnavailable, "dash not ready")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Content-Type", "application/dash+xml")
 	w.Header().Set("Cache-Control", "no-cache")
-	http.ServeFile(w, r, remuxer.PlaylistPath())
+	http.ServeFile(w, r, remuxer.ManifestPath())
 }
 
-func (h *VODHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
+func (h *VODHandler) DASHSegment(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "sessionID")
 	segment := chi.URLParam(r, "segment")
 
@@ -485,12 +485,12 @@ func (h *VODHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	segPath := filepath.Join(sess.TempDir, "hls", segment)
+	segPath := filepath.Join(sess.TempDir, "dash", segment)
 	if _, err := os.Stat(segPath); err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeFile(w, r, segPath)
 }

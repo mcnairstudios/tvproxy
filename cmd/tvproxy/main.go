@@ -21,7 +21,7 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/defaults"
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/handler"
-	"github.com/gavinmcnair/tvproxy/pkg/hls"
+	"github.com/gavinmcnair/tvproxy/pkg/dash"
 	"github.com/gavinmcnair/tvproxy/pkg/logocache"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/openapi"
@@ -209,8 +209,8 @@ func main() {
 	hdhrHandler := handler.NewHDHRHandler(hdhrService, proxyService, cfg)
 	outputHandler := handler.NewOutputHandler(outputService)
 	proxyHandler := handler.NewProxyHandler(proxyService, settingsService, log)
-	hlsManager := hls.NewManager(log)
-	vodHandler := handler.NewVODHandler(vodService, clientService, hlsManager, log)
+	dashManager := dash.NewManager(log)
+	vodHandler := handler.NewVODHandler(vodService, clientService, dashManager, log)
 	activityHandler := handler.NewActivityHandler(activityService)
 	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
 	dataResetter := service.NewDataResetter(
@@ -296,8 +296,8 @@ func main() {
 	r.Post("/channel/{channelID}/vod", vodHandler.CreateChannelSession)
 	r.Get("/vod/{sessionID}/status", vodHandler.Status)
 	r.Get("/vod/{sessionID}/stream", vodHandler.Stream)
-	r.Get("/vod/{sessionID}/hls/live.m3u8", vodHandler.HLSPlaylist)
-	r.Get("/vod/{sessionID}/hls/{segment}", vodHandler.HLSSegment)
+	r.Get("/vod/{sessionID}/dash/manifest.mpd", vodHandler.DASHManifest)
+	r.Get("/vod/{sessionID}/dash/{segment}", vodHandler.DASHSegment)
 
 	r.Group(func(r chi.Router) {
 		r.Use(authMW.Authenticate)
@@ -537,7 +537,7 @@ func main() {
 	log.Info().Msg("shutting down")
 
 	wgService.Stop()
-	hlsManager.Shutdown()
+	dashManager.Shutdown()
 	vodService.Shutdown()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
