@@ -108,6 +108,16 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 		return result
 	}
 
+	// Discard initial data for 2s to let the tuner lock to the new frequency.
+	// SAT>IP servers reuse tuners across sessions; without this delay the
+	// scanner picks up stale TS packets from the previous frequency.
+	lockEnd := time.Now().Add(2 * time.Second)
+	for time.Now().Before(lockEnd) {
+		c.conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		c.readInterleaved() //nolint:errcheck // discard stale data
+	}
+	c.conn.SetDeadline(time.Now().Add(timeout + 5*time.Second))
+
 	pr, pw := io.Pipe()
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
