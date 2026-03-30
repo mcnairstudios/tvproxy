@@ -1,6 +1,7 @@
 package dash
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -12,6 +13,25 @@ import (
 
 	"github.com/rs/zerolog"
 )
+
+type logWriter struct {
+	log    zerolog.Logger
+	prefix string
+	buf    bytes.Buffer
+}
+
+func (w *logWriter) Write(p []byte) (int, error) {
+	w.buf.Write(p)
+	for {
+		line, err := w.buf.ReadString('\n')
+		if err != nil {
+			w.buf.WriteString(line)
+			break
+		}
+		w.log.Warn().Str("src", w.prefix).Msg(line[:len(line)-1])
+	}
+	return len(p), nil
+}
 
 type Remuxer struct {
 	inputPath    string
@@ -47,7 +67,6 @@ func (r *Remuxer) Start(ctx context.Context) error {
 
 	r.cmd = exec.CommandContext(rctx, "ffmpeg",
 		"-y", "-hide_banner", "-loglevel", "warning",
-		"-re",
 		"-i", r.inputPath,
 		"-c", "copy",
 		"-f", "dash",
@@ -57,15 +76,15 @@ func (r *Remuxer) Start(ctx context.Context) error {
 		"-remove_at_exit", "1",
 		"-use_timeline", "1",
 		"-use_template", "1",
-		"-init_seg_name", "init-$RepresentationID$.$ext$",
-		"-media_seg_name", "chunk-$RepresentationID$-$Number%05d$.$ext$",
-		"-utc_timing_url", "",
+		"-init_seg_name", "init-stream$RepresentationID$.$ext$",
+		"-media_seg_name", "chunk-stream$RepresentationID$-$Number%05d$.$ext$",
 		r.manifestPath,
 	)
 	r.cmd.Cancel = func() error {
 		return r.cmd.Process.Signal(syscall.SIGTERM)
 	}
 	r.cmd.WaitDelay = 5 * time.Second
+	r.cmd.Stderr = &logWriter{log: r.log, prefix: "dash-remuxer"}
 
 	if err := r.cmd.Start(); err != nil {
 		cancel()
