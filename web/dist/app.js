@@ -2466,6 +2466,11 @@
   let activePlayerCleanup = null;
   let playInProgress = false;
 
+  function isAudioOnly(streamTracks) {
+    if (!streamTracks || !streamTracks.length) return false;
+    return !streamTracks.some(function(t) { return t.category === 'video'; });
+  }
+
   async function playStreamWithVODDetection(streamID, name, tvgId) {
     if (playInProgress) return;
     playInProgress = true;
@@ -2486,7 +2491,11 @@
           session = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, request_headers: resp.request_headers };
         }
       } catch(e) {}
-      openVideoPlayer(name, '/stream/' + streamID + '?profile=Browser', tvgId, session, undefined, undefined, streamTracks);
+      if (isAudioOnly(streamTracks)) {
+        openAudioPlayer(name, tvgId, session);
+      } else {
+        openVideoPlayer(name, '/stream/' + streamID + '?profile=Browser', tvgId, session, undefined, undefined, streamTracks);
+      }
     } finally {
       playInProgress = false;
       document.body.style.cursor = '';
@@ -2519,6 +2528,112 @@
     } finally {
       playInProgress = false;
       document.body.style.cursor = '';
+    }
+  }
+
+  function openAudioPlayer(title, tvgId, dvr) {
+    if (activePlayerCleanup) { activePlayerCleanup(); activePlayerCleanup = null; }
+    const playerCtx = new AbortController();
+    let pollInterval = null;
+
+    function cleanup() {
+      activePlayerCleanup = null;
+      playerCtx.abort();
+      if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      if (dvr) {
+        api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(() => {});
+      }
+      overlay.remove();
+    }
+    activePlayerCleanup = cleanup;
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--bg-card);border-radius:12px;padding:24px;width:320px;text-align:center;';
+
+    var logoUrl = tvgId ? '/logo?url=' + encodeURIComponent(tvgId) : '';
+    var logoEl = document.createElement('div');
+    logoEl.style.cssText = 'width:80px;height:80px;border-radius:50%;background:var(--bg-input);margin:0 auto 16px;display:flex;align-items:center;justify-content:center;overflow:hidden;';
+    if (logoUrl) {
+      var img = document.createElement('img');
+      img.src = logoUrl;
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+      img.onerror = function() { logoEl.innerHTML = '<span style="font-size:32px;color:#666;">&#9835;</span>'; };
+      logoEl.appendChild(img);
+    } else {
+      logoEl.innerHTML = '<span style="font-size:32px;color:#666;">&#9835;</span>';
+    }
+    modal.appendChild(logoEl);
+
+    var titleEl = document.createElement('h3');
+    titleEl.style.cssText = 'margin:0 0 16px;color:#e0e0e0;font-size:16px;';
+    titleEl.textContent = title;
+    modal.appendChild(titleEl);
+
+    var statusEl = document.createElement('div');
+    statusEl.style.cssText = 'color:#999;font-size:12px;margin-bottom:16px;';
+    statusEl.textContent = 'Connecting...';
+    modal.appendChild(statusEl);
+
+    var audio = document.createElement('audio');
+    audio.volume = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
+    audio.addEventListener('volumechange', function() { localStorage.setItem('tvproxy_volume', String(audio.volume)); });
+
+    var controlsRow = document.createElement('div');
+    controlsRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:12px;';
+
+    var playBtn = document.createElement('button');
+    playBtn.style.cssText = 'background:var(--accent);border:none;color:#fff;width:48px;height:48px;border-radius:50%;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;';
+    playBtn.innerHTML = '&#9654;';
+    playBtn.onclick = function() {
+      if (audio.paused) { audio.play().catch(function() {}); }
+      else { audio.pause(); }
+    };
+    audio.onplay = function() { playBtn.innerHTML = '&#9646;&#9646;'; statusEl.style.color = '#4caf50'; statusEl.textContent = 'Playing'; };
+    audio.onpause = function() { playBtn.innerHTML = '&#9654;'; };
+    audio.onerror = function() { statusEl.style.color = '#ff6b6b'; statusEl.textContent = 'Playback error'; };
+    audio.onwaiting = function() { statusEl.textContent = 'Buffering...'; };
+
+    var volSlider = document.createElement('input');
+    volSlider.type = 'range'; volSlider.min = '0'; volSlider.max = '1'; volSlider.step = '0.05';
+    volSlider.value = String(audio.volume);
+    volSlider.style.cssText = 'width:100px;height:6px;accent-color:var(--accent);';
+    volSlider.oninput = function() { audio.volume = parseFloat(volSlider.value); };
+    audio.addEventListener('volumechange', function() { volSlider.value = String(audio.volume); });
+
+    controlsRow.appendChild(playBtn);
+    controlsRow.appendChild(volSlider);
+    modal.appendChild(controlsRow);
+
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'btn btn-sm';
+    closeBtn.style.cssText = 'margin-top:16px;';
+    closeBtn.textContent = 'Close';
+    closeBtn.onclick = cleanup;
+    modal.appendChild(closeBtn);
+
+    overlay.appendChild(modal);
+    overlay.onclick = function(e) { if (e.target === overlay) cleanup(); };
+    document.body.appendChild(overlay);
+
+    if (dvr) {
+      audio.src = '/vod/' + dvr.id + '/stream';
+      audio.play().catch(function() {});
+
+      pollInterval = setInterval(async function() {
+        if (playerCtx.signal.aborted) { clearInterval(pollInterval); return; }
+        try {
+          var resp = await fetch('/vod/' + dvr.id + '/status', { signal: playerCtx.signal });
+          if (resp.status === 404) { clearInterval(pollInterval); statusEl.style.color = '#ff6b6b'; statusEl.textContent = 'Session ended'; return; }
+          if (!resp.ok) return;
+          var st = await resp.json();
+          if (st.error) { statusEl.style.color = '#ff6b6b'; statusEl.textContent = st.error; clearInterval(pollInterval); }
+        } catch(e) {}
+      }, 3000);
     }
   }
 
