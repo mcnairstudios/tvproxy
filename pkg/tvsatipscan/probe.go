@@ -151,6 +151,8 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 	pmtData := map[uint16]*astits.PMTData{} // serviceID → PMT
 	result.signalOnly = (pids == "0")
 	patDone, nitDone, sdtReceived := false, false, false
+	sdtSeenSvcIDs := map[uint16]bool{} // service IDs seen from matching SDT sections
+	sdtSectionCount := 0               // matching SDT section events received
 	nitMuxSeen := map[string]bool{}
 	nitSectionsSeen := map[uint8]bool{}
 	nitLastSection := uint8(0)
@@ -183,23 +185,51 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 			result.patReceived = true
 		}
 
-		// Accumulate all SDT packets — PID 17 carries table 0x42 (current TS) and
-		// 0x46 (other TSes). Keep merging; don't overwrite names already found.
-		if d.SDT != nil {
+		// PID 17 carries SDT-actual (table_id 0x42, current TS) and SDT-other
+		// (0x46, other TSes). SDT-other describes services on other muxes whose
+		// service IDs won't appear in our PAT programs map. Accept an SDT section
+		// only when at least one service ID matches a program we discovered from PAT.
+		// Multi-section SDT: track service IDs seen across sections and detect when
+		// a full table cycle completes (no new service IDs added on the next section).
+		if d.SDT != nil && patDone {
+			hasOwnService := false
 			for _, s := range d.SDT.Services {
-				if s.HasFreeCSAMode {
-					svcEncrypted[s.ServiceID] = true
+				if _, ok := programs[s.ServiceID]; ok {
+					hasOwnService = true
+					break
 				}
-				for _, desc := range s.Descriptors {
-					if desc.Tag == astits.DescriptorTagService && desc.Service != nil {
-						if services[s.ServiceID] == "" {
-							services[s.ServiceID] = dvbString(desc.Service.Name)
-							svcTypes[s.ServiceID] = desc.Service.Type
+			}
+			if hasOwnService {
+				prevSeen := len(sdtSeenSvcIDs)
+				for _, s := range d.SDT.Services {
+					sdtSeenSvcIDs[s.ServiceID] = true
+					if s.HasFreeCSAMode {
+						svcEncrypted[s.ServiceID] = true
+					}
+					for _, desc := range s.Descriptors {
+						if desc.Tag == astits.DescriptorTagService && desc.Service != nil {
+							if services[s.ServiceID] == "" {
+								services[s.ServiceID] = dvbString(desc.Service.Name)
+								svcTypes[s.ServiceID] = desc.Service.Type
+							}
 						}
 					}
 				}
+				sdtSectionCount++
+				// Mark SDT done when all programs are named (single-section SDT, fast path)
+				// or when this section added no new service IDs (full table cycle seen).
+				allNamed := true
+				for svcID := range programs {
+					if services[svcID] == "" {
+						allNamed = false
+						break
+					}
+				}
+				noNewSvcs := sdtSectionCount > 1 && len(sdtSeenSvcIDs) == prevSeen
+				if allNamed || noNewSvcs {
+					sdtReceived = true
+				}
 			}
-			sdtReceived = true
 		}
 
 		// Accumulate NIT muxes. PID 16 carries NIT-actual (0x40) and NIT-other (0x41).
@@ -276,10 +306,11 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 			}
 		}
 
-		// pids=0:       signal-only — just confirm the mux is on air via PAT.
-		// pids=0,16,17: discovery — wait for PAT + complete NIT.
-		// pids=sdt:     SI-only full scan — wait for PAT + SDT (no PMT/NIT needed).
-		// pids=all:     full scan — wait for PAT + SDT + all PMTs.
+		// pids=0:           signal-only — just confirm the mux is on air via PAT.
+		// pids=0,16,17:     discovery — wait for PAT + complete NIT.
+		// pids=sdt:         SI-only full scan — wait for PAT + SDT-actual.
+		// pids=0,16,17,...: Phase-2 PMT scan — wait for PAT + all PMTs collected.
+		// pids=all:         full scan — wait for PAT + SDT + all PMTs.
 		if pids == "0" {
 			if patDone {
 				break
@@ -291,6 +322,20 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 		} else if pids != "all" {
 			if patDone && nitDone {
 				break
+			}
+			// Phase 2 PMT scan: break as soon as all requested PMTs are collected,
+			// without waiting for NIT (which may take 10-25s and isn't needed here).
+			if strings.HasPrefix(pids, "0,16,17,") && patDone && len(pmtPending) > 0 {
+				allPMT := true
+				for _, got := range pmtPending {
+					if !got {
+						allPMT = false
+						break
+					}
+				}
+				if allPMT {
+					break
+				}
 			}
 		} else {
 			allPMTDone := patDone
