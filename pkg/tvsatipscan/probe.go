@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,15 +28,7 @@ type scanResult struct {
 	nitComplete bool                        // all NIT sections received (complete mux list)
 	signalOnly  bool                        // was scanned in signal-only mode (pids=0)
 	pmtData     map[uint16]*astits.PMTData  // serviceID → PMT (populated during full scan)
-}
-
-// buildPMTURL replaces pids=0,16,17 with pids=0,16,17,<pmtPIDs...>
-func buildPMTURL(base string, pmtPIDs []uint16) string {
-	extra := ""
-	for _, pid := range pmtPIDs {
-		extra += fmt.Sprintf(",%d", pid)
-	}
-	return strings.Replace(base, "pids=0,16,17", "pids=0,16,17"+extra, 1)
+	programs    map[uint16]uint16           // serviceID → pmtPID from PAT (populated during any scan)
 }
 
 // scanTransponder tunes via SAT>IP RTSP and collects PAT + SDT + NIT + PMT (for stream metadata).
@@ -157,6 +150,21 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 	nitSectionsSeen := map[uint8]bool{}
 	nitLastSection := uint8(0)
 	pmtPending := map[uint16]bool{} // pmtPID → collected?
+
+	// For targeted scans (pids=0,16,17,...), pre-parse the requested PMT PIDs.
+	// Completion is tracked against these rather than pmtPending (which reflects all
+	// programs in the actual PAT). If the actual PAT has no overlap with the requested
+	// PIDs (Phase 1 returned wrong data), we break early so the caller can retry with
+	// the correct PIDs from result.programs.
+	var phase2PMTs map[uint16]bool
+	if strings.HasPrefix(pids, "0,16,17,") {
+		phase2PMTs = make(map[uint16]bool)
+		for _, p := range strings.Split(pids[len("0,16,17,"):], ",") {
+			if v, err := strconv.ParseUint(strings.TrimSpace(p), 10, 16); err == nil {
+				phase2PMTs[uint16(v)] = false
+			}
+		}
+	}
 
 	dmx := astits.NewDemuxer(ctx, pr, astits.DemuxerOptPacketSize(188))
 	for {
@@ -301,6 +309,9 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 					cp := *d.PMT
 					pmtData[svcID] = &cp
 					pmtPending[pmtPID] = true
+					if phase2PMTs != nil {
+						phase2PMTs[pmtPID] = true
+					}
 					break
 				}
 			}
@@ -309,7 +320,9 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 		// pids=0:           signal-only — just confirm the mux is on air via PAT.
 		// pids=0,16,17:     discovery — wait for PAT + complete NIT.
 		// pids=sdt:         SI-only full scan — wait for PAT + SDT-actual.
-		// pids=0,16,17,...: Phase-2 PMT scan — wait for PAT + all PMTs collected.
+		// pids=0,16,17,...: targeted PMT scan — wait for PAT + SDT + requested PMTs.
+		//                   Break early if PAT shows none of the requested PIDs exist
+		//                   (Phase 1 got wrong data); caller retries with correct PIDs.
 		// pids=all:         full scan — wait for PAT + SDT + all PMTs.
 		if pids == "0" {
 			if patDone {
@@ -319,21 +332,32 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 			if patDone && sdtReceived {
 				break
 			}
-		} else if pids != "all" {
+		} else if pids == "0,16,17" {
 			if patDone && nitDone {
 				break
 			}
-			// Phase 2 PMT scan: break as soon as all requested PMTs are collected,
-			// without waiting for NIT (which may take 10-25s and isn't needed here).
-			if strings.HasPrefix(pids, "0,16,17,") && patDone && len(pmtPending) > 0 {
-				allPMT := true
-				for _, got := range pmtPending {
-					if !got {
-						allPMT = false
+		} else if strings.HasPrefix(pids, "0,16,17,") {
+			if patDone && phase2PMTs != nil {
+				if len(programs) > 0 {
+					hasOverlap := false
+					for pid := range phase2PMTs {
+						if _, ok := pmtPending[pid]; ok {
+							hasOverlap = true
+							break
+						}
+					}
+					if !hasOverlap {
 						break
 					}
 				}
-				if allPMT {
+				allDone := len(phase2PMTs) > 0
+				for _, got := range phase2PMTs {
+					if !got {
+						allDone = false
+						break
+					}
+				}
+				if allDone && sdtReceived {
 					break
 				}
 			}
@@ -385,6 +409,7 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 		result.channels = append(result.channels, ch)
 	}
 	result.pmtData = pmtData
+	result.programs = programs
 	c.teardown(controlURL, session)
 	sort.Slice(result.channels, func(i, j int) bool {
 		return result.channels[i].ServiceID < result.channels[j].ServiceID
@@ -416,12 +441,17 @@ func scanParallel(host string, tps []Transponder, maxParallel int, timeout time.
 	}
 	wg.Wait()
 
-	// Phase 2: for muxes that found services, fetch PMT data per service.
+	// Phase 2: targeted PMT scan (pids=0,16,17,<PMT PIDs>) for each mux with channels.
+	// Uses Phase 1's PMT PIDs as the filter. If Phase 1 got the wrong transport stream
+	// for a frequency (device tuner misallocation), the Phase 2 PAT won't match the
+	// requested PIDs and scanTransponder breaks early. In that case r2.programs has the
+	// correct PIDs from Phase 2's actual PAT — we retry as Phase 3 with those correct
+	// PIDs, replacing Phase 1's wrong channels entirely.
+	var wg2 sync.WaitGroup
 	for i, r := range results {
 		if len(r.channels) == 0 {
 			continue
 		}
-		// Build a targeted PID list: PAT + all PMT PIDs discovered.
 		pmtPIDs := make([]uint16, 0, len(r.channels))
 		seen := map[uint16]bool{}
 		for _, ch := range r.channels {
@@ -437,28 +467,54 @@ func scanParallel(host string, tps []Transponder, maxParallel int, timeout time.
 		for _, p := range pmtPIDs {
 			pidStr += fmt.Sprintf(",%d", p)
 		}
-		r2 := scanTransponder(context.Background(), host, tps[i], timeout, pidStr, verbose)
-		// Merge PMT stream components into phase-1 channels.
-		for j, ch := range results[i].channels {
-			if pmt, ok := r2.pmtData[ch.ServiceID]; ok {
-				results[i].channels[j].PCRPID = pmt.PCRPID
-				results[i].channels[j].Streams = nil
-				for _, es := range pmt.ElementaryStreams {
-					comp := StreamComponent{
-						PID:        es.ElementaryPID,
-						StreamType: uint8(es.StreamType),
-						TypeName:   streamTypStr(uint8(es.StreamType)),
-					}
-					for _, desc := range es.ElementaryStreamDescriptors {
-						if desc.ISO639LanguageAndAudioType != nil {
-							comp.Language = string(desc.ISO639LanguageAndAudioType.Language[:])
+		wg2.Add(1)
+		go func(idx int, ps string) {
+			sem <- struct{}{}
+			defer wg2.Done()
+			defer func() { <-sem }()
+			r2 := scanTransponder(context.Background(), host, tps[idx], timeout, ps, verbose)
+			if len(r2.pmtData) > 0 {
+				// Phase 2 succeeded: merge stream components into Phase 1 channels.
+				for j, ch := range results[idx].channels {
+					if pmt, ok := r2.pmtData[ch.ServiceID]; ok {
+						results[idx].channels[j].PCRPID = pmt.PCRPID
+						results[idx].channels[j].Streams = nil
+						for _, es := range pmt.ElementaryStreams {
+							comp := StreamComponent{
+								PID:        es.ElementaryPID,
+								StreamType: uint8(es.StreamType),
+								TypeName:   streamTypStr(uint8(es.StreamType)),
+							}
+							for _, desc := range es.ElementaryStreamDescriptors {
+								if desc.ISO639LanguageAndAudioType != nil {
+									comp.Language = string(desc.ISO639LanguageAndAudioType.Language[:])
+								}
+							}
+							results[idx].channels[j].Streams = append(results[idx].channels[j].Streams, comp)
 						}
 					}
-					results[i].channels[j].Streams = append(results[i].channels[j].Streams, comp)
+				}
+				return
+			}
+			// Phase 2 failed (PAT mismatch: Phase 1 got wrong transport stream).
+			// r2.programs has the correct service IDs and PMT PIDs from Phase 2's actual PAT.
+			// Retry as Phase 3 with the correct PIDs; replace Phase 1 channels entirely.
+			if len(r2.programs) == 0 {
+				return
+			}
+			p3Str := "0,16,17"
+			for _, pmtPID := range r2.programs {
+				if pmtPID != 0 {
+					p3Str += fmt.Sprintf(",%d", pmtPID)
 				}
 			}
-		}
+			r3 := scanTransponder(context.Background(), host, tps[idx], timeout, p3Str, verbose)
+			if len(r3.channels) > 0 {
+				results[idx].channels = r3.channels
+			}
+		}(i, pidStr)
 	}
+	wg2.Wait()
 
 	return results
 }
