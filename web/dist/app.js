@@ -997,7 +997,7 @@
               var body = { program_title: recBtn.dataset.ptitle || '', channel_name: ch.dataset.chname || '', stop_at: pStop };
               recBtn.classList.add('recording');
               recBtn.disabled = true;
-              api.post('/channel/' + ch.dataset.chid + '/record', body).catch(function() {
+              api.post('/api/vod/record/' + ch.dataset.chid, body).catch(function() {
                 recBtn.classList.remove('recording'); recBtn.disabled = false;
               });
             }
@@ -1135,6 +1135,7 @@
           return;
         }
         if (btn.dataset.radioRec) {
+          toggleRadioRecord(btn, btn.dataset.sid);
           return;
         }
         play({ streamID: btn.dataset.sid, name: btn.dataset.sname, tvgId: btn.dataset.tvgid || undefined });
@@ -1196,6 +1197,30 @@
         if (activeRadio.nowInterval) clearInterval(activeRadio.nowInterval);
         api.del('/vod/' + activeRadio.sessionID + (activeRadio.consumerID ? '?consumer_id=' + activeRadio.consumerID : '')).catch(function() {});
         activeRadio = null;
+      }
+
+      function toggleRadioRecord(btn, streamID) {
+        if (btn.dataset.recording === '1') {
+          api.del('/vod/' + btn.dataset.sessionId + '/recording').then(function() {
+            btn.style.color = '';
+            btn.dataset.recording = '0';
+            btn.title = 'Record';
+          }).catch(function() {});
+          return;
+        }
+        btn.style.color = '#ffa726';
+        api.post('/stream/' + streamID + '/vod?profile=Browser')
+          .then(function(resp) {
+            if (!resp.session_id) { btn.style.color = ''; return; }
+            btn.dataset.sessionId = resp.session_id;
+            return api.post('/vod/' + resp.session_id + '/recording');
+          })
+          .then(function() {
+            btn.style.color = '#e53935';
+            btn.dataset.recording = '1';
+            btn.title = 'Stop Recording';
+          })
+          .catch(function() { btn.style.color = ''; });
       }
 
       function buildStreamRows(streams) {
@@ -2632,10 +2657,7 @@
       var vodPath = streamID ? '/stream/' + streamID + '/vod' : '/channel/' + channelID + '/vod';
       let session = null;
       try {
-        const resp = await fetch(vodPath + '?profile=Browser' + audioParam, { method: 'POST' }).then(function(r) {
-          if (!r.ok) throw new Error('VOD session failed: ' + r.status);
-          return r.json();
-        });
+        const resp = await api.post(vodPath + '?profile=Browser' + audioParam);
         if (resp.audio_only) {
           if (resp.session_id) {
             api.del('/vod/' + resp.session_id + (resp.consumer_id ? '?consumer_id=' + resp.consumer_id : '')).catch(function() {});
@@ -4909,9 +4931,9 @@
       }
 
       async function fetchAndRender() {
-        var viewers = await api.get('/api/activity');
-        var recordings = [];
-        try { recordings = await api.get('/api/recordings', { cache: 'no-store' }) || []; } catch (e) {}
+        var activity = await api.get('/api/activity');
+        var viewers = activity.filter(function(a) { return a.type !== 'recording'; });
+        var recordings = activity.filter(function(a) { return a.type === 'recording'; });
         renderViewers(viewers, recordings);
       }
 
