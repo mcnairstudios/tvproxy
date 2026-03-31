@@ -12,8 +12,10 @@ type BuildOptions struct {
 	UserAgent     string
 	Probe         *ProbeResult
 	Container     string
+	Delivery      string
 	HWAccel       string
 	VideoCodec    string
+	AudioCodec    string
 	CustomCommand string
 }
 
@@ -69,7 +71,7 @@ func composeBuildArgs(opts BuildOptions) string {
 	}
 
 	parts = append(parts, encoderFlags(opts.HWAccel, outputCodec, s)...)
-	parts = append(parts, buildAudioFlags(opts.Probe, opts.Container, s)...)
+	parts = append(parts, buildAudioFlags(opts.Probe, opts.Container, opts.Delivery, opts.AudioCodec, s)...)
 
 	parts = append(parts, "-output_ts_offset", "0")
 
@@ -128,9 +130,21 @@ func hwInitFlags(hwaccel, outputCodec string) []string {
 	return nil
 }
 
-func buildAudioFlags(probe *ProbeResult, container string, s *defaults.FFmpegSettings) []string {
-	if container == "webm" {
-		return []string{"-c:a", s.WebMAudioCodec, "-b:a", s.AudioBitrate}
+func buildAudioFlags(probe *ProbeResult, container, delivery, audioCodec string, s *defaults.FFmpegSettings) []string {
+	switch audioCodec {
+	case "copy":
+		return []string{"-c:a", "copy"}
+	case "aac":
+		return []string{"-c:a", "aac", "-b:a", s.AudioBitrate}
+	case "opus":
+		return []string{"-c:a", "libopus", "-b:a", s.AudioBitrate}
+	default:
+		if container == "webm" {
+			return []string{"-c:a", "libopus", "-b:a", s.AudioBitrate}
+		}
+		if delivery == "dash" {
+			return []string{"-c:a", "libopus", "-b:a", s.AudioBitrate}
+		}
+		return audioEncoder(probe)
 	}
-	return audioEncoder(probe)
 }

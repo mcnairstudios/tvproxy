@@ -25,6 +25,7 @@ var (
 	validVideoCodecs = map[string]bool{"default": true, "copy": true, "h264": true, "h265": true, "av1": true}
 	validContainers  = map[string]bool{"mpegts": true, "matroska": true, "mp4": true, "webm": true}
 	validDeliveries  = map[string]bool{"stream": true, "dash": true}
+	validAudioCodecs = map[string]bool{"default": true, "copy": true, "aac": true, "opus": true}
 	validFPSModes    = map[string]bool{"auto": true, "cfr": true}
 )
 
@@ -34,6 +35,7 @@ type profileFields struct {
 	VideoCodec    string
 	Container     string
 	Delivery      string
+	AudioCodec    string
 	FPSMode       string
 	Deinterlace   bool
 	UseCustomArgs bool
@@ -55,6 +57,9 @@ func validateProfileFields(f profileFields) string {
 	}
 	if !validDeliveries[f.Delivery] {
 		return "invalid delivery"
+	}
+	if !validAudioCodecs[f.AudioCodec] {
+		return "invalid audio_codec"
 	}
 	if !validFPSModes[f.FPSMode] {
 		return "invalid fps_mode"
@@ -94,6 +99,7 @@ func (h *StreamProfileHandler) Create(w http.ResponseWriter, r *http.Request) {
 		VideoCodec    string `json:"video_codec"`
 		Container     string `json:"container"`
 		Delivery      string `json:"delivery"`
+		AudioCodec    string `json:"audio_codec"`
 		Deinterlace   bool   `json:"deinterlace"`
 		FPSMode       string `json:"fps_mode"`
 		UseCustomArgs bool   `json:"use_custom_args"`
@@ -130,12 +136,15 @@ func (h *StreamProfileHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Delivery == "" {
 		req.Delivery = "stream"
 	}
+	if req.AudioCodec == "" {
+		req.AudioCodec = "default"
+	}
 	if req.FPSMode == "" {
 		req.FPSMode = "auto"
 	}
 
 	f := profileFields{
-		StreamMode: req.StreamMode, HWAccel: req.HWAccel, Delivery: req.Delivery,
+		StreamMode: req.StreamMode, HWAccel: req.HWAccel, Delivery: req.Delivery, AudioCodec: req.AudioCodec,
 		VideoCodec: req.VideoCodec, Container: req.Container, FPSMode: req.FPSMode,
 		Deinterlace: req.Deinterlace, UseCustomArgs: req.UseCustomArgs, CustomArgs: req.CustomArgs,
 	}
@@ -151,6 +160,7 @@ func (h *StreamProfileHandler) Create(w http.ResponseWriter, r *http.Request) {
 		VideoCodec:    req.VideoCodec,
 		Container:     req.Container,
 		Delivery:      req.Delivery,
+		AudioCodec:    req.AudioCodec,
 		Deinterlace:   req.Deinterlace,
 		FPSMode:       req.FPSMode,
 		UseCustomArgs: req.UseCustomArgs,
@@ -202,6 +212,7 @@ func (h *StreamProfileHandler) Update(w http.ResponseWriter, r *http.Request) {
 		VideoCodec    string `json:"video_codec"`
 		Container     string `json:"container"`
 		Delivery      string `json:"delivery"`
+		AudioCodec    string `json:"audio_codec"`
 		Deinterlace   bool   `json:"deinterlace"`
 		FPSMode       string `json:"fps_mode"`
 		UseCustomArgs bool   `json:"use_custom_args"`
@@ -255,6 +266,12 @@ func (h *StreamProfileHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Delivery == "" {
 		req.Delivery = "stream"
 	}
+	if req.AudioCodec == "" {
+		req.AudioCodec = profile.AudioCodec
+	}
+	if req.AudioCodec == "" {
+		req.AudioCodec = "default"
+	}
 	if req.FPSMode == "" {
 		req.FPSMode = profile.FPSMode
 	}
@@ -263,7 +280,7 @@ func (h *StreamProfileHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	f := profileFields{
-		StreamMode: req.StreamMode, HWAccel: req.HWAccel, Delivery: req.Delivery,
+		StreamMode: req.StreamMode, HWAccel: req.HWAccel, Delivery: req.Delivery, AudioCodec: req.AudioCodec,
 		VideoCodec: req.VideoCodec, Container: req.Container, FPSMode: req.FPSMode,
 		Deinterlace: req.Deinterlace, UseCustomArgs: req.UseCustomArgs, CustomArgs: req.CustomArgs,
 	}
@@ -277,6 +294,7 @@ func (h *StreamProfileHandler) Update(w http.ResponseWriter, r *http.Request) {
 	profile.VideoCodec = req.VideoCodec
 	profile.Container = req.Container
 	profile.Delivery = req.Delivery
+	profile.AudioCodec = req.AudioCodec
 	profile.Deinterlace = req.Deinterlace
 	profile.FPSMode = req.FPSMode
 	profile.IsDefault = req.IsDefault

@@ -26,7 +26,7 @@ func NewManager(log zerolog.Logger) *Manager {
 	}
 }
 
-func (m *Manager) GetOrStart(ctx context.Context, channelID, outputDir string, input io.Reader, audioOnly bool) (*Remuxer, error) {
+func (m *Manager) GetOrStart(ctx context.Context, channelID, outputDir string, input io.Reader) (*Remuxer, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -38,7 +38,7 @@ func (m *Manager) GetOrStart(ctx context.Context, channelID, outputDir string, i
 	}
 
 	r := NewRemuxer(outputDir, m.log)
-	if err := r.Start(ctx, input, audioOnly); err != nil {
+	if err := r.Start(ctx, input); err != nil {
 		return nil, err
 	}
 

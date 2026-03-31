@@ -56,7 +56,7 @@ func NewRemuxer(outputDir string, log zerolog.Logger) *Remuxer {
 	}
 }
 
-func (r *Remuxer) Start(ctx context.Context, input io.Reader, audioOnly bool) error {
+func (r *Remuxer) Start(ctx context.Context, input io.Reader) error {
 	if err := os.MkdirAll(r.outputDir, 0755); err != nil {
 		return fmt.Errorf("creating dash output dir: %w", err)
 	}
@@ -69,16 +69,15 @@ func (r *Remuxer) Start(ctx context.Context, input io.Reader, audioOnly bool) er
 		packagerBin = "/usr/local/bin/packager"
 	}
 
-	var args []string
-	if !audioOnly {
-		args = append(args, fmt.Sprintf("in=/dev/stdin,stream=video,init_segment=%s,segment_template=%s",
+	args := []string{
+		fmt.Sprintf("in=/dev/stdin,stream=video,init_segment=%s,segment_template=%s",
 			filepath.Join(r.outputDir, "init_v.mp4"),
-			filepath.Join(r.outputDir, "seg_v_$Number$.m4s")))
+			filepath.Join(r.outputDir, "seg_v_$Number$.m4s")),
+		fmt.Sprintf("in=/dev/stdin,stream=audio,init_segment=%s,segment_template=%s",
+			filepath.Join(r.outputDir, "init_a.mp4"),
+			filepath.Join(r.outputDir, "seg_a_$Number$.m4s")),
+		"--mpd_output", r.manifestPath, "--segment_duration", "2", "--io_block_size", "65536",
 	}
-	args = append(args, fmt.Sprintf("in=/dev/stdin,stream=audio,init_segment=%s,segment_template=%s",
-		filepath.Join(r.outputDir, "init_a.mp4"),
-		filepath.Join(r.outputDir, "seg_a_$Number$.m4s")))
-	args = append(args, "--mpd_output", r.manifestPath, "--segment_duration", "2", "--io_block_size", "65536")
 	r.cmd = exec.CommandContext(rctx, packagerBin, args...)
 	r.cmd.Stdin = input
 	r.cmd.Cancel = func() error {

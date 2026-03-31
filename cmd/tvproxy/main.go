@@ -150,6 +150,10 @@ func main() {
 		streamStore.Save()
 	}
 
+	dashTmpDir := filepath.Join(os.TempDir(), "tvproxy-dash")
+	os.RemoveAll(dashTmpDir)
+	log.Debug().Str("path", dashTmpDir).Msg("cleaned stale dash segments")
+
 	authService := service.NewAuthService(userStore, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
 	authService.SetInviteExpiry(cfg.Settings.Auth.InviteTokenExpiry)
 
@@ -221,6 +225,9 @@ func main() {
 	outputHandler := handler.NewOutputHandler(outputService)
 	proxyHandler := handler.NewProxyHandler(proxyService, settingsService, log)
 	dashManager := dash.NewManager(log)
+	sessionMgr.SetOnCleanup(func(channelID string) {
+		dashManager.Stop(channelID)
+	})
 	vodHandler := handler.NewVODHandler(vodService, clientService, dashManager, log)
 	activityHandler := handler.NewActivityHandler(activityService)
 	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)

@@ -1130,8 +1130,52 @@
           quickAddChannel(btn.dataset.sid, btn.dataset.sname, btn.dataset.tvgid || '', btn.dataset.slogo || '');
           return;
         }
+        if (btn.dataset.radioPlay) {
+          playRadioInline(btn, btn.dataset.sid, btn.dataset.sname);
+          return;
+        }
+        if (btn.dataset.radioRec) {
+          return;
+        }
         playStreamWithVODDetection(btn.dataset.sid, btn.dataset.sname, btn.dataset.tvgid || undefined);
       });
+
+      var activeRadio = null;
+      function playRadioInline(btn, streamID, name) {
+        if (activeRadio && activeRadio.streamID === streamID) {
+          if (activeRadio.audio.paused) {
+            activeRadio.audio.play();
+            btn.textContent = '\u23F9';
+            btn.title = 'Stop';
+          } else {
+            stopRadio();
+          }
+          return;
+        }
+        if (activeRadio) stopRadio();
+        btn.textContent = '\u23F3';
+        btn.title = 'Connecting...';
+        fetch('/stream/' + streamID + '/vod?profile=Browser', { method: 'POST', headers: { 'Authorization': 'Bearer ' + (state.accessToken || '') } })
+          .then(function(r) { return r.json(); })
+          .then(function(resp) {
+            if (!resp.session_id) { btn.textContent = '\u25B6'; return; }
+            var audio = new Audio('/vod/' + resp.session_id + '/stream');
+            audio.volume = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
+            audio.onplaying = function() { btn.textContent = '\u23F9'; btn.title = 'Stop'; };
+            audio.onerror = function() { btn.textContent = '\u25B6'; btn.title = 'Play'; stopRadio(); };
+            audio.play().catch(function() { btn.textContent = '\u25B6'; });
+            activeRadio = { streamID: streamID, sessionID: resp.session_id, consumerID: resp.consumer_id, audio: audio, btn: btn };
+          }).catch(function() { btn.textContent = '\u25B6'; });
+      }
+      function stopRadio() {
+        if (!activeRadio) return;
+        activeRadio.audio.pause();
+        activeRadio.audio.removeAttribute('src');
+        activeRadio.btn.textContent = '\u25B6';
+        activeRadio.btn.title = 'Play';
+        api.del('/vod/' + activeRadio.sessionID + (activeRadio.consumerID ? '?consumer_id=' + activeRadio.consumerID : '')).catch(function() {});
+        activeRadio = null;
+      }
 
       function buildStreamRows(streams) {
         const rows = [];
@@ -1154,7 +1198,17 @@
           } else {
             tracksCell = '<td></td>';
           }
-          rows.push('<tr><td>' + logo + '</td><td>' + esc(s.name) + '</td>' + tracksCell + '<td style="width:80px"><div class="actions-cell" style="justify-content:flex-end"><button class="btn btn-primary btn-sm btn-icon" title="Add as Channel" style="font-size:16px" data-qadd="1" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '" data-slogo="' + esc(s.logo || '') + '">+</button><button class="btn btn-secondary btn-sm btn-icon" title="Play" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '">\u25B6</button></div></td></tr>');
+          var isRadio = s.group && s.group.toLowerCase() === 'radio';
+          var actionHtml = '<div class="actions-cell" style="justify-content:flex-end;gap:4px;">';
+          actionHtml += '<button class="btn btn-primary btn-sm btn-icon" title="Add as Channel" style="font-size:16px" data-qadd="1" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '" data-slogo="' + esc(s.logo || '') + '">+</button>';
+          if (isRadio) {
+            actionHtml += '<button class="btn btn-sm btn-icon" title="Record" data-radio-rec="1" data-sid="' + s.id + '" style="font-size:12px">\u23FA</button>';
+            actionHtml += '<button class="btn btn-secondary btn-sm btn-icon" title="Play" data-radio-play="1" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '">\u25B6</button>';
+          } else {
+            actionHtml += '<button class="btn btn-secondary btn-sm btn-icon" title="Play" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '">\u25B6</button>';
+          }
+          actionHtml += '</div>';
+          rows.push('<tr><td>' + logo + '</td><td>' + esc(s.name) + '</td>' + tracksCell + '<td style="width:120px">' + actionHtml + '</td></tr>');
         }
         return rows;
       }
@@ -3570,6 +3624,7 @@
         { key: 'video_codec', label: 'Codec', render: item => ({'default':'Global Default',copy:'Copy',h264:'H.264',h265:'H.265',av1:'AV1'})[item.video_codec] || item.video_codec },
         { key: 'container', label: 'Container', render: item => ({mpegts:'MPEG-TS',matroska:'Matroska',mp4:'MP4',webm:'WebM'})[item.container] || item.container },
         { key: 'delivery', label: 'Delivery', render: item => ({stream:'Stream (FFmpeg)',dash:'DASH (Shaka)'})[item.delivery] || item.delivery || 'stream' },
+        { key: 'audio_codec', label: 'Audio', render: item => ({'default':'Auto',copy:'Copy',aac:'AAC',opus:'Opus'})[item.audio_codec] || item.audio_codec || 'Auto' },
         { key: 'is_default', label: 'Default', render: item => {
           const badges = [];
           if (item.is_system) badges.push(h('span', { className: 'badge badge-info', style: 'margin-right:4px' }, 'System'));
@@ -3613,6 +3668,12 @@
           { value: 'stream', label: 'Stream (FFmpeg)' },
           { value: 'dash', label: 'DASH (Shaka)' },
         ], default: 'stream', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
+        { key: 'audio_codec', label: 'Audio Codec', type: 'select', options: [
+          { value: 'default', label: 'Default (auto)' },
+          { value: 'copy', label: 'Copy (passthrough)' },
+          { value: 'aac', label: 'AAC' },
+          { value: 'opus', label: 'Opus' },
+        ], default: 'default', help: 'Default: Opus for DASH/WebM, Copy for passthrough, AAC otherwise.', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
         { key: 'deinterlace', label: 'Deinterlace', type: 'checkbox', default: false, help: 'Apply yadif deinterlace filter (only when transcoding, not copy).', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' && (form.video_codec || 'default') !== 'copy' },
         { key: 'fps_mode', label: 'FPS Mode', type: 'select', options: [
           { value: 'auto', label: 'Auto (variable)' },

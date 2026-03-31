@@ -146,8 +146,10 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 		StreamURL:     streamURL,
 		Probe:         probe,
 		Container:     sp.Container,
+		Delivery:      sp.Delivery,
 		HWAccel:       hwaccel,
 		VideoCodec:    videoCodec,
+		AudioCodec:    sp.AudioCodec,
 		CustomCommand: sp.Args,
 	})
 	return command, args, sp.Container

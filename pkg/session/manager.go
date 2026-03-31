@@ -40,12 +40,17 @@ type StartOpts struct {
 }
 
 type Manager struct {
-	sessions   map[string]*Session
-	config     *config.Config
-	httpClient *http.Client
-	probeCache store.ProbeCache
-	log        zerolog.Logger
-	mu         sync.RWMutex
+	sessions    map[string]*Session
+	config      *config.Config
+	httpClient  *http.Client
+	probeCache  store.ProbeCache
+	onCleanup   func(channelID string)
+	log         zerolog.Logger
+	mu          sync.RWMutex
+}
+
+func (m *Manager) SetOnCleanup(fn func(channelID string)) {
+	m.onCleanup = fn
 }
 
 func NewManager(cfg *config.Config, httpClient *http.Client, probeCache store.ProbeCache, log zerolog.Logger) *Manager {
@@ -254,11 +259,18 @@ func (m *Manager) stopAndCleanup(channelID string, s *Session) {
 
 	<-s.done
 
-	os.RemoveAll(s.TempDir)
+	if m.onCleanup != nil {
+		m.onCleanup(channelID)
+	}
+
+	if !s.HasRecordingConsumer() {
+		os.RemoveAll(s.TempDir)
+	}
 
 	m.log.Info().
 		Str("channel_id", channelID).
 		Str("session_id", s.ID).
+		Bool("preserved", s.HasRecordingConsumer()).
 		Msg("session stopped and cleaned up")
 }
 
