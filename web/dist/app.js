@@ -2563,7 +2563,10 @@
       if (progInterval) { clearInterval(progInterval); progInterval = null; }
       if (signalInterval) { clearInterval(signalInterval); signalInterval = null; }
       if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
-      if (videoEl) {
+      if (dashPlayer) {
+        dashPlayer.destroy();
+        dashPlayer = null;
+      } else if (videoEl) {
         videoEl.pause();
         videoEl.removeAttribute('src');
         videoEl.load();
@@ -2672,9 +2675,21 @@
 
     var savedVol = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
     videoEl.volume = savedVol;
-    videoEl.src = streamSrc;
     videoEl.addEventListener('volumechange', function() { localStorage.setItem('tvproxy_volume', String(videoEl.volume)); });
-    videoEl.play().catch(function() {});
+
+    var dashPlayer = null;
+    if (streamSrc.endsWith('.mpd') && typeof dashjs !== 'undefined') {
+      dashPlayer = dashjs.MediaPlayer().create();
+      dashPlayer.initialize(videoEl, streamSrc, true);
+      dashPlayer.updateSettings({ streaming: { lowLatencyEnabled: true, delay: { liveDelay: 3 } } });
+    } else {
+      videoEl.src = streamSrc;
+      videoEl.play().catch(function() {});
+    }
+
+    if (window.__vjsCreateStore) {
+      window.__vjsCreateStore()(videoEl);
+    }
 
     videoEl.addEventListener('playing', function() {
       retryCount = 0;
@@ -2728,7 +2743,9 @@
 
     function restartPlayback() {
       if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
-      if (videoEl) {
+      if (dashPlayer) {
+        dashPlayer.attachSource(streamSrc);
+      } else if (videoEl) {
         videoEl.src = streamSrc;
         videoEl.play().catch(function() {});
       }
