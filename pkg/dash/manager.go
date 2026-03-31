@@ -2,73 +2,83 @@ package dash
 
 import (
 	"context"
+	"io"
 	"os"
 	"sync"
 
 	"github.com/rs/zerolog"
 )
 
+type Remuxing struct {
+	remuxer *Remuxer
+	reader  io.ReadCloser
+}
+
 type Manager struct {
-	remuxers map[string]*Remuxer
-	mu       sync.Mutex
-	log      zerolog.Logger
+	remuxings map[string]*Remuxing
+	mu        sync.Mutex
+	log       zerolog.Logger
 }
 
 func NewManager(log zerolog.Logger) *Manager {
 	return &Manager{
-		remuxers: make(map[string]*Remuxer),
-		log:      log.With().Str("component", "dash_manager").Logger(),
+		remuxings: make(map[string]*Remuxing),
+		log:       log.With().Str("component", "dash_manager").Logger(),
 	}
 }
 
-func (m *Manager) GetOrStart(ctx context.Context, channelID, inputPath, outputDir string) (*Remuxer, error) {
+func (m *Manager) GetOrStart(ctx context.Context, channelID, outputDir string, reader io.ReadCloser) (*Remuxer, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if r, ok := m.remuxers[channelID]; ok {
-		if !r.IsDone() {
-			return r, nil
+	if rx, ok := m.remuxings[channelID]; ok {
+		if !rx.remuxer.IsDone() {
+			reader.Close()
+			return rx.remuxer, nil
 		}
-		delete(m.remuxers, channelID)
+		delete(m.remuxings, channelID)
 	}
 
-	r := NewRemuxer(inputPath, outputDir, m.log)
-	if err := r.Start(ctx); err != nil {
+	r := NewRemuxer(outputDir, m.log)
+	if err := r.Start(ctx, reader); err != nil {
+		reader.Close()
 		return nil, err
 	}
 
-	m.remuxers[channelID] = r
-	m.log.Info().Str("channel_id", channelID).Str("input", inputPath).Msg("dash remuxer started")
+	m.remuxings[channelID] = &Remuxing{remuxer: r, reader: reader}
+	m.log.Info().Str("channel_id", channelID).Msg("dash remuxer started")
 	return r, nil
 }
 
 func (m *Manager) Stop(channelID string) {
 	m.mu.Lock()
-	r, ok := m.remuxers[channelID]
+	rx, ok := m.remuxings[channelID]
 	if ok {
-		delete(m.remuxers, channelID)
+		delete(m.remuxings, channelID)
 	}
 	m.mu.Unlock()
 
 	if ok {
-		r.Stop()
-		os.RemoveAll(r.OutputDir())
+		rx.remuxer.Stop()
+		rx.reader.Close()
+		os.RemoveAll(rx.remuxer.OutputDir())
 		m.log.Info().Str("channel_id", channelID).Msg("dash remuxer stopped")
 	}
 }
 
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
-	remuxers := make([]*Remuxer, 0, len(m.remuxers))
-	for _, r := range m.remuxers {
-		remuxers = append(remuxers, r)
+	all := make(map[string]*Remuxing, len(m.remuxings))
+	for k, v := range m.remuxings {
+		all[k] = v
 	}
-	m.remuxers = make(map[string]*Remuxer)
+	m.remuxings = make(map[string]*Remuxing)
 	m.mu.Unlock()
 
-	for _, r := range remuxers {
-		r.Stop()
-		os.RemoveAll(r.OutputDir())
+	for _, rx := range all {
+		rx.remuxer.Stop()
+		rx.reader.Close()
+		os.RemoveAll(rx.remuxer.OutputDir())
 	}
-	m.log.Info().Int("count", len(remuxers)).Msg("dash manager shutdown complete")
+	m.log.Info().Int("count", len(all)).Msg("dash manager shutdown complete")
 }

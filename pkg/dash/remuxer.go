@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,7 +35,6 @@ func (w *logWriter) Write(p []byte) (int, error) {
 }
 
 type Remuxer struct {
-	inputPath    string
 	outputDir    string
 	manifestPath string
 	cmd          *exec.Cmd
@@ -46,9 +46,8 @@ type Remuxer struct {
 	log          zerolog.Logger
 }
 
-func NewRemuxer(inputPath, outputDir string, log zerolog.Logger) *Remuxer {
+func NewRemuxer(outputDir string, log zerolog.Logger) *Remuxer {
 	return &Remuxer{
-		inputPath:    inputPath,
 		outputDir:    outputDir,
 		manifestPath: filepath.Join(outputDir, "manifest.mpd"),
 		done:         make(chan struct{}),
@@ -57,46 +56,32 @@ func NewRemuxer(inputPath, outputDir string, log zerolog.Logger) *Remuxer {
 	}
 }
 
-func (r *Remuxer) Start(ctx context.Context) error {
+func (r *Remuxer) Start(ctx context.Context, input io.Reader) error {
 	if err := os.MkdirAll(r.outputDir, 0755); err != nil {
 		return fmt.Errorf("creating dash output dir: %w", err)
 	}
-
-	// Wait for the upstream to write the fMP4 init segment before starting.
-	// The file needs at least ftyp+moov (empty_moov) for ffmpeg to open it.
-	waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer waitCancel()
-	for {
-		info, err := os.Stat(r.inputPath)
-		if err == nil && info.Size() > 1024 {
-			break
-		}
-		select {
-		case <-waitCtx.Done():
-			return fmt.Errorf("upstream file not ready: %w", waitCtx.Err())
-		case <-time.After(500 * time.Millisecond):
-		}
-	}
-	r.log.Debug().Str("input", r.inputPath).Msg("upstream file ready, starting dash remuxer")
 
 	rctx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
 
 	r.cmd = exec.CommandContext(rctx, "ffmpeg",
 		"-y", "-hide_banner", "-loglevel", "warning",
-		"-f", "mp4", "-fflags", "+genpts+discardcorrupt+nofillin",
-		"-i", r.inputPath,
+		"-f", "mp4",
+		"-i", "pipe:0",
 		"-c", "copy",
 		"-f", "dash",
+		"-streaming", "1",
+		"-ldash", "1",
 		"-seg_duration", "2",
 		"-window_size", "5",
-		"-extra_window_size", "5",
+		"-extra_window_size", "10",
 		"-use_timeline", "1",
 		"-use_template", "1",
 		"-init_seg_name", "init-stream$RepresentationID$.$ext$",
 		"-media_seg_name", "chunk-stream$RepresentationID$-$Number%05d$.$ext$",
 		r.manifestPath,
 	)
+	r.cmd.Stdin = input
 	r.cmd.Cancel = func() error {
 		return r.cmd.Process.Signal(syscall.SIGTERM)
 	}

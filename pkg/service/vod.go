@@ -170,7 +170,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		ProfileName: profileName,
 		Command:     command,
 		Args:        args,
-		OutputDir:   s.config.VODTempDir,
+		OutputDir:   s.config.VODOutputDir,
 	}, "viewer")
 	if err != nil {
 		return "", "", "", err
@@ -213,7 +213,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		ProfileName: profileName,
 		Command:     command,
 		Args:        args,
-		OutputDir:   s.config.VODTempDir,
+		OutputDir:   s.config.VODOutputDir,
 	}, "viewer")
 	if err != nil {
 		return "", "", "", err
@@ -297,7 +297,7 @@ func (s *VODService) startRecordingInternal(ctx context.Context, channelID, titl
 		ProfileName: "recording",
 		Command:     command,
 		Args:        args,
-		OutputDir:   s.config.VODTempDir,
+		OutputDir:   s.config.VODOutputDir,
 	}, "recording")
 	if err != nil {
 		return err
@@ -606,7 +606,7 @@ func (s *VODService) removeRecordingIntent(tempDir string) {
 }
 
 func (s *VODService) RecoverRecordings(ctx context.Context) {
-	vodDir := s.config.VODTempDir
+	vodDir := s.config.VODOutputDir
 	if vodDir == "" {
 		return
 	}
