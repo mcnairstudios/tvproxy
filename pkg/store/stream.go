@@ -255,6 +255,31 @@ func (s *StreamStoreImpl) DeleteOrphanedM3UStreams(_ context.Context, knownAccou
 	return deleted, nil
 }
 
+func (s *StreamStoreImpl) DeleteOrphanedSatIPStreams(_ context.Context, knownSourceIDs []string) ([]string, error) {
+	known := make(map[string]struct{}, len(knownSourceIDs))
+	for _, id := range knownSourceIDs {
+		known[id] = struct{}{}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var deleted []string
+	for id, st := range s.items {
+		if st.SatIPSourceID == "" {
+			continue
+		}
+		if _, ok := known[st.SatIPSourceID]; !ok {
+			delete(s.items, id)
+			deleted = append(deleted, id)
+		}
+	}
+	if len(deleted) > 0 {
+		s.rev.Bump()
+	}
+	return deleted, nil
+}
+
 func (s *StreamStoreImpl) Delete(_ context.Context, id string) error {
 	s.mu.Lock()
 	delete(s.items, id)

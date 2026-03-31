@@ -139,6 +139,17 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to load satip source store")
 	}
 
+	// Clean up orphaned streams from deleted SAT>IP sources
+	satipSources, _ := satipSourceStore.List(ctx)
+	satipIDs := make([]string, len(satipSources))
+	for i, s := range satipSources {
+		satipIDs[i] = s.ID
+	}
+	if deleted, err := streamStore.DeleteOrphanedSatIPStreams(ctx, satipIDs); err == nil && len(deleted) > 0 {
+		log.Info().Int("count", len(deleted)).Msg("cleaned up orphaned satip streams")
+		streamStore.Save()
+	}
+
 	authService := service.NewAuthService(userStore, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
 	authService.SetInviteExpiry(cfg.Settings.Auth.InviteTokenExpiry)
 
