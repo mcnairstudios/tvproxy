@@ -101,7 +101,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	logoService := service.NewLogoService(logoStore, epgStore, testLogoCache, log)
 
 	satipSourceStore := store.NewSatIPSourceStore(filepath.Join(dir, "satip_sources.json"))
-	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, log)
+	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, nil, log)
 	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, cfg, nil, log)
 	channelService := service.NewChannelService(channelStore, channelGroupStore, streamStore, log)
 	epgService := service.NewEPGService(epgSourceStore, epgStore, cfg, nil, log)

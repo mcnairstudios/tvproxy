@@ -2541,6 +2541,52 @@
   let activePlayerCleanup = null;
   let playInProgress = false;
 
+  var globalRadio = null;
+  function playGlobalRadio(id, name, tvgId, isChannel) {
+    stopGlobalRadio();
+    var vodPath = isChannel ? '/channel/' + id + '/vod' : '/stream/' + id + '/vod';
+    fetch(vodPath + '?profile=Browser', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(resp) {
+        if (!resp.session_id) return;
+        var audio = new Audio('/vod/' + resp.session_id + '/stream');
+        audio.volume = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
+
+        var bar = document.createElement('div');
+        bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--bg-card);border-top:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:12px;z-index:9999;';
+        var nameEl = document.createElement('span');
+        nameEl.style.cssText = 'color:#e0e0e0;font-size:14px;flex:1;';
+        nameEl.textContent = name;
+        var stopBtn = document.createElement('button');
+        stopBtn.className = 'btn btn-sm';
+        stopBtn.textContent = '\u23F9 Stop';
+        stopBtn.onclick = stopGlobalRadio;
+        bar.appendChild(nameEl);
+        bar.appendChild(stopBtn);
+        document.body.appendChild(bar);
+
+        audio.onplaying = function() { nameEl.textContent = '\u25B6 ' + name; };
+        audio.onerror = function() { stopGlobalRadio(); };
+        audio.play().catch(function() {});
+
+        if (tvgId) {
+          api.get('/api/epg/now?channel_id=' + encodeURIComponent(tvgId)).then(function(p) {
+            if (p && p.title) nameEl.textContent = '\u25B6 ' + name + ' \u2014 ' + p.title;
+          }).catch(function() {});
+        }
+
+        globalRadio = { audio: audio, bar: bar, sessionID: resp.session_id, consumerID: resp.consumer_id };
+      }).catch(function() {});
+  }
+  function stopGlobalRadio() {
+    if (!globalRadio) return;
+    globalRadio.audio.pause();
+    globalRadio.audio.removeAttribute('src');
+    globalRadio.bar.remove();
+    api.del('/vod/' + globalRadio.sessionID + (globalRadio.consumerID ? '?consumer_id=' + globalRadio.consumerID : '')).catch(function() {});
+    globalRadio = null;
+  }
+
   function isAudioOnly(streamTracks, streamGroup) {
     if (streamGroup && streamGroup.toLowerCase() === 'radio') return true;
     if (!streamTracks || !streamTracks.length) return false;
@@ -2560,8 +2606,15 @@
       var name = opts.name || '';
       var tvgId = opts.tvgId;
 
-      if (streamID && streamsCache._data) {
-        var s = streamsCache._data.find(function(s) { return s.id === streamID; });
+      var lookupID = streamID;
+      if (!lookupID && channelID && channelsCache._data) {
+        var ch = channelsCache._data.find(function(c) { return c.id === channelID; });
+        if (ch && ch.stream_ids && ch.stream_ids.length > 0) {
+          lookupID = ch.stream_ids[0];
+        }
+      }
+      if (lookupID && streamsCache._data) {
+        var s = streamsCache._data.find(function(s) { return s.id === lookupID; });
         if (s) {
           if (s.tracks) streamTracks = s.tracks;
           if (s.group) streamGroup = s.group;
@@ -2569,6 +2622,8 @@
       }
 
       if (isAudioOnly(streamTracks, streamGroup)) {
+        var radioID = streamID || (channelID ? channelID : null);
+        if (radioID) playGlobalRadio(radioID, name, tvgId, !!channelID);
         return;
       }
 
@@ -2581,6 +2636,14 @@
           if (!r.ok) throw new Error('VOD session failed: ' + r.status);
           return r.json();
         });
+        if (resp.audio_only) {
+          if (resp.session_id) {
+            api.del('/vod/' + resp.session_id + (resp.consumer_id ? '?consumer_id=' + resp.consumer_id : '')).catch(function() {});
+          }
+          var radioID = streamID || channelID;
+          if (radioID) playGlobalRadio(radioID, name, tvgId, !!channelID);
+          return;
+        }
         if (resp.session_id) {
           session = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, request_headers: resp.request_headers };
         }

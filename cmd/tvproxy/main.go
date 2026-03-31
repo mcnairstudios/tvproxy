@@ -190,7 +190,7 @@ func main() {
 	logoCache := logocache.New(filepath.Join(dataDir, "static", "logocache"), cfg, logoTimeout)
 	logoService := service.NewLogoService(logoStore, epgStore, logoCache, log)
 
-	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, log)
+	// satipService created below after recordingStore
 	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, cfg, wgHTTPClient, log)
 	m3uService.CleanupOrphanedStreams(ctx)
 	channelService := service.NewChannelService(channelStore, channelGroupStore, streamStore, log)
@@ -202,6 +202,7 @@ func main() {
 	hdhrService := service.NewHDHRService(hdhrStore, channelStore)
 	outputService := service.NewOutputService(channelStore, channelGroupStore, epgStore, logoService, cfg, log)
 	recordingStore := store.NewRecordingStore(cfg.RecordDir, log)
+	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, recordingStore, log)
 	sessionMgr := session.NewManager(cfg, wgHTTPClient, recordingStore, log)
 	vodService := service.NewVODService(channelStore, streamStore, profileStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
 	vodService.RecoverRecordings(ctx)

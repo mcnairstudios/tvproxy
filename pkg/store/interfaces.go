@@ -80,6 +80,8 @@ type ProbeCache interface {
 	GetProbe(streamHash string) (*ffmpeg.ProbeResult, error)
 	SaveProbe(streamHash string, result *ffmpeg.ProbeResult) error
 	InvalidateProbe(streamHash string) error
+	GetProbeByStreamID(streamID string) (*ffmpeg.ProbeResult, error)
+	SaveProbeByStreamID(streamID string, result *ffmpeg.ProbeResult) error
 }
 
 type RecordingReader interface {

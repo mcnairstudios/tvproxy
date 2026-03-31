@@ -150,7 +150,7 @@ func (h *VODHandler) CreateChannelSession(w http.ResponseWriter, r *http.Request
 	channelID := chi.URLParam(r, "channelID")
 	profileName := r.URL.Query().Get("profile")
 
-	sessionID, consumerID, container, err := h.vodService.StartWatching(r.Context(), channelID, profileName, r.UserAgent(), r.RemoteAddr)
+	sessionID, consumerID, container, audioOnly, err := h.vodService.StartWatching(r.Context(), channelID, profileName, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
 		h.log.Error().Err(err).Str("channel_id", channelID).Msg("create channel VOD session failed")
 		respondError(w, http.StatusBadRequest, err.Error())
@@ -162,6 +162,7 @@ func (h *VODHandler) CreateChannelSession(w http.ResponseWriter, r *http.Request
 		"consumer_id":     consumerID,
 		"channel_id":      channelID,
 		"container":       container,
+		"audio_only":      audioOnly,
 		"request_headers": clientHeaders(r),
 	})
 }

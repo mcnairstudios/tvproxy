@@ -68,6 +68,37 @@ func (s *RecordingStoreImpl) GetProbe(streamHash string) (*ffmpeg.ProbeResult, e
 	return &result, nil
 }
 
+func (s *RecordingStoreImpl) SaveProbeByStreamID(streamID string, result *ffmpeg.ProbeResult) error {
+	if err := validatePathComponent(streamID); err != nil {
+		return fmt.Errorf("invalid stream ID: %w", err)
+	}
+	dir := filepath.Join(s.rootDir, streamID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "probe.json"), data, 0644)
+}
+
+func (s *RecordingStoreImpl) GetProbeByStreamID(streamID string) (*ffmpeg.ProbeResult, error) {
+	if err := validatePathComponent(streamID); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(s.rootDir, streamID, "probe.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var result ffmpeg.ProbeResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (s *RecordingStoreImpl) SaveProbe(streamHash string, result *ffmpeg.ProbeResult) error {
 	if err := validatePathComponent(streamHash); err != nil {
 		return fmt.Errorf("invalid stream hash: %w", err)

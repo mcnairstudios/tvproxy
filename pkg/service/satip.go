@@ -10,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/tvsatipscan"
@@ -19,6 +20,7 @@ type SatIPService struct {
 	satipSourceStore store.SatIPSourceStore
 	streamStore      store.StreamStore
 	channelStore     store.ChannelStore
+	recordingStore   *store.RecordingStoreImpl
 	log              zerolog.Logger
 	StatusTracker
 }
@@ -27,12 +29,14 @@ func NewSatIPService(
 	satipSourceStore store.SatIPSourceStore,
 	streamStore store.StreamStore,
 	channelStore store.ChannelStore,
+	recordingStore *store.RecordingStoreImpl,
 	log zerolog.Logger,
 ) *SatIPService {
 	return &SatIPService{
 		satipSourceStore: satipSourceStore,
 		streamStore:      streamStore,
 		channelStore:     channelStore,
+		recordingStore:   recordingStore,
 		log:              log.With().Str("service", "satip").Logger(),
 		StatusTracker:    NewStatusTracker(),
 	}
@@ -177,16 +181,43 @@ func (s *SatIPService) scanSource(ctx context.Context, source *models.SatIPSourc
 		contentHash := source.ID + ":" + strconv.Itoa(int(ch.ServiceID))
 		id := deterministicStreamID(contentHash)
 		keepIDs = append(keepIDs, id)
+		group := satipStreamGroup(ch.ServiceType)
+		tracks := satipTracks(ch.Streams)
 		streams = append(streams, models.Stream{
 			ID:            id,
 			SatIPSourceID: source.ID,
 			Name:          ch.Name,
 			URL:           ch.RTSPURL(source.Host),
-			Group:         satipStreamGroup(ch.ServiceType),
+			Group:         group,
 			ContentHash:   contentHash,
 			IsActive:      true,
-			Tracks:        satipTracks(ch.Streams),
+			Tracks:        tracks,
 		})
+
+		if s.recordingStore != nil {
+			hasVideo := group != "Radio"
+			probe := &ffmpeg.ProbeResult{
+				HasVideo:   hasVideo,
+				SourceType: "satip",
+			}
+			if hasVideo {
+				for _, t := range tracks {
+					if t.Category == "video" {
+						probe.Video = &ffmpeg.VideoInfo{Codec: t.Type}
+						break
+					}
+				}
+			}
+			for _, t := range tracks {
+				if t.Category == "audio" {
+					probe.AudioTracks = append(probe.AudioTracks, ffmpeg.AudioTrack{
+						Language: t.Language,
+						Codec:    t.Type,
+					})
+				}
+			}
+			s.recordingStore.SaveProbeByStreamID(id, probe)
+		}
 	}
 
 	// Preserve existing streams from muxes that had no signal or errors this scan.
