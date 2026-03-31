@@ -9,7 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
+
+	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -118,7 +121,7 @@ func (s *VODService) resolveStreamForChannel(ctx context.Context, channelID stri
 	return "", "", "", "", "", fmt.Errorf("no active streams for channel %s", channelID)
 }
 
-func (s *VODService) composeSessionArgs(ctx context.Context, profileName, streamURL string) (string, string, string) {
+func (s *VODService) composeSessionArgs(ctx context.Context, profileName, streamURL, streamGroup string) (string, string, string) {
 	if profileName == "" {
 		return "ffmpeg", "", "mp4"
 	}
@@ -142,6 +145,7 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 		probe, _ = s.recordingStore.GetProbe(ffmpeg.StreamHash(streamURL))
 	}
 
+	audioOnly := strings.EqualFold(streamGroup, "radio")
 	command, args := ffmpeg.Build(ffmpeg.BuildOptions{
 		StreamURL:     streamURL,
 		Probe:         probe,
@@ -150,6 +154,7 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 		HWAccel:       hwaccel,
 		VideoCodec:    videoCodec,
 		AudioCodec:    sp.AudioCodec,
+		AudioOnly:     audioOnly,
 		CustomCommand: sp.Args,
 	})
 	return command, args, sp.Container
@@ -161,7 +166,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		return "", "", "", err
 	}
 
-	command, args, container := s.composeSessionArgs(ctx, profileName, streamURL)
+	command, args, container := s.composeSessionArgs(ctx, profileName, streamURL, "")
 
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
 		ChannelID:   channelID,
@@ -204,12 +209,17 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		return "", "", "", fmt.Errorf("stream %s is inactive", streamID)
 	}
 
-	command, args, container := s.composeSessionArgs(ctx, profileName, stream.URL)
+	streamURL := stream.URL
+	if strings.EqualFold(stream.Group, "radio") {
+		streamURL = audioOnlyURL(*stream)
+	}
+
+	command, args, container := s.composeSessionArgs(ctx, profileName, streamURL, stream.Group)
 
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
 		ChannelID:   streamID,
 		StreamID:    streamID,
-		StreamURL:   stream.URL,
+		StreamURL:   streamURL,
 		StreamName:  stream.Name,
 		ChannelName: stream.Name,
 		ProfileName: profileName,
@@ -665,4 +675,33 @@ func (s *VODService) Shutdown() {
 
 	s.sessionMgr.Shutdown()
 	s.log.Info().Msg("VOD service shutdown complete")
+}
+
+func audioOnlyURL(stream models.Stream) string {
+	if len(stream.Tracks) == 0 {
+		return stream.URL
+	}
+	var audioPIDs []string
+	for _, t := range stream.Tracks {
+		if t.Category == "audio" {
+			audioPIDs = append(audioPIDs, fmt.Sprintf("%d", t.PID))
+		}
+	}
+	if len(audioPIDs) == 0 {
+		return stream.URL
+	}
+	// Replace pids= in the URL with just PAT (0) + audio PIDs
+	idx := strings.Index(stream.URL, "pids=")
+	if idx < 0 {
+		return stream.URL
+	}
+	end := strings.Index(stream.URL[idx:], "&")
+	var base string
+	if end < 0 {
+		base = stream.URL[:idx]
+	} else {
+		base = stream.URL[:idx] + stream.URL[idx+end+1:]
+		base += "&"
+	}
+	return base + "pids=0," + strings.Join(audioPIDs, ",")
 }

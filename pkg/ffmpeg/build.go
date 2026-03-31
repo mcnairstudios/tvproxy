@@ -16,6 +16,7 @@ type BuildOptions struct {
 	HWAccel       string
 	VideoCodec    string
 	AudioCodec    string
+	AudioOnly     bool
 	CustomCommand string
 }
 
@@ -28,23 +29,31 @@ func Build(opts BuildOptions) (command, args string) {
 
 func composeBuildArgs(opts BuildOptions) string {
 	s := settings()
+	hasVideo := !opts.AudioOnly && (opts.Probe == nil || opts.Probe.HasVideo)
 	outputCodec := resolveOutputCodec(opts.Probe, opts.VideoCodec)
 	interlaced := opts.Probe != nil && opts.Probe.Video != nil && isInterlaced(opts.Probe.Video.FieldOrder)
 
 	var parts []string
 	parts = append(parts, "-hide_banner", "-loglevel", s.LogLevel, "-nostdin")
 
-	hasProbeVideo := opts.Probe == nil || opts.Probe.HasVideo
-	if outputCodec != "copy" && hasProbeVideo {
+	if outputCodec != "copy" && hasVideo {
 		parts = append(parts, hwInitFlags(opts.HWAccel, outputCodec)...)
 	}
 
 	if isRTSPURL(opts.StreamURL) {
-		parts = append(parts,
-			"-rtsp_transport", "tcp",
-			"-analyzeduration", "3000000",
-			"-probesize", "2000000",
-			"-max_delay", "500000")
+		if opts.AudioOnly {
+			parts = append(parts,
+				"-rtsp_transport", "tcp",
+				"-analyzeduration", "0",
+				"-probesize", "32",
+				"-max_delay", "500000")
+		} else {
+			parts = append(parts,
+				"-rtsp_transport", "tcp",
+				"-analyzeduration", "3000000",
+				"-probesize", "2000000",
+				"-max_delay", "500000")
+		}
 	} else if isHTTPURL(opts.StreamURL) {
 		parts = append(parts,
 			"-reconnect", "1",
@@ -60,7 +69,6 @@ func composeBuildArgs(opts BuildOptions) string {
 
 	parts = append(parts, "-err_detect", "ignore_err", "-fflags", s.FFlags, "-i", "{input}")
 
-	hasVideo := opts.Probe == nil || opts.Probe.HasVideo
 	if hasVideo {
 		parts = append(parts, "-map", "0:v:0?")
 	}
