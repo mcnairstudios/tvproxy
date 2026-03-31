@@ -23,7 +23,8 @@ var (
 	validStreamModes = map[string]bool{"direct": true, "proxy": true, "ffmpeg": true}
 	validHWAccels    = map[string]bool{"default": true, "none": true, "qsv": true, "nvenc": true, "vaapi": true, "videotoolbox": true}
 	validVideoCodecs = map[string]bool{"default": true, "copy": true, "h264": true, "h265": true, "av1": true}
-	validContainers  = map[string]bool{"mpegts": true, "matroska": true, "mp4": true, "webm": true, "dash": true}
+	validContainers  = map[string]bool{"mpegts": true, "matroska": true, "mp4": true, "webm": true}
+	validDeliveries  = map[string]bool{"stream": true, "dash": true}
 	validFPSModes    = map[string]bool{"auto": true, "cfr": true}
 )
 
@@ -32,6 +33,7 @@ type profileFields struct {
 	HWAccel       string
 	VideoCodec    string
 	Container     string
+	Delivery      string
 	FPSMode       string
 	Deinterlace   bool
 	UseCustomArgs bool
@@ -50,6 +52,9 @@ func validateProfileFields(f profileFields) string {
 	}
 	if !validContainers[f.Container] {
 		return "invalid container"
+	}
+	if !validDeliveries[f.Delivery] {
+		return "invalid delivery"
 	}
 	if !validFPSModes[f.FPSMode] {
 		return "invalid fps_mode"
@@ -88,6 +93,7 @@ func (h *StreamProfileHandler) Create(w http.ResponseWriter, r *http.Request) {
 		HWAccel       string `json:"hwaccel"`
 		VideoCodec    string `json:"video_codec"`
 		Container     string `json:"container"`
+		Delivery      string `json:"delivery"`
 		Deinterlace   bool   `json:"deinterlace"`
 		FPSMode       string `json:"fps_mode"`
 		UseCustomArgs bool   `json:"use_custom_args"`
@@ -121,12 +127,15 @@ func (h *StreamProfileHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Container == "" {
 		req.Container = ffmpeg.DefaultContainer(req.VideoCodec)
 	}
+	if req.Delivery == "" {
+		req.Delivery = "stream"
+	}
 	if req.FPSMode == "" {
 		req.FPSMode = "auto"
 	}
 
 	f := profileFields{
-		StreamMode: req.StreamMode, HWAccel: req.HWAccel,
+		StreamMode: req.StreamMode, HWAccel: req.HWAccel, Delivery: req.Delivery,
 		VideoCodec: req.VideoCodec, Container: req.Container, FPSMode: req.FPSMode,
 		Deinterlace: req.Deinterlace, UseCustomArgs: req.UseCustomArgs, CustomArgs: req.CustomArgs,
 	}
@@ -141,6 +150,7 @@ func (h *StreamProfileHandler) Create(w http.ResponseWriter, r *http.Request) {
 		HWAccel:       req.HWAccel,
 		VideoCodec:    req.VideoCodec,
 		Container:     req.Container,
+		Delivery:      req.Delivery,
 		Deinterlace:   req.Deinterlace,
 		FPSMode:       req.FPSMode,
 		UseCustomArgs: req.UseCustomArgs,
@@ -191,6 +201,7 @@ func (h *StreamProfileHandler) Update(w http.ResponseWriter, r *http.Request) {
 		HWAccel       string `json:"hwaccel"`
 		VideoCodec    string `json:"video_codec"`
 		Container     string `json:"container"`
+		Delivery      string `json:"delivery"`
 		Deinterlace   bool   `json:"deinterlace"`
 		FPSMode       string `json:"fps_mode"`
 		UseCustomArgs bool   `json:"use_custom_args"`
@@ -238,6 +249,12 @@ func (h *StreamProfileHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Container == "" {
 		req.Container = ffmpeg.DefaultContainer(req.VideoCodec)
 	}
+	if req.Delivery == "" {
+		req.Delivery = profile.Delivery
+	}
+	if req.Delivery == "" {
+		req.Delivery = "stream"
+	}
 	if req.FPSMode == "" {
 		req.FPSMode = profile.FPSMode
 	}
@@ -246,7 +263,7 @@ func (h *StreamProfileHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	f := profileFields{
-		StreamMode: req.StreamMode, HWAccel: req.HWAccel,
+		StreamMode: req.StreamMode, HWAccel: req.HWAccel, Delivery: req.Delivery,
 		VideoCodec: req.VideoCodec, Container: req.Container, FPSMode: req.FPSMode,
 		Deinterlace: req.Deinterlace, UseCustomArgs: req.UseCustomArgs, CustomArgs: req.CustomArgs,
 	}
@@ -259,6 +276,7 @@ func (h *StreamProfileHandler) Update(w http.ResponseWriter, r *http.Request) {
 	profile.HWAccel = req.HWAccel
 	profile.VideoCodec = req.VideoCodec
 	profile.Container = req.Container
+	profile.Delivery = req.Delivery
 	profile.Deinterlace = req.Deinterlace
 	profile.FPSMode = req.FPSMode
 	profile.IsDefault = req.IsDefault

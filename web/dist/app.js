@@ -2563,9 +2563,9 @@
       if (progInterval) { clearInterval(progInterval); progInterval = null; }
       if (signalInterval) { clearInterval(signalInterval); signalInterval = null; }
       if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
-      if (dashPlayer) {
-        dashPlayer.destroy();
-        dashPlayer = null;
+      if (shakaPlayer) {
+        shakaPlayer.destroy();
+        shakaPlayer = null;
       } else if (videoEl) {
         videoEl.pause();
         videoEl.removeAttribute('src');
@@ -2592,20 +2592,20 @@
     var overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:' + (window.innerWidth <= 768 ? 'flex-start' : 'center') + ';justify-content:center;' + (window.innerWidth <= 768 ? 'padding-top:env(safe-area-inset-top);' : '');
     var modal = document.createElement('div');
-    modal.style.cssText = 'background:var(--bg-card);border-radius:8px;padding:' + (window.innerWidth <= 768 ? '8px' : '12px') + ';max-width:800px;width:' + (window.innerWidth <= 768 ? '100%' : '90%') + ';position:relative;' + (window.innerWidth <= 768 ? 'border-radius:0;margin:0;' : '');
+    modal.style.cssText = 'background:#000;border-radius:12px;max-width:900px;width:' + (window.innerWidth <= 768 ? '100%' : '90%') + ';position:relative;overflow:hidden;' + (window.innerWidth <= 768 ? 'border-radius:0;margin:0;' : '');
 
-    var header = document.createElement('div');
-    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
-    var titleEl = document.createElement('h3');
-    titleEl.style.cssText = 'margin:0;color:#e0e0e0;font-size:16px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-    titleEl.textContent = title;
-    var hdrRight = document.createElement('div');
-    hdrRight.style.cssText = 'display:flex;gap:6px;flex-shrink:0;align-items:center;';
+    var playerWrap = document.createElement('div');
+    playerWrap.setAttribute('data-shaka-player-container', '');
+    playerWrap.style.cssText = 'position:relative;border-radius:12px;overflow:hidden;' + (audioOnly ? '' : 'aspect-ratio:16/9;') + 'background:#000;';
+
+    var videoEl = document.createElement('video');
+    videoEl.setAttribute('playsinline', '');
+    videoEl.setAttribute('data-shaka-player', '');
+    videoEl.style.cssText = 'width:100%;height:100%;display:block;';
+    playerWrap.appendChild(videoEl);
 
     var recordBtn = document.createElement('button');
-    recordBtn.className = 'btn btn-sm';
     recordBtn.title = 'Record';
-    recordBtn.style.cssText = 'padding:4px 8px;line-height:1;font-size:12px;';
     recordBtn.textContent = '\u23FA';
     function startRecordingUI() {
       isRecording = true;
@@ -2627,35 +2627,30 @@
     };
 
     var statsBtn = document.createElement('button');
-    statsBtn.className = 'btn btn-sm';
-    statsBtn.style.cssText = 'padding:4px 8px;line-height:1;font-size:12px;';
     statsBtn.textContent = '\u2139';
     statsBtn.title = 'Stats';
 
     var closeBtn = document.createElement('button');
-    closeBtn.className = 'btn btn-sm';
-    closeBtn.style.cssText = 'padding:4px 8px;font-size:14px;line-height:1;';
     closeBtn.textContent = '\u2715';
     closeBtn.title = 'Close';
     closeBtn.onclick = cleanup;
 
-    hdrRight.appendChild(statsBtn);
-    hdrRight.appendChild(recordBtn);
-    hdrRight.appendChild(closeBtn);
-    header.appendChild(titleEl);
-    header.appendChild(hdrRight);
-    modal.appendChild(header);
+    var titleEl = document.createElement('span');
+    titleEl.textContent = title;
 
-    var playerWrap = document.createElement('div');
-    playerWrap.style.cssText = 'position:relative;border-radius:12px;overflow:hidden;' + (audioOnly ? 'max-height:80px;' : '');
+    var floatBar = document.createElement('div');
+    floatBar.style.cssText = 'position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:8px 12px;background:linear-gradient(rgba(0,0,0,0.7),transparent);opacity:0;transition:opacity 0.2s;z-index:20;pointer-events:none;';
+    var barBtns = [titleEl, recordBtn, statsBtn, closeBtn];
+    titleEl.style.cssText = 'flex:1;color:#fff;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,0.5);';
+    var btnStyle = 'background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);border:none;color:#fff;width:32px;height:32px;border-radius:50%;font-size:14px;cursor:pointer;pointer-events:auto;transition:background 0.15s;';
+    recordBtn.style.cssText = btnStyle;
+    statsBtn.style.cssText = btnStyle;
+    closeBtn.style.cssText = btnStyle;
+    barBtns.forEach(function(b) { floatBar.appendChild(b); });
+    playerWrap.appendChild(floatBar);
 
-    var skin = document.createElement('video-skin');
-    var videoEl = document.createElement('video');
-    videoEl.setAttribute('playsinline', '');
-    videoEl.setAttribute('controls', '');
-    videoEl.slot = 'media';
-    skin.appendChild(videoEl);
-    playerWrap.appendChild(skin);
+    playerWrap.addEventListener('mouseenter', function() { floatBar.style.opacity = '1'; });
+    playerWrap.addEventListener('mouseleave', function() { floatBar.style.opacity = '0'; });
 
     var statsOverlay = document.createElement('div');
     statsOverlay.style.cssText = 'display:none;position:absolute;top:8px;left:8px;background:rgba(0,0,0,0.8);color:#fff;padding:10px 12px;border-radius:6px;font-size:11px;font-family:monospace;line-height:1.6;z-index:100;max-height:80%;overflow-y:auto;pointer-events:none;';
@@ -2663,10 +2658,10 @@
     playerWrap.appendChild(statsOverlay);
     modal.appendChild(playerWrap);
 
-    var statusEl = document.createElement('div');
-    statusEl.style.cssText = 'color:#999;font-size:12px;margin-top:6px;';
-    statusEl.textContent = 'Connecting...';
-    modal.appendChild(statusEl);
+    var statusEl = document.createElement('span');
+    statusEl.style.cssText = 'background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);color:#fff;font-size:11px;padding:4px 10px;border-radius:16px;pointer-events:none;white-space:nowrap;';
+    statusEl.textContent = 'Idle';
+    floatBar.insertBefore(statusEl, closeBtn);
 
     overlay.appendChild(modal);
     overlay.onclick = function(e) { if (e.target === overlay) cleanup(); };
@@ -2678,11 +2673,37 @@
     videoEl.volume = savedVol;
     videoEl.addEventListener('volumechange', function() { localStorage.setItem('tvproxy_volume', String(videoEl.volume)); });
 
-    var dashPlayer = null;
-    if (streamSrc.endsWith('.mpd') && typeof dashjs !== 'undefined') {
-      dashPlayer = dashjs.MediaPlayer().create();
-      dashPlayer.initialize(videoEl, streamSrc, true);
-      dashPlayer.updateSettings({ streaming: { delay: { liveDelay: 3 }, buffer: { fastSwitchEnabled: true } } });
+    var shakaPlayer = null;
+    if (typeof shaka !== 'undefined') {
+      shaka.polyfill.installAll();
+      shakaPlayer = new shaka.Player();
+      shakaPlayer.configure({
+        streaming: {
+          bufferingGoal: 10,
+          rebufferingGoal: 2,
+          bufferBehind: 30,
+          retryParameters: { maxAttempts: 5, baseDelay: 500 }
+        }
+      });
+      shakaPlayer.attach(videoEl).then(function() {
+        var ui = new shaka.ui.Overlay(shakaPlayer, playerWrap, videoEl);
+        ui.configure({
+          addBigPlayButton: false,
+          fadeDelay: 2,
+          controlPanelElements: ['play_pause', 'time_and_duration', 'spacer', 'mute', 'volume', 'fullscreen'],
+          overflowMenuButtons: []
+        });
+        return shakaPlayer.load(streamSrc).then(function() {
+          videoEl.play().catch(function() {});
+        });
+      }).catch(function(e) {
+        statusEl.style.color = '#ff6b6b';
+        statusEl.textContent = 'Errored';
+        statusEl.style.cursor = 'pointer';
+        statusEl.style.pointerEvents = 'auto';
+        statusEl.title = e.message || String(e);
+        statusEl.onclick = function() { alert('Player error:\n\n' + (e.detail || e.message || e)); };
+      });
     } else {
       videoEl.src = streamSrc;
       videoEl.play().catch(function() {});
@@ -2697,7 +2718,7 @@
     });
     videoEl.addEventListener('waiting', function() {
       statusEl.style.color = '#ffa726';
-      statusEl.textContent = 'Buffering...';
+      statusEl.textContent = 'Buffering';
     });
     videoEl.addEventListener('error', function() {
       if (channelID) api.post('/api/channels/' + channelID + '/fail').catch(function() {});
@@ -2708,7 +2729,7 @@
       if (playerCtx.signal.aborted) return;
       if (retryCount >= MAX_RETRIES) {
         statusEl.style.color = '#ff6b6b';
-        statusEl.textContent = 'Source unavailable. ';
+        statusEl.textContent = 'Errored ';
         var retryLink = document.createElement('a');
         retryLink.textContent = 'Retry';
         retryLink.href = '#';
@@ -2741,8 +2762,8 @@
 
     function restartPlayback() {
       if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
-      if (dashPlayer) {
-        dashPlayer.attachSource(streamSrc);
+      if (shakaPlayer) {
+        shakaPlayer.load(streamSrc).catch(function() {});
       } else if (videoEl) {
         videoEl.src = streamSrc;
         videoEl.play().catch(function() {});
@@ -2763,8 +2784,8 @@
     }
 
     function updateStatusText() {
-      var container = 'DASH';
-      statusEl.textContent = 'Playing (' + container + ')' + buildStatusSuffix();
+      var state = isRecording ? 'Recording' : 'Streaming';
+      statusEl.textContent = state + buildStatusSuffix();
     }
 
     function fetchNowPlaying() {
@@ -2798,7 +2819,11 @@
           var st = await resp.json();
           if (st.error && !st.recording) {
             statusEl.style.color = '#ff6b6b';
-            statusEl.textContent = 'Source failed: ' + st.error;
+            statusEl.textContent = 'Errored';
+            statusEl.style.cursor = 'pointer';
+            statusEl.style.pointerEvents = 'auto';
+            statusEl.title = st.error;
+            statusEl.onclick = function() { alert('Source error:\n\n' + st.error); };
             clearInterval(pollInterval);
             return;
           }
@@ -3543,7 +3568,8 @@
         { key: 'stream_mode', label: 'Mode', render: item => ({direct:'Direct',proxy:'Proxy',ffmpeg:'FFmpeg'})[item.stream_mode] || item.stream_mode },
         { key: 'hwaccel', label: 'HW Accel', render: item => ({'default':'Global Default',none:'None (Software)',qsv:'Intel QSV',nvenc:'NVIDIA NVENC',vaapi:'VAAPI (AMD/Intel)',videotoolbox:'VideoToolbox (macOS)'})[item.hwaccel] || item.hwaccel },
         { key: 'video_codec', label: 'Codec', render: item => ({'default':'Global Default',copy:'Copy',h264:'H.264',h265:'H.265',av1:'AV1'})[item.video_codec] || item.video_codec },
-        { key: 'container', label: 'Container/Delivery', render: item => ({mpegts:'MPEG-TS',matroska:'Matroska',mp4:'MP4',dash:'DASH',webm:'WebM'})[item.container] || item.container },
+        { key: 'container', label: 'Container', render: item => ({mpegts:'MPEG-TS',matroska:'Matroska',mp4:'MP4',webm:'WebM'})[item.container] || item.container },
+        { key: 'delivery', label: 'Delivery', render: item => ({stream:'Stream (FFmpeg)',dash:'DASH (Shaka)'})[item.delivery] || item.delivery || 'stream' },
         { key: 'is_default', label: 'Default', render: item => {
           const badges = [];
           if (item.is_system) badges.push(h('span', { className: 'badge badge-info', style: 'margin-right:4px' }, 'System'));
@@ -3577,13 +3603,16 @@
           { value: 'h265', label: 'H.265 / HEVC' },
           { value: 'av1', label: 'AV1' },
         ], default: 'default', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
-        { key: 'container', label: 'Container/Delivery', type: 'select', options: [
+        { key: 'container', label: 'Container', type: 'select', options: [
           { value: 'mpegts', label: 'MPEG-TS (HDHR/Plex)' },
           { value: 'matroska', label: 'Matroska (VLC)' },
           { value: 'mp4', label: 'MP4' },
-          { value: 'dash', label: 'DASH (Browser)' },
           { value: 'webm', label: 'WebM' },
         ], showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
+        { key: 'delivery', label: 'Delivery', type: 'select', options: [
+          { value: 'stream', label: 'Stream (FFmpeg)' },
+          { value: 'dash', label: 'DASH (Shaka)' },
+        ], default: 'stream', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
         { key: 'deinterlace', label: 'Deinterlace', type: 'checkbox', default: false, help: 'Apply yadif deinterlace filter (only when transcoding, not copy).', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' && (form.video_codec || 'default') !== 'copy' },
         { key: 'fps_mode', label: 'FPS Mode', type: 'select', options: [
           { value: 'auto', label: 'Auto (variable)' },

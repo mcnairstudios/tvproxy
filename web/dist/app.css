@@ -1292,9 +1292,17 @@ tbody tr:last-child td { border-bottom: none; }
   .btn-group { gap: 6px; }
 }
 
-video-skin {
-  display: block;
-  width: 100%;
+[data-shaka-player-container] {
   border-radius: 12px;
   overflow: hidden;
+}
+.shaka-bottom-controls {
+  background: linear-gradient(transparent, rgba(0,0,0,0.7)) !important;
+}
+.shaka-controls-container {
+  opacity: 1;
+  transition: opacity 0.3s !important;
+}
+.shaka-controls-container[shown="false"] {
+  opacity: 0;
 }

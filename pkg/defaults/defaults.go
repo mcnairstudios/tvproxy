@@ -20,6 +20,7 @@ type ClientDefault struct {
 	AutoDetect bool        `json:"auto_detect"`
 	HWAccel    string      `json:"hwaccel"`
 	Container  string      `json:"container"`
+	Delivery   string      `json:"delivery"`
 	MatchRules []MatchRule `json:"match_rules"`
 }
 

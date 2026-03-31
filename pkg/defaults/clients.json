@@ -100,6 +100,7 @@
       "auto_detect": true,
       "hwaccel": "default",
       "container": "mp4",
+      "delivery": "dash",
       "match_rules": [
         {"header_name": "User-Agent", "match_type": "contains", "match_value": "Mozilla/"}
       ]

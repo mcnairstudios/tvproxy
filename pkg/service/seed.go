@@ -40,12 +40,18 @@ func SeedClientDefaults(_ context.Context, defs *defaults.ClientDefaults, profil
 	for _, c := range defs.Clients {
 		hwaccel := c.HWAccel
 
+		delivery := c.Delivery
+		if delivery == "" {
+			delivery = "stream"
+		}
+
 		profile := &models.StreamProfile{
 			ID:         uuid.New().String(),
 			Name:       c.Name,
 			StreamMode: "ffmpeg",
 			HWAccel:    hwaccel,
 			Container:  c.Container,
+			Delivery:   delivery,
 			AutoDetect: c.AutoDetect,
 			Command:    "ffmpeg",
 			IsClient:   true,

@@ -197,8 +197,8 @@ func (s *ProfileStoreImpl) SeedSystemProfiles() {
 	}
 
 	systemProfiles := []models.StreamProfile{
-		{Name: "Direct", StreamMode: "direct", HWAccel: "none", VideoCodec: "copy", Container: "mpegts", IsSystem: true},
-		{Name: "Proxy", StreamMode: "proxy", HWAccel: "none", VideoCodec: "copy", Container: "mpegts", IsDefault: true, IsSystem: true},
+		{Name: "Direct", StreamMode: "direct", HWAccel: "none", VideoCodec: "copy", Container: "mpegts", Delivery: "stream", IsSystem: true},
+		{Name: "Proxy", StreamMode: "proxy", HWAccel: "none", VideoCodec: "copy", Container: "mpegts", Delivery: "stream", IsDefault: true, IsSystem: true},
 	}
 
 	for _, sp := range systemProfiles {
