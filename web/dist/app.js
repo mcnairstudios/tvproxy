@@ -2681,15 +2681,12 @@
     if (streamSrc.endsWith('.mpd') && typeof dashjs !== 'undefined') {
       dashPlayer = dashjs.MediaPlayer().create();
       dashPlayer.initialize(videoEl, streamSrc, true);
-      dashPlayer.updateSettings({ streaming: { lowLatencyEnabled: true, delay: { liveDelay: 3 } } });
+      dashPlayer.updateSettings({ streaming: { delay: { liveDelay: 3 }, buffer: { fastSwitchEnabled: true } } });
     } else {
       videoEl.src = streamSrc;
       videoEl.play().catch(function() {});
     }
 
-    if (window.__vjsCreateStore) {
-      window.__vjsCreateStore()(videoEl);
-    }
 
     videoEl.addEventListener('playing', function() {
       retryCount = 0;
