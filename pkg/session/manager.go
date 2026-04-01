@@ -76,7 +76,7 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 	delete(m.sessions, channelID)
 	s.cancel()
 	<-s.done
-	os.Remove(filepath.Join(s.TempDir, "video.mp4"))
+	os.Remove(s.FilePath)
 	m.log.Info().Str("channel_id", channelID).Str("session_id", s.ID).Msg("replaced dead session")
 }
 
@@ -103,8 +103,8 @@ func (m *Manager) GetOrCreate(ctx context.Context, opts StartOpts) (*Session, er
 		return nil, fmt.Errorf("creating session dir: %w", err)
 	}
 
-	filePath := filepath.Join(tempDir, "video.mp4")
-	os.Remove(filePath)
+	fileName := ffmpeg.SanitizeFilename(opts.StreamName, time.Now()) + ".mp4"
+	filePath := filepath.Join(tempDir, fileName)
 
 	sessionCtx, cancel := context.WithCancel(context.Background())
 
@@ -403,8 +403,8 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 		return nil, "", fmt.Errorf("creating session dir: %w", err)
 	}
 
-	filePath := filepath.Join(tempDir, "video.mp4")
-	os.Remove(filePath)
+	fileName := ffmpeg.SanitizeFilename(opts.StreamName, time.Now()) + ".mp4"
+	filePath := filepath.Join(tempDir, fileName)
 
 	sessionCtx, cancel := context.WithCancel(context.Background())
 
