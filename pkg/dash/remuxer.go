@@ -129,7 +129,7 @@ func (r *Remuxer) Start(ctx context.Context) error {
 		"--segment_duration", "2",
 		"--io_block_size", "65536",
 	}
-	tsBufDepth := "86400"
+	tsBufDepth := "300"
 	if r.duration > 0 {
 		tsBufDepth = fmt.Sprintf("%d", int(r.duration)+60)
 	}

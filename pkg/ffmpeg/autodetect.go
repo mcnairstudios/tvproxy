@@ -23,12 +23,16 @@ func isInterlaced(fieldOrder string) bool {
 func audioEncoder(probe *ProbeResult) []string {
 	s := settings()
 	if probe == nil || len(probe.AudioTracks) == 0 {
-		return []string{"-c:a", "aac", "-b:a", s.AudioBitrate}
+		return []string{"-c:a", "aac", "-ac", "2", "-b:a", s.AudioBitrate}
 	}
+	isStereoOrMono := probe.AudioTracks[0].Channels <= 2
 	switch probe.AudioTracks[0].Codec {
 	case "aac":
-		return []string{"-c:a", "copy"}
+		if isStereoOrMono {
+			return []string{"-c:a", "copy"}
+		}
+		return []string{"-c:a", "aac", "-ac", "2", "-b:a", s.AudioBitrate}
 	default:
-		return []string{"-c:a", "aac", "-b:a", s.AudioBitrate}
+		return []string{"-c:a", "aac", "-ac", "2", "-b:a", s.AudioBitrate}
 	}
 }

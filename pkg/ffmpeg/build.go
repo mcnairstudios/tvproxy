@@ -74,7 +74,7 @@ func composeBuildArgs(opts BuildOptions) string {
 	parts = append(parts, "-max_muxing_queue_size", strconv.Itoa(s.MaxMuxingQueueSize))
 
 	if !hasVideo {
-		parts = append(parts, "-c:a", "aac", "-b:a", s.AudioBitrate)
+		parts = append(parts, "-c:a", "aac", "-ac", "2", "-b:a", s.AudioBitrate)
 		parts = append(parts, "-output_ts_offset", "0", "-f", "adts", "pipe:1")
 		return strings.Join(parts, " ")
 	}
@@ -148,7 +148,7 @@ func buildAudioFlags(probe *ProbeResult, container, delivery, audioCodec string,
 	case "copy":
 		return []string{"-c:a", "copy"}
 	case "aac":
-		return []string{"-c:a", "aac", "-b:a", s.AudioBitrate}
+		return []string{"-c:a", "aac", "-ac", "2", "-b:a", s.AudioBitrate}
 	case "opus":
 		return []string{"-c:a", "libopus", "-b:a", s.AudioBitrate}
 	default:
@@ -156,7 +156,7 @@ func buildAudioFlags(probe *ProbeResult, container, delivery, audioCodec string,
 			return []string{"-c:a", "libopus", "-b:a", s.AudioBitrate}
 		}
 		if delivery == "dash" {
-			return []string{"-c:a", "aac", "-b:a", s.AudioBitrate}
+			return []string{"-c:a", "aac", "-ac", "2", "-b:a", s.AudioBitrate}
 		}
 		return audioEncoder(probe)
 	}

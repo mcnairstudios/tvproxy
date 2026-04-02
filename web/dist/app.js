@@ -3003,16 +3003,14 @@
       shakaPlayer.addEventListener('error', function(e) { console.error('SHAKA ERROR:', e.detail); });
       shakaPlayer.configure({
         streaming: {
-          bufferingGoal: 15,
+          bufferingGoal: 10,
           rebufferingGoal: 2,
-          bufferBehind: 60,
-          segmentPrefetchLimit: 2
+          bufferBehind: 30,
+          failureCallback: function(error) {
+            console.warn('SHAKA FAILURE:', error.code, error.data);
+          }
         },
         manifest: {
-          dash: {
-            ignoreMinBufferTime: true,
-            autoCorrectDrift: true
-          },
           retryParameters: { maxAttempts: 10, baseDelay: 2000, timeout: 30000 }
         }
       });
@@ -3024,9 +3022,32 @@
           controlPanelElements: ['play_pause', 'time_and_duration', 'spacer', 'mute', 'volume', 'fullscreen'],
           overflowMenuButtons: []
         });
-        var startTime = (dvr && dvr.duration > 0) ? 0 : null;
-        console.log('SHAKA LOAD:', streamSrc, 'startTime:', startTime, 'duration:', dvr ? dvr.duration : 'none');
-        return shakaPlayer.load(streamSrc, startTime).then(function() {
+        function waitForStream() {
+          if (!dvr) return Promise.resolve();
+          statusEl.style.color = '#ffa726';
+          statusEl.textContent = 'Connecting...';
+          return new Promise(function(resolve, reject) {
+            var attempts = 0;
+            function poll() {
+              if (playerCtx.signal.aborted) { reject(new Error('cancelled')); return; }
+              fetch('/vod/' + dvr.id + '/status').then(function(r) { return r.json(); }).then(function(st) {
+                if (st.buffered > 0) { if (st.duration > 0 && !dvr.duration) dvr.duration = st.duration; resolve(); return; }
+                if (st.error) { reject(new Error(st.error)); return; }
+                attempts++;
+                if (attempts >= 60) { reject(new Error('stream timeout')); return; }
+                setTimeout(poll, 500);
+              }).catch(function() { attempts++; if (attempts >= 60) { reject(new Error('poll failed')); return; } setTimeout(poll, 500); });
+            }
+            poll();
+          });
+        }
+        return waitForStream().then(function() {
+          statusEl.style.color = '#ffa726';
+          statusEl.textContent = 'Buffering...';
+          console.log('SHAKA LOAD:', streamSrc, 'duration:', dvr ? dvr.duration : 'none');
+          var startAt = (dvr && dvr.duration > 0) ? 0 : null;
+          return shakaPlayer.load(streamSrc, startAt);
+        }).then(function() {
           console.log('SHAKA LOADED OK. isLive:', shakaPlayer.isLive(), 'seekRange:', shakaPlayer.seekRange(), 'readyState:', videoEl.readyState);
           videoEl.play().catch(function(e) { console.error('PLAY FAILED:', e); });
           var controls = playerWrap.querySelector('.shaka-bottom-controls .shaka-controls-container');
