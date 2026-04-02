@@ -13,7 +13,7 @@
     jsErrorFlushTimer = null;
     if (jsErrorLog.length === 0) return;
     var batch = jsErrorLog.splice(0, 20);
-    var token = localStorage.getItem('tvproxy_access_token') || '';
+    var token = localStorage.getItem('access_token') || '';
     fetch('/api/frontend-errors', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': token ? 'Bearer ' + token : '' }, body: JSON.stringify({ errors: batch }) }).catch(function() {});
   }
   window.onerror = function(msg, source, line, col, err) { reportJSError(msg, source, line, col, err); };
