@@ -35,9 +35,11 @@ func (m *Manager) GetOrStart(ctx context.Context, channelID, inputPath, outputDi
 	defer m.mu.Unlock()
 
 	if r, ok := m.remuxers[channelID]; ok {
-		if !r.IsDone() {
+		if !r.IsDone() && r.inputPath == inputPath {
 			return r, nil
 		}
+		r.Stop()
+		os.RemoveAll(r.OutputDir())
 		delete(m.remuxers, channelID)
 	}
 
