@@ -246,6 +246,10 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 	probe, _ := ffmpeg.Probe(ctx, filePath, "")
 	if probe != nil {
 		duration = probe.Duration
+		sess := s.sessionMgr.Get(sessionKey)
+		if sess != nil {
+			sess.SetProbeInfo(probe.Video, probe.AudioTracks, probe.Duration)
+		}
 	}
 
 	if s.activity != nil {

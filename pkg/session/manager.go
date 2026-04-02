@@ -361,7 +361,7 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 
 	if m.probeCache != nil && opts.StreamURL != "" {
 		if cached, err := m.probeCache.GetProbe(ffmpeg.StreamHash(opts.StreamURL)); err == nil && cached != nil {
-			s.setProbeInfo(cached.Video, cached.AudioTracks, cached.Duration)
+			s.SetProbeInfo(cached.Video, cached.AudioTracks, cached.Duration)
 		}
 	}
 
@@ -435,7 +435,7 @@ func (m *Manager) probeAsync(s *Session, streamURL string) {
 	if m.probeCache != nil && streamURL != "" {
 		cached, err := m.probeCache.GetProbe(ffmpeg.StreamHash(streamURL))
 		if err == nil && cached != nil {
-			s.setProbeInfo(cached.Video, cached.AudioTracks, cached.Duration)
+			s.SetProbeInfo(cached.Video, cached.AudioTracks, cached.Duration)
 			m.log.Debug().Str("session_id", s.ID).Str("stream_url", streamURL).Msg("probe cache hit")
 			return
 		}
@@ -462,7 +462,7 @@ func (m *Manager) probeAsync(s *Session, streamURL string) {
 		return
 	}
 
-	s.setProbeInfo(result.Video, result.AudioTracks, result.Duration)
+	s.SetProbeInfo(result.Video, result.AudioTracks, result.Duration)
 
 	if m.probeCache != nil && streamURL != "" {
 		if saveErr := m.probeCache.SaveProbe(ffmpeg.StreamHash(streamURL), result); saveErr != nil {

@@ -92,7 +92,7 @@ func (s *Session) getError() error {
 	return err
 }
 
-func (s *Session) setProbeInfo(video *ffmpeg.VideoInfo, audio []ffmpeg.AudioTrack, duration float64) {
+func (s *Session) SetProbeInfo(video *ffmpeg.VideoInfo, audio []ffmpeg.AudioTrack, duration float64) {
 	s.mu.Lock()
 	if video != nil {
 		s.Video = video
