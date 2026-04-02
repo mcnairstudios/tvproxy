@@ -521,6 +521,7 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 	re := regexp.MustCompile(`availabilityStartTime="[^"]*"`)
 	mpd = re.ReplaceAllString(mpd, `availabilityStartTime="2000-01-01T00:00:00Z"`)
 	mpd = strings.Replace(mpd, `minimumUpdatePeriod="PT5S"`, `minimumUpdatePeriod="PT2S"`, 1)
+	mpd = strings.Replace(mpd, ` suggestedPresentationDelay="PT3S"`, ``, 1)
 
 	data = []byte(mpd)
 
