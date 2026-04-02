@@ -1131,7 +1131,7 @@
           return;
         }
         if (btn.dataset.radioPlay) {
-          playRadioInline(btn, btn.dataset.sid, btn.dataset.sname, btn.dataset.tvgid || undefined);
+          toggleInlineRadio(btn, btn.dataset.sid, btn.dataset.sname, btn.dataset.tvgid || undefined);
           return;
         }
         if (btn.dataset.radioRec) {
@@ -1141,43 +1141,41 @@
         play({ streamID: btn.dataset.sid, name: btn.dataset.sname, tvgId: btn.dataset.tvgid || undefined });
       });
 
-      var activeRadio = null;
-      function playRadioInline(btn, streamID, name, tvgId) {
-        if (activeRadio && activeRadio.streamID === streamID) {
-          if (activeRadio.audio.paused) {
-            activeRadio.audio.play();
+      var activeInlineRadio = null;
+      function toggleInlineRadio(btn, streamID, name, tvgId) {
+        if (activeInlineRadio && activeInlineRadio.streamID === streamID) {
+          if (activeInlineRadio.audio.paused) {
+            activeInlineRadio.audio.play();
             btn.textContent = '\u23F9';
             btn.title = 'Stop';
           } else {
-            stopRadio();
+            stopInlineRadio();
           }
           return;
         }
-        if (activeRadio) stopRadio();
+        if (activeInlineRadio) stopInlineRadio();
         btn.textContent = '\u23F3';
         btn.title = 'Connecting...';
         var row = btn.closest('tr');
         var nameCell = row ? row.querySelectorAll('td')[1] : null;
         var origName = nameCell ? nameCell.textContent : '';
-        fetch('/stream/' + streamID + '/vod?profile=Browser', { method: 'POST', headers: { 'Authorization': 'Bearer ' + (state.accessToken || '') } })
-          .then(function(r) { return r.json(); })
+        createAudioSession('/stream/' + streamID + '/vod')
           .then(function(resp) {
-            if (!resp.session_id) { btn.textContent = '\u25B6'; return; }
-            var audio = new Audio('/vod/' + resp.session_id + '/stream');
-            audio.volume = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
+            if (!resp) { btn.textContent = '\u25B6'; return; }
+            var audio = createAudioElement('/vod/' + resp.session_id + '/stream');
             audio.onplaying = function() {
               btn.textContent = '\u23F9'; btn.title = 'Stop';
-              fetchRadioNowPlaying(tvgId, nameCell, origName);
+              updateInlineNowPlaying(tvgId, nameCell, origName);
             };
-            audio.onerror = function() { btn.textContent = '\u25B6'; btn.title = 'Play'; stopRadio(); };
+            audio.onerror = function() { btn.textContent = '\u25B6'; btn.title = 'Play'; stopInlineRadio(); };
             audio.play().catch(function() { btn.textContent = '\u25B6'; });
-            activeRadio = { streamID: streamID, sessionID: resp.session_id, consumerID: resp.consumer_id, audio: audio, btn: btn, nameCell: nameCell, origName: origName, tvgId: tvgId, nowInterval: null };
+            activeInlineRadio = { streamID: streamID, sessionID: resp.session_id, consumerID: resp.consumer_id, audio: audio, btn: btn, nameCell: nameCell, origName: origName, tvgId: tvgId, nowInterval: null };
             if (tvgId) {
-              activeRadio.nowInterval = setInterval(function() { fetchRadioNowPlaying(tvgId, nameCell, origName); }, 30000);
+              activeInlineRadio.nowInterval = setInterval(function() { updateInlineNowPlaying(tvgId, nameCell, origName); }, 30000);
             }
           }).catch(function() { btn.textContent = '\u25B6'; });
       }
-      function fetchRadioNowPlaying(tvgId, nameCell, origName) {
+      function updateInlineNowPlaying(tvgId, nameCell, origName) {
         if (!tvgId || !nameCell) return;
         api.get('/api/epg/now?channel_id=' + encodeURIComponent(tvgId)).then(function(p) {
           if (p && p.title) {
@@ -1185,18 +1183,18 @@
           }
         }).catch(function() {});
       }
-      function stopRadio() {
-        if (!activeRadio) return;
-        activeRadio.audio.pause();
-        activeRadio.audio.removeAttribute('src');
-        activeRadio.btn.textContent = '\u25B6';
-        activeRadio.btn.title = 'Play';
-        if (activeRadio.nameCell && activeRadio.origName) {
-          activeRadio.nameCell.textContent = activeRadio.origName;
+      function stopInlineRadio() {
+        if (!activeInlineRadio) return;
+        activeInlineRadio.audio.pause();
+        activeInlineRadio.audio.removeAttribute('src');
+        activeInlineRadio.btn.textContent = '\u25B6';
+        activeInlineRadio.btn.title = 'Play';
+        if (activeInlineRadio.nameCell && activeInlineRadio.origName) {
+          activeInlineRadio.nameCell.textContent = activeInlineRadio.origName;
         }
-        if (activeRadio.nowInterval) clearInterval(activeRadio.nowInterval);
-        api.del('/vod/' + activeRadio.sessionID + (activeRadio.consumerID ? '?consumer_id=' + activeRadio.consumerID : '')).catch(function() {});
-        activeRadio = null;
+        if (activeInlineRadio.nowInterval) clearInterval(activeInlineRadio.nowInterval);
+        releaseAudioSession(activeInlineRadio.sessionID, activeInlineRadio.consumerID);
+        activeInlineRadio = null;
       }
 
       function toggleRadioRecord(btn, streamID) {
@@ -2566,71 +2564,78 @@
   let activePlayerCleanup = null;
   let playInProgress = false;
 
-  var globalRadio = null;
-  function playGlobalRadio(id, name, tvgId, isChannel, directUrl) {
-    stopGlobalRadio();
+  function createAudioSession(vodPath) {
+    return api.post(vodPath + '?profile=Browser').then(function(resp) {
+      return resp && resp.session_id ? resp : null;
+    });
+  }
+
+  function createAudioElement(src) {
+    var audio = new Audio(src);
+    audio.volume = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
+    return audio;
+  }
+
+  function releaseAudioSession(sessionID, consumerID) {
+    if (!sessionID) return;
+    api.del('/vod/' + sessionID + (consumerID ? '?consumer_id=' + consumerID : '')).catch(function() {});
+  }
+
+  function buildFloatingRadioBar(name, onStop) {
+    var bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--bg-card);border-top:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:12px;z-index:9999;';
+    var nameEl = document.createElement('span');
+    nameEl.style.cssText = 'color:#e0e0e0;font-size:14px;flex:1;';
+    nameEl.textContent = name;
+    var stopBtn = document.createElement('button');
+    stopBtn.className = 'btn btn-sm';
+    stopBtn.textContent = '\u23F9 Stop';
+    stopBtn.onclick = onStop;
+    bar.appendChild(nameEl);
+    bar.appendChild(stopBtn);
+    document.body.appendChild(bar);
+    return { bar: bar, nameEl: nameEl };
+  }
+
+  var floatingRadio = null;
+  function startFloatingRadio(id, name, tvgId, isChannel, directUrl) {
+    stopFloatingRadio();
+    var ui = buildFloatingRadioBar(name, stopFloatingRadio);
+
     if (directUrl) {
-      var audio = new Audio(directUrl);
-      audio.volume = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
-      var bar = document.createElement('div');
-      bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--bg-card);border-top:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:12px;z-index:9999;';
-      var nameEl = document.createElement('span');
-      nameEl.style.cssText = 'color:#e0e0e0;font-size:14px;flex:1;';
-      nameEl.textContent = name;
-      var stopBtn = document.createElement('button');
-      stopBtn.className = 'btn btn-sm';
-      stopBtn.textContent = '\u23F9 Stop';
-      stopBtn.onclick = stopGlobalRadio;
-      bar.appendChild(nameEl);
-      bar.appendChild(stopBtn);
-      document.body.appendChild(bar);
-      audio.onplaying = function() { nameEl.textContent = '\u25B6 ' + name; };
-      audio.onerror = function() { stopGlobalRadio(); };
+      var audio = createAudioElement(directUrl);
+      audio.onplaying = function() { ui.nameEl.textContent = '\u25B6 ' + name; };
+      audio.onerror = function() { stopFloatingRadio(); };
       audio.play().catch(function() {});
-      globalRadio = { audio: audio, bar: bar, sessionID: null, consumerID: null };
+      floatingRadio = { audio: audio, bar: ui.bar, sessionID: null, consumerID: null };
       return;
     }
+
     var vodPath = isChannel ? '/channel/' + id + '/vod' : '/stream/' + id + '/vod';
-    fetch(vodPath + '?profile=Browser', { method: 'POST' })
-      .then(function(r) { return r.json(); })
+    createAudioSession(vodPath)
       .then(function(resp) {
-        if (!resp.session_id) return;
-        var audio = new Audio('/vod/' + resp.session_id + '/stream');
-        audio.volume = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
-
-        var bar = document.createElement('div');
-        bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:var(--bg-card);border-top:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:12px;z-index:9999;';
-        var nameEl = document.createElement('span');
-        nameEl.style.cssText = 'color:#e0e0e0;font-size:14px;flex:1;';
-        nameEl.textContent = name;
-        var stopBtn = document.createElement('button');
-        stopBtn.className = 'btn btn-sm';
-        stopBtn.textContent = '\u23F9 Stop';
-        stopBtn.onclick = stopGlobalRadio;
-        bar.appendChild(nameEl);
-        bar.appendChild(stopBtn);
-        document.body.appendChild(bar);
-
-        audio.onplaying = function() { nameEl.textContent = '\u25B6 ' + name; };
-        audio.onerror = function() { stopGlobalRadio(); };
+        if (!resp) { ui.bar.remove(); return; }
+        var audio = createAudioElement('/vod/' + resp.session_id + '/stream');
+        audio.onplaying = function() { ui.nameEl.textContent = '\u25B6 ' + name; };
+        audio.onerror = function() { stopFloatingRadio(); };
         audio.play().catch(function() {});
 
         if (tvgId) {
           api.get('/api/epg/now?channel_id=' + encodeURIComponent(tvgId)).then(function(p) {
-            if (p && p.title) nameEl.textContent = '\u25B6 ' + name + ' \u2014 ' + p.title;
+            if (p && p.title) ui.nameEl.textContent = '\u25B6 ' + name + ' \u2014 ' + p.title;
           }).catch(function() {});
         }
 
-        globalRadio = { audio: audio, bar: bar, sessionID: resp.session_id, consumerID: resp.consumer_id };
-      }).catch(function() {});
+        floatingRadio = { audio: audio, bar: ui.bar, sessionID: resp.session_id, consumerID: resp.consumer_id };
+      }).catch(function() { ui.bar.remove(); });
   }
-  function stopGlobalRadio() {
-    if (!globalRadio) return;
-    globalRadio.audio.pause();
-    globalRadio.audio.removeAttribute('src');
-    globalRadio.bar.remove();
-    api.del('/vod/' + globalRadio.sessionID + (globalRadio.consumerID ? '?consumer_id=' + globalRadio.consumerID : '')).catch(function() {});
-    globalRadio = null;
+  function stopFloatingRadio() {
+    if (!floatingRadio) return;
+    floatingRadio.audio.pause();
+    floatingRadio.audio.removeAttribute('src');
+    floatingRadio.bar.remove();
+    releaseAudioSession(floatingRadio.sessionID, floatingRadio.consumerID);
+    floatingRadio = null;
   }
 
   function isAudioOnly(streamTracks, streamGroup) {
@@ -2669,15 +2674,15 @@
 
       if (isAudioOnly(streamTracks, streamGroup) && !opts.fileUrl) {
         var radioID = streamID || (channelID ? channelID : null);
-        if (radioID) playGlobalRadio(radioID, name, tvgId, !!channelID);
+        if (radioID) startFloatingRadio(radioID, name, tvgId, !!channelID);
         return;
       }
 
       if (opts.fileUrl) {
         if (isAudioOnly(streamTracks, streamGroup)) {
-          playGlobalRadio(null, name, tvgId, false, opts.fileUrl);
+          startFloatingRadio(null, name, tvgId, false, opts.fileUrl);
         } else {
-          openVideoPlayer(name, opts.fileUrl, tvgId, null, null);
+          openVideoModal(name, opts.fileUrl, tvgId, null, null);
         }
         return;
       }
@@ -2693,7 +2698,7 @@
             api.del('/vod/' + resp.session_id + (resp.consumer_id ? '?consumer_id=' + resp.consumer_id : '')).catch(function() {});
           }
           var radioID = streamID || channelID;
-          if (radioID) playGlobalRadio(radioID, name, tvgId, !!channelID);
+          if (radioID) startFloatingRadio(radioID, name, tvgId, !!channelID);
           return;
         }
         if (resp.session_id) {
@@ -2704,7 +2709,7 @@
         document.body.style.cursor = '';
         return;
       }
-      openVideoPlayer(name, vodPath.replace('/vod', '') + '?profile=Browser', tvgId, session, channelID || streamID, streamTracks, streamGroup);
+      openVideoModal(name, vodPath.replace('/vod', '') + '?profile=Browser', tvgId, session, channelID || streamID, streamTracks, streamGroup);
     } finally {
       playInProgress = false;
       document.body.style.cursor = '';
@@ -2721,7 +2726,7 @@
   }
 
 
-  function openVideoPlayer(title, url, tvgId, dvr, channelID, streamTracks, streamGroup) {
+  function openVideoModal(title, url, tvgId, dvr, channelID, streamTracks, streamGroup) {
     if (activePlayerCleanup) { activePlayerCleanup(); activePlayerCleanup = null; }
     const playerCtx = new AbortController();
     let pollInterval = null;
@@ -2887,7 +2892,6 @@
         });
         return shakaPlayer.load(streamSrc).then(function() {
           videoEl.play().catch(function() {});
-          // Inject programme info into Shaka control bar
           var controls = playerWrap.querySelector('.shaka-bottom-controls .shaka-controls-container');
           if (controls) {
             var progEl = document.createElement('span');
