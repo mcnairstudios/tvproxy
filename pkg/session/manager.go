@@ -76,7 +76,7 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 	delete(m.sessions, channelID)
 	s.cancel()
 	<-s.done
-	os.Remove(s.FilePath)
+	os.RemoveAll(s.TempDir)
 	m.log.Info().Str("channel_id", channelID).Str("session_id", s.ID).Msg("replaced dead session")
 }
 
@@ -160,7 +160,7 @@ func (m *Manager) stopAndCleanup(channelID string, s *Session) {
 	}
 
 	if !s.HasRecordingConsumer() {
-		os.Remove(s.FilePath)
+		os.RemoveAll(s.TempDir)
 	}
 
 	m.log.Info().
@@ -293,7 +293,20 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 		}
 	}
 
-	tempDir := filepath.Join(opts.OutputDir, opts.ChannelID)
+	streamID := opts.StreamID
+	if streamID == "" {
+		streamID = opts.ChannelID
+	}
+
+	var tempDir string
+	if m.probeCache != nil {
+		if rs, ok := m.probeCache.(interface{ ActiveDir(string) string }); ok {
+			tempDir = rs.ActiveDir(streamID)
+		}
+	}
+	if tempDir == "" {
+		tempDir = filepath.Join(opts.OutputDir, streamID, "active")
+	}
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		m.mu.Unlock()
 		return nil, "", fmt.Errorf("creating session dir: %w", err)
@@ -304,8 +317,9 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 
 	sessionCtx, cancel := context.WithCancel(context.Background())
 
+	sessionID := uuid.New().String()
 	s := &Session{
-		ID:          uuid.New().String(),
+		ID:          sessionID,
 		ChannelID:   opts.ChannelID,
 		StreamID:    opts.StreamID,
 		StreamURL:   opts.StreamURL,
@@ -317,6 +331,25 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 		consumers:   make(map[string]*Consumer),
 		cancel:      cancel,
 		done:        make(chan struct{}),
+	}
+
+	if m.probeCache != nil {
+		if rs, ok := m.probeCache.(interface {
+			WriteSessionMeta(string, store.SessionMeta) error
+		}); ok {
+			rs.WriteSessionMeta(streamID, store.SessionMeta{
+				Status:      store.SessionActive,
+				SessionID:   sessionID,
+				StreamID:    opts.StreamID,
+				StreamName:  opts.StreamName,
+				StreamURL:   opts.StreamURL,
+				ChannelID:   opts.ChannelID,
+				ChannelName: opts.ChannelName,
+				ProfileName: opts.ProfileName,
+				FileName:    fileName,
+				StartedAt:   time.Now(),
+			})
+		}
 	}
 
 	c := &Consumer{
@@ -376,7 +409,9 @@ func (m *Manager) Shutdown() {
 		s.mu.Unlock()
 		s.cancel()
 		<-s.done
-		os.Remove(s.FilePath)
+		if !s.HasRecordingConsumer() {
+			os.RemoveAll(s.TempDir)
+		}
 	}
 
 	m.log.Info().Int("sessions", len(sessions)).Msg("session manager shutdown complete")

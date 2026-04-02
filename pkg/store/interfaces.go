@@ -95,8 +95,18 @@ type RecordingWriter interface {
 	Delete(streamID, filename string) error
 }
 
+type SessionMetaStore interface {
+	WriteSessionMeta(streamID string, meta SessionMeta) error
+	ReadSessionMeta(streamID string) (*SessionMeta, error)
+	RemoveActiveSession(streamID string) error
+	CompleteRecording(streamID string, meta SessionMeta) (string, error)
+	ListActiveRecordings() ([]SessionMeta, error)
+	ActiveDir(streamID string) string
+}
+
 type RecordingStore interface {
 	ProbeCache
 	RecordingReader
 	RecordingWriter
+	SessionMetaStore
 }
