@@ -416,21 +416,47 @@ func (h *VODHandler) StreamCompletedRecording(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	profileName := r.URL.Query().Get("profile")
-	if profileName == "" {
-		http.ServeFile(w, r, fullPath)
+	http.ServeFile(w, r, fullPath)
+}
+
+func (h *VODHandler) PlayCompletedRecording(w http.ResponseWriter, r *http.Request) {
+	streamID := chi.URLParam(r, "streamID")
+	filename := chi.URLParam(r, "filename")
+	user := requireUser(r)
+	if user == nil {
+		respondError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
 
-	reader, contentType, err := h.vodService.TranscodeFile(r.Context(), fullPath, profileName)
+	fullPath, err := h.vodService.GetCompletedRecordingPath(streamID, filename, user.UserID, user.IsAdmin)
 	if err != nil {
-		h.log.Error().Err(err).Str("filename", filename).Str("profile", profileName).Msg("transcode failed")
-		respondError(w, http.StatusInternalServerError, "transcode failed")
+		if errors.Is(err, service.ErrNotAuthorized) {
+			respondError(w, http.StatusForbidden, "not authorized")
+			return
+		}
+		respondError(w, http.StatusNotFound, "recording not found")
 		return
 	}
-	defer reader.Close()
 
-	serveTranscodedOrFile(w, r, reader, contentType)
+	profileName := r.URL.Query().Get("profile")
+	title := filename
+	if profileName == "" {
+		profileName = "Browser"
+	}
+
+	sessionID, consumerID, container, duration, err := h.vodService.StartWatchingFile(r.Context(), fullPath, title, profileName, r.UserAgent(), r.RemoteAddr)
+	if err != nil {
+		h.log.Error().Err(err).Str("filename", filename).Msg("failed to create file session")
+		respondError(w, http.StatusInternalServerError, "session creation failed")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"session_id":  sessionID,
+		"consumer_id": consumerID,
+		"container":   container,
+		"duration":    duration,
+	})
 }
 
 func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {

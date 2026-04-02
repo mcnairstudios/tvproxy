@@ -2683,6 +2683,17 @@
         return;
       }
 
+      if (opts.recordingPath) {
+        try {
+          var recResp = await api.post(opts.recordingPath + '?profile=Browser');
+          if (recResp.session_id) {
+            var recSession = { id: recResp.session_id, consumer_id: recResp.consumer_id, duration: recResp.duration, container: recResp.container };
+            openVideoModal(name, null, tvgId, recSession, recResp.session_id);
+          }
+        } catch(e) {}
+        return;
+      }
+
       var defaultAudio = defaultAudioIndex(streamTracks);
       var audioParam = defaultAudio > 0 ? '&audio=' + defaultAudio : '';
       var vodPath = streamID ? '/stream/' + streamID + '/vod' : '/channel/' + channelID + '/vod';
@@ -4269,8 +4280,7 @@
             var basePath = '/api/recordings/completed/' + encodedStreamID + '/' + encodedName;
             var actions = h('td', { style: 'display:flex;gap:4px;' });
             var playBtn = h('button', { className: 'btn btn-primary btn-sm', onClick: function() {
-              var fileUrl = basePath + '/stream?token=' + encodeURIComponent(state.accessToken || '');
-              play({ streamID: rec.stream_id, name: title, fileUrl: fileUrl });
+              play({ streamID: rec.stream_id, name: title, recordingPath: basePath + '/play' });
             }}, '\u25B6 Play');
             var deleteBtn = h('button', { className: 'btn btn-danger btn-sm', onClick: async function() {
               if (!confirm('Delete ' + title + '?')) return;

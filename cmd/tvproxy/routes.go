@@ -222,6 +222,7 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 			r.Get("/completed", h.vod.ListCompletedRecordings)
 			r.Get("/completed/{streamID}/{filename}/probe", h.vod.ProbeCompletedRecording)
 			r.Get("/completed/{streamID}/{filename}/stream", h.vod.StreamCompletedRecording)
+			r.Post("/completed/{streamID}/{filename}/play", h.vod.PlayCompletedRecording)
 			r.Delete("/completed/{streamID}/{filename}", h.vod.DeleteCompletedRecording)
 			r.Post("/schedule", h.scheduler.Schedule)
 			r.Get("/schedule", h.scheduler.List)

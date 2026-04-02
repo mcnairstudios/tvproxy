@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -219,6 +220,47 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 	}
 
 	return streamID, consumerID, container, nil
+}
+
+func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, profileName, userAgent, remoteAddr string) (string, string, string, float64, error) {
+	command, args, container := s.composeSessionArgs(ctx, profileName, filePath, "")
+
+	sessionKey := "file:" + filepath.Base(filePath)
+
+	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
+		ChannelID:   sessionKey,
+		StreamID:    sessionKey,
+		StreamURL:   filePath,
+		StreamName:  name,
+		ChannelName: name,
+		ProfileName: profileName,
+		Command:     command,
+		Args:        args,
+		OutputDir:   s.config.VODOutputDir,
+	}, session.ConsumerViewer)
+	if err != nil {
+		return "", "", "", 0, err
+	}
+
+	var duration float64
+	probe, _ := ffmpeg.Probe(ctx, filePath, "")
+	if probe != nil {
+		duration = probe.Duration
+	}
+
+	if s.activity != nil {
+		s.activity.Add(ViewerOpts{
+			ID:          consumerID,
+			ChannelID:   sessionKey,
+			ChannelName: name,
+			ProfileName: profileName,
+			UserAgent:   userAgent,
+			RemoteAddr:  remoteAddr,
+			Type:        "vod",
+		})
+	}
+
+	return sessionKey, consumerID, container, duration, nil
 }
 
 func (s *VODService) StopWatching(channelID string, consumerID string) {
