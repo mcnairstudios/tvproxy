@@ -2814,16 +2814,70 @@
     }
     recordBtn.onclick = function() {
       if (!dvr) return;
+      recordBtn.disabled = true;
       if (isRecording) {
-        api.del('/vod/' + dvr.id + '/recording').then(function() { stopRecordingUI(); }).catch(function() {});
+        api.del('/vod/' + dvr.id + '/recording').then(function() { stopRecordingUI(); }).catch(function() {}).finally(function() { recordBtn.disabled = false; });
       } else {
-        api.post('/vod/' + dvr.id + '/recording').then(function() { startRecordingUI(); }).catch(function() {});
+        startRecordingUI();
+        api.post('/vod/' + dvr.id + '/recording').catch(function() { stopRecordingUI(); }).finally(function() { recordBtn.disabled = false; });
       }
     };
 
     var statsBtn = document.createElement('button');
     statsBtn.textContent = '\u2139';
     statsBtn.title = 'Stats';
+
+    var audioBtn = document.createElement('button');
+    audioBtn.textContent = '\uD83C\uDF99';
+    audioBtn.title = 'Audio Track';
+    audioBtn.style.display = 'none';
+    var audioMenu = document.createElement('div');
+    audioMenu.style.cssText = 'display:none;position:absolute;top:44px;right:80px;background:rgba(0,0,0,0.9);backdrop-filter:blur(8px);border-radius:8px;padding:4px 0;z-index:30;min-width:180px;pointer-events:auto;';
+    audioBtn.onclick = function() {
+      audioMenu.style.display = audioMenu.style.display === 'none' ? 'block' : 'none';
+    };
+
+    function buildAudioMenu(tracks) {
+      audioMenu.innerHTML = '';
+      if (!tracks || tracks.length < 2) { audioBtn.style.display = 'none'; return; }
+      audioBtn.style.display = '';
+      tracks.forEach(function(track, idx) {
+        var label = track.codec || '?';
+        if (track.language) label += ' [' + track.language + ']';
+        if (track.channels) label += ' ' + track.channels + 'ch';
+        if (track.audio_type === 3) label += ' (AD)';
+        var item = document.createElement('div');
+        item.style.cssText = 'padding:6px 14px;color:#fff;font-size:13px;cursor:pointer;white-space:nowrap;' + (idx === currentAudioIndex ? 'background:rgba(255,255,255,0.15);' : '');
+        item.textContent = (idx === currentAudioIndex ? '\u2713 ' : '   ') + label;
+        item.onclick = function() {
+          if (idx === currentAudioIndex) { audioMenu.style.display = 'none'; return; }
+          currentAudioIndex = idx;
+          audioMenu.style.display = 'none';
+          switchAudioTrack(idx);
+        };
+        audioMenu.appendChild(item);
+      });
+    }
+
+    function switchAudioTrack(audioIndex) {
+      if (!dvr || !channelID) return;
+      statusEl.style.color = '#ffa726';
+      statusEl.textContent = 'Switching audio...';
+      (async function() {
+        try {
+          await api.del('/vod/' + dvr.id + (dvr.consumer_id ? '?consumer_id=' + dvr.consumer_id : '')).catch(function() {});
+          var audioParam = audioIndex > 0 ? '&audio=' + audioIndex : '';
+          var vodPath = '/channel/' + channelID + '/vod';
+          var resp = await api.post(vodPath + '?profile=' + encodeURIComponent(currentProfile) + audioParam);
+          if (resp.session_id) {
+            dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
+            if (dvrTracker) dvrTracker.reset();
+            streamSrc = '/vod/' + dvr.id + '/dash/manifest.mpd';
+          }
+        } catch(e) {}
+        restartPlayback();
+      })();
+    }
 
     var closeBtn = document.createElement('button');
     closeBtn.textContent = '\u2715';
@@ -2835,10 +2889,11 @@
 
     var floatBar = document.createElement('div');
     floatBar.style.cssText = 'position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:8px 12px;background:linear-gradient(rgba(0,0,0,0.7),transparent);opacity:0;transition:opacity 0.2s;z-index:20;pointer-events:none;';
-    var barBtns = [titleEl, recordBtn, statsBtn, closeBtn];
+    var barBtns = [titleEl, recordBtn, audioBtn, statsBtn, closeBtn];
     titleEl.style.cssText = 'flex:1;color:#fff;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,0.5);';
     var btnStyle = 'background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);border:none;color:#fff;width:32px;height:32px;border-radius:50%;font-size:14px;cursor:pointer;pointer-events:auto;transition:background 0.15s;';
     recordBtn.style.cssText = btnStyle;
+    audioBtn.style.cssText = btnStyle;
     statsBtn.style.cssText = btnStyle;
     closeBtn.style.cssText = btnStyle;
     barBtns.forEach(function(b) { floatBar.appendChild(b); });
@@ -2851,6 +2906,7 @@
     statsOverlay.style.cssText = 'display:none;position:absolute;top:8px;left:8px;background:rgba(0,0,0,0.8);color:#fff;padding:10px 12px;border-radius:6px;font-size:11px;font-family:monospace;line-height:1.6;z-index:100;max-height:80%;overflow-y:auto;pointer-events:none;';
     statsBtn.onclick = function() { statsOverlay.style.display = statsOverlay.style.display === 'none' ? 'block' : 'none'; };
     playerWrap.appendChild(statsOverlay);
+    playerWrap.appendChild(audioMenu);
     modal.appendChild(playerWrap);
 
     var statusEl = document.createElement('span');
@@ -2867,6 +2923,18 @@
     var savedVol = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
     videoEl.volume = savedVol;
     videoEl.addEventListener('volumechange', function() { localStorage.setItem('tvproxy_volume', String(videoEl.volume)); });
+
+    if (streamTracks && streamTracks.length > 0) {
+      var videoTrack = streamTracks.find(function(t) { return t.category === 'video'; });
+      var audioTracks = streamTracks.filter(function(t) { return t.category === 'audio'; });
+      probeData = {
+        video: videoTrack ? { codec: videoTrack.codec || '', fps: '', bit_rate: '', field_order: '', pix_fmt: '', color_space: '', profile: '' } : null,
+        audio_tracks: audioTracks.map(function(t) { return { codec: t.codec || '?', language: t.language || '', channels: t.channels || 0, audio_type: t.audio_type || 0 }; }),
+        duration: 0,
+        profile: currentProfile
+      };
+      buildAudioMenu(probeData.audio_tracks);
+    }
 
     var shakaPlayer = null;
     if (typeof shaka !== 'undefined') {
@@ -3058,6 +3126,7 @@
           }
           if (st.video || st.audio_tracks) {
             probeData = { video: st.video || null, audio_tracks: st.audio_tracks || [], duration: st.duration, profile: st.profile || '' };
+            buildAudioMenu(probeData.audio_tracks);
           }
           if (st.stream_url && st.stream_url.startsWith('rtsp://') && !signalInterval) {
             satipStreamUrl = st.stream_url;
