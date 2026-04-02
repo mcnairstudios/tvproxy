@@ -2833,7 +2833,8 @@
     audioBtn.style.display = 'none';
     var audioMenu = document.createElement('div');
     audioMenu.style.cssText = 'display:none;position:absolute;top:44px;right:80px;background:rgba(0,0,0,0.9);backdrop-filter:blur(8px);border-radius:8px;padding:4px 0;z-index:30;min-width:180px;pointer-events:auto;';
-    audioBtn.onclick = function() {
+    audioBtn.onclick = function(e) {
+      e.stopPropagation();
       audioMenu.style.display = audioMenu.style.display === 'none' ? 'block' : 'none';
     };
 
@@ -2901,6 +2902,9 @@
 
     playerWrap.addEventListener('mouseenter', function() { floatBar.style.opacity = '1'; });
     playerWrap.addEventListener('mouseleave', function() { floatBar.style.opacity = '0'; });
+    playerWrap.addEventListener('click', function(e) {
+      if (e.target !== audioBtn && !audioMenu.contains(e.target)) audioMenu.style.display = 'none';
+    });
 
     var statsOverlay = document.createElement('div');
     statsOverlay.style.cssText = 'display:none;position:absolute;top:8px;left:8px;background:rgba(0,0,0,0.8);color:#fff;padding:10px 12px;border-radius:6px;font-size:11px;font-family:monospace;line-height:1.6;z-index:100;max-height:80%;overflow-y:auto;pointer-events:none;';
@@ -2915,7 +2919,10 @@
     floatBar.insertBefore(statusEl, closeBtn);
 
     overlay.appendChild(modal);
-    overlay.onclick = function(e) { if (e.target === overlay) cleanup(); };
+    overlay.onclick = function(e) {
+      if (e.target === overlay) cleanup();
+      audioMenu.style.display = 'none';
+    };
     document.body.appendChild(overlay);
 
     var streamSrc = dvr ? '/vod/' + dvr.id + '/dash/manifest.mpd' : url;

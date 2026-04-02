@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -58,14 +59,42 @@ type RecordingEntry struct {
 }
 
 type RecordingStoreImpl struct {
-	rootDir string
-	log     zerolog.Logger
+	rootDir  string
+	log      zerolog.Logger
+	mu       sync.RWMutex
+	sessions map[string]SessionMeta
 }
 
 func NewRecordingStore(rootDir string, log zerolog.Logger) *RecordingStoreImpl {
-	return &RecordingStoreImpl{
-		rootDir: rootDir,
-		log:     log.With().Str("store", "recording").Logger(),
+	s := &RecordingStoreImpl{
+		rootDir:  rootDir,
+		log:      log.With().Str("store", "recording").Logger(),
+		sessions: make(map[string]SessionMeta),
+	}
+	s.rebuildIndex()
+	return s
+}
+
+func (s *RecordingStoreImpl) rebuildIndex() {
+	streamDirs, err := os.ReadDir(s.rootDir)
+	if err != nil {
+		return
+	}
+	for _, sd := range streamDirs {
+		if !sd.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(s.rootDir, sd.Name(), "active", "meta.json"))
+		if err != nil {
+			continue
+		}
+		var meta SessionMeta
+		if json.Unmarshal(data, &meta) == nil {
+			s.sessions[sd.Name()] = meta
+		}
+	}
+	if len(s.sessions) > 0 {
+		s.log.Info().Int("count", len(s.sessions)).Msg("rebuilt active session index from disk")
 	}
 }
 
@@ -182,7 +211,13 @@ func (s *RecordingStoreImpl) WriteSessionMeta(streamID string, meta SessionMeta)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "meta.json"), data, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "meta.json"), data, 0644); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.sessions[streamID] = meta
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *RecordingStoreImpl) ReadSessionMeta(streamID string) (*SessionMeta, error) {
@@ -207,6 +242,9 @@ func (s *RecordingStoreImpl) RemoveActiveSession(streamID string) error {
 	if err := validatePathComponent(streamID); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	delete(s.sessions, streamID)
+	s.mu.Unlock()
 	return os.RemoveAll(s.ActiveDir(streamID))
 }
 
@@ -254,28 +292,20 @@ func (s *RecordingStoreImpl) CompleteRecording(streamID string, meta SessionMeta
 
 	os.RemoveAll(activeDir)
 
+	s.mu.Lock()
+	delete(s.sessions, streamID)
+	s.mu.Unlock()
+
 	return mp4Name, nil
 }
 
 func (s *RecordingStoreImpl) ListActiveRecordings() ([]SessionMeta, error) {
-	streamDirs, err := os.ReadDir(s.rootDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	var result []SessionMeta
-	for _, sd := range streamDirs {
-		if !sd.IsDir() {
-			continue
-		}
-		meta, err := s.ReadSessionMeta(sd.Name())
-		if err != nil || meta == nil {
-			continue
-		}
+	for _, meta := range s.sessions {
 		if meta.Status == SessionRecording {
-			result = append(result, *meta)
+			result = append(result, meta)
 		}
 	}
 	return result, nil
