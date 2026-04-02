@@ -30,15 +30,27 @@ func (s *VODService) StartRecording(ctx context.Context, channelID, title, chann
 	return s.startRecordingInternal(ctx, channelID, title, channelName, userID, stopAt)
 }
 
-func (s *VODService) startRecordingInternal(ctx context.Context, channelID, title, channelName, userID string, stopAt time.Time) error {
+func (s *VODService) startRecordingInternal(ctx context.Context, sessionKey, title, channelName, userID string, stopAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.recordings[channelID]; exists {
+	if _, exists := s.recordings[sessionKey]; exists {
 		return ErrAlreadyRecording
 	}
 
-	streamURL, streamName, resolvedChannelName, streamID, _, err := s.resolveStreamForChannel(ctx, channelID)
+	sess := s.sessionMgr.Get(sessionKey)
+	if sess != nil {
+		consumerID := s.sessionMgr.AddRecordingConsumer(sessionKey)
+		if consumerID == "" {
+			return fmt.Errorf("failed to add recording consumer")
+		}
+		if channelName == "" {
+			channelName = sess.ChannelName
+		}
+		return s.finalizeRecordingStart(sess, sessionKey, consumerID, title, channelName, userID, stopAt)
+	}
+
+	streamURL, streamName, resolvedChannelName, streamID, _, err := s.resolveStreamForChannel(ctx, sessionKey)
 	if err != nil {
 		return err
 	}
@@ -61,8 +73,8 @@ func (s *VODService) startRecordingInternal(ctx context.Context, channelID, titl
 		VideoCodec: defaultCodec,
 	})
 
-	sess, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
-		ChannelID:   channelID,
+	newSess, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
+		ChannelID:   sessionKey,
 		StreamID:    streamID,
 		StreamURL:   streamURL,
 		StreamName:  streamName,
@@ -76,6 +88,10 @@ func (s *VODService) startRecordingInternal(ctx context.Context, channelID, titl
 		return err
 	}
 
+	return s.finalizeRecordingStart(newSess, sessionKey, consumerID, title, channelName, userID, stopAt)
+}
+
+func (s *VODService) finalizeRecordingStart(sess *session.Session, sessionKey, consumerID, title, channelName, userID string, stopAt time.Time) error {
 	rs := &recordingState{
 		ConsumerID: consumerID,
 		Title:      title,
@@ -85,11 +101,11 @@ func (s *VODService) startRecordingInternal(ctx context.Context, channelID, titl
 	}
 
 	rs.Timer = time.AfterFunc(time.Until(stopAt), func() {
-		s.log.Info().Str("channel_id", channelID).Msg("recording deadline reached, auto-stopping")
-		s.stopRecordingInternal(channelID)
+		s.log.Info().Str("session_key", sessionKey).Msg("recording deadline reached, auto-stopping")
+		s.stopRecordingInternal(sessionKey)
 	})
 
-	s.recordings[channelID] = rs
+	s.recordings[sessionKey] = rs
 
 	if sess != nil {
 		s.updateSessionMetaForRecording(sess, title, userID, stopAt)
@@ -98,14 +114,14 @@ func (s *VODService) startRecordingInternal(ctx context.Context, channelID, titl
 	if s.activity != nil {
 		s.activity.Add(ViewerOpts{
 			ID:          consumerID,
-			ChannelID:   channelID,
+			ChannelID:   sessionKey,
 			ChannelName: channelName,
 			ProfileName: title,
 			Type:        session.ConsumerRecording,
 		})
 	}
 
-	s.log.Info().Str("channel_id", channelID).Str("title", title).Str("user_id", userID).Time("stop_at", stopAt).Msg("recording started")
+	s.log.Info().Str("session_key", sessionKey).Str("title", title).Str("user_id", userID).Time("stop_at", stopAt).Msg("recording started")
 	return nil
 }
 

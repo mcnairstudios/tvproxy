@@ -113,6 +113,23 @@ func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string) 
 const lingerDuration = 30 * time.Second
 
 
+func (m *Manager) AddRecordingConsumer(sessionKey string) string {
+	m.mu.RLock()
+	s, ok := m.sessions[sessionKey]
+	m.mu.RUnlock()
+	if !ok {
+		return ""
+	}
+	c := &Consumer{
+		ID:        uuid.New().String(),
+		Type:      ConsumerRecording,
+		CreatedAt: time.Now(),
+	}
+	s.addConsumer(c)
+	m.log.Info().Str("session_key", sessionKey).Str("consumer_id", c.ID).Msg("recording consumer added")
+	return c.ID
+}
+
 func (m *Manager) RemoveConsumer(channelID string, consumerID string) {
 	m.mu.RLock()
 	s, ok := m.sessions[channelID]
