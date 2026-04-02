@@ -511,17 +511,36 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _, duration = h.vodService.GetProbeInfo(channelID)
+	done := h.vodService.IsDone(channelID)
 	mpd := string(data)
 
-	if duration > 0 && !strings.Contains(mpd, "mediaPresentationDuration") {
+	if duration > 0 {
 		durStr := formatISODuration(duration)
-		mpd = strings.Replace(mpd, `type="dynamic"`, `type="dynamic" mediaPresentationDuration="`+durStr+`"`, 1)
+		if done {
+			mpd = strings.Replace(mpd, `type="dynamic"`, `type="static"`, 1)
+			if !strings.Contains(mpd, "mediaPresentationDuration") {
+				mpd = strings.Replace(mpd, `type="static"`, `type="static" mediaPresentationDuration="`+durStr+`"`, 1)
+			}
+			re := regexp.MustCompile(` availabilityStartTime="[^"]*"`)
+			mpd = re.ReplaceAllString(mpd, ``)
+			re = regexp.MustCompile(` minimumUpdatePeriod="[^"]*"`)
+			mpd = re.ReplaceAllString(mpd, ``)
+			re = regexp.MustCompile(` timeShiftBufferDepth="[^"]*"`)
+			mpd = re.ReplaceAllString(mpd, ``)
+			re = regexp.MustCompile(` suggestedPresentationDelay="[^"]*"`)
+			mpd = re.ReplaceAllString(mpd, ``)
+			re = regexp.MustCompile(` publishTime="[^"]*"`)
+			mpd = re.ReplaceAllString(mpd, ``)
+		} else {
+			if !strings.Contains(mpd, "mediaPresentationDuration") {
+				mpd = strings.Replace(mpd, `type="dynamic"`, `type="dynamic" mediaPresentationDuration="`+durStr+`"`, 1)
+			}
+			re := regexp.MustCompile(`availabilityStartTime="[^"]*"`)
+			mpd = re.ReplaceAllString(mpd, `availabilityStartTime="2000-01-01T00:00:00Z"`)
+			mpd = strings.Replace(mpd, ` suggestedPresentationDelay="PT3S"`, ``, 1)
+			mpd = strings.Replace(mpd, `minimumUpdatePeriod="PT5S"`, `minimumUpdatePeriod="PT2S"`, 1)
+		}
 	}
-
-	re := regexp.MustCompile(`availabilityStartTime="[^"]*"`)
-	mpd = re.ReplaceAllString(mpd, `availabilityStartTime="2000-01-01T00:00:00Z"`)
-	mpd = strings.Replace(mpd, `minimumUpdatePeriod="PT5S"`, `minimumUpdatePeriod="PT2S"`, 1)
-	mpd = strings.Replace(mpd, ` suggestedPresentationDelay="PT3S"`, ``, 1)
 
 	data = []byte(mpd)
 

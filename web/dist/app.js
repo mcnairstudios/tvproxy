@@ -2977,7 +2977,8 @@
     };
     document.body.appendChild(overlay);
 
-    var streamSrc = dvr ? '/vod/' + dvr.id + '/dash/manifest.mpd' : url;
+    var useDirectStream = dvr && dvr.duration > 0;
+    var streamSrc = dvr ? (useDirectStream ? '/vod/' + dvr.id + '/stream' : '/vod/' + dvr.id + '/dash/manifest.mpd') : url;
 
     var savedVol = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
     videoEl.volume = savedVol;
@@ -3011,6 +3012,7 @@
           }
         },
         manifest: {
+          availabilityWindowOverride: Infinity,
           retryParameters: { maxAttempts: 10, baseDelay: 2000, timeout: 30000 }
         }
       });
@@ -3210,6 +3212,11 @@
           if (dvrTracker) dvrTracker.updateBuffered(st.buffered);
           if (st.duration > 0 && dvr && !dvr.duration) {
             dvr.duration = st.duration;
+          }
+          if (st.ready && dvr && dvr.duration > 0 && shakaPlayer && shakaPlayer.isLive()) {
+            var currentTime = videoEl.currentTime;
+            console.log('Session done, reloading as static from', currentTime);
+            shakaPlayer.load(streamSrc, currentTime).catch(function(e) { console.warn('Static reload failed:', e); });
           }
           if (isLive && st.duration > 0 && !channelID) {
             isLive = false;
