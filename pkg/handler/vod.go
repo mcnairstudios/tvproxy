@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -510,14 +511,18 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _, duration = h.vodService.GetProbeInfo(channelID)
-	if duration > 0 {
+	mpd := string(data)
+
+	if duration > 0 && !strings.Contains(mpd, "mediaPresentationDuration") {
 		durStr := formatISODuration(duration)
-		mpd := string(data)
-		if !strings.Contains(mpd, "mediaPresentationDuration") {
-			mpd = strings.Replace(mpd, `type="dynamic"`, `type="dynamic" mediaPresentationDuration="`+durStr+`"`, 1)
-			data = []byte(mpd)
-		}
+		mpd = strings.Replace(mpd, `type="dynamic"`, `type="dynamic" mediaPresentationDuration="`+durStr+`"`, 1)
 	}
+
+	re := regexp.MustCompile(`availabilityStartTime="[^"]*"`)
+	mpd = re.ReplaceAllString(mpd, `availabilityStartTime="2000-01-01T00:00:00Z"`)
+	mpd = strings.Replace(mpd, `minimumUpdatePeriod="PT5S"`, `minimumUpdatePeriod="PT2S"`, 1)
+
+	data = []byte(mpd)
 
 	w.Header().Set("Content-Type", "application/dash+xml")
 	w.Header().Set("Cache-Control", "no-cache, no-store")
