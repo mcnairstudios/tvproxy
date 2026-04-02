@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -510,6 +511,15 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _, duration = h.vodService.GetProbeInfo(channelID)
+
+	if duration == 0 {
+		if epgDurStr := r.URL.Query().Get("epg_duration"); epgDurStr != "" {
+			if epgDur, err := strconv.ParseFloat(epgDurStr, 64); err == nil && epgDur > 0 {
+				duration = epgDur
+			}
+		}
+	}
+
 	mpd := string(data)
 
 	if duration > 0 {

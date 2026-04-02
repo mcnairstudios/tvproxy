@@ -2765,6 +2765,7 @@
     let pollInterval = null;
     let progInterval = null;
     let signalInterval = null;
+    var transcodeTimer = null;
     let signalData = null;
     let satipStreamUrl = null;
     let nowProgram = null;
@@ -2790,6 +2791,7 @@
       if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
       if (progInterval) { clearInterval(progInterval); progInterval = null; }
       if (recordElapsedTimer) { clearInterval(recordElapsedTimer); recordElapsedTimer = null; }
+      if (transcodeTimer) { clearInterval(transcodeTimer); transcodeTimer = null; }
       if (signalInterval) { clearInterval(signalInterval); signalInterval = null; }
       if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
       if (dashPlayer) {
@@ -2978,6 +2980,7 @@
     document.body.appendChild(overlay);
 
     var streamSrc = dvr ? '/vod/' + dvr.id + '/dash/manifest.mpd' : url;
+    var epgDuration = 0;
 
     var savedVol = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
     videoEl.volume = savedVol;
@@ -3019,12 +3022,23 @@
     }
 
     if (typeof dashjs !== 'undefined') {
-      waitForStream().then(function() {
+      var epgReady = tvgId ? api.get('/api/epg/now?channel_id=' + encodeURIComponent(tvgId)).then(function(program) {
+        if (program && program.start && program.stop) {
+          nowProgram = program;
+          var remaining = (new Date(program.stop).getTime() - Date.now()) / 1000;
+          epgDuration = remaining > 0 ? remaining : 0;
+        }
+      }).catch(function() {}) : Promise.resolve();
+
+      Promise.all([waitForStream(), epgReady]).then(function() {
         statusEl.style.color = '#ffa726';
         statusEl.textContent = 'Buffering...';
+        if (epgDuration > 0) {
+          streamSrc += (streamSrc.indexOf('?') >= 0 ? '&' : '?') + 'epg_duration=' + epgDuration;
+        }
         return fetch(streamSrc).then(function() {}).catch(function() {});
       }).then(function() {
-        var isVOD = dvr && dvr.duration > 0;
+        var isVOD = (dvr && dvr.duration > 0) || epgDuration > 0;
         dashPlayer = dashjs.MediaPlayer().create();
         window._dashDebug = dashPlayer;
         dashPlayer.updateSettings({
@@ -3067,11 +3081,33 @@
           statusEl.title = e.error ? e.error.message : String(e);
           statusEl.onclick = function() { alert('Player error:\n\n' + JSON.stringify(e.error || e)); };
         });
+        var transcodeBar = null;
+        if (isVOD) {
+          transcodeBar = document.createElement('div');
+          transcodeBar.style.cssText = 'position:absolute;bottom:28px;left:12px;right:12px;height:3px;background:rgba(0,0,0,0.3);z-index:25;pointer-events:none;border-radius:1px;';
+          var transcodeFill = document.createElement('div');
+          transcodeFill.style.cssText = 'height:100%;background:rgba(79,195,247,0.6);width:0%;transition:width 2s linear;border-radius:1px;';
+          transcodeBar.appendChild(transcodeFill);
+          transcodeBar._fill = transcodeFill;
+          playerWrap.appendChild(transcodeBar);
+        }
+
         dashPlayer.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function() {
           var dvrWin = dashPlayer.getDvrWindow();
           console.log('DASH INIT. dvrWindow:', dvrWin, 'duration:', dashPlayer.duration());
           if (isVOD) {
             dashPlayer.seek(0);
+            transcodeTimer = setInterval(function() {
+              if (playerCtx.signal.aborted || !dashPlayer) { clearInterval(transcodeTimer); return; }
+              var win = dashPlayer.getDvrWindow();
+              var total = dvr.duration || 1;
+              var pct = Math.min(100, (win.end / total) * 100);
+              if (transcodeBar && transcodeBar._fill) transcodeBar._fill.style.width = pct + '%';
+              if (pct >= 99.5 && transcodeBar) {
+                transcodeBar.style.display = 'none';
+                clearInterval(transcodeTimer);
+              }
+            }, 2000);
           }
         });
         dashPlayer.setXHRWithCredentialsForType('MPD', false);
@@ -3184,6 +3220,19 @@
               info += ' \u2022 ' + formatTime(program.start) + ' - ' + formatTime(program.stop);
             }
             nowPlayingEl.textContent = info;
+          }
+          if (program.start && program.stop && !dvr.duration) {
+            var progDur = (new Date(program.stop).getTime() - Date.now()) / 1000;
+            if (progDur > 0) {
+              epgDuration = progDur;
+              if (dashPlayer) {
+                dashPlayer.updateSettings({
+                  streaming: {
+                    timeShiftBuffer: { calcFromSegmentTimeline: true }
+                  }
+                });
+              }
+            }
           }
         }
       }).catch(function() {});
