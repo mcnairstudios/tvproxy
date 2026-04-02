@@ -175,7 +175,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		Command:     command,
 		Args:        args,
 		OutputDir:   s.config.VODOutputDir,
-	}, "viewer")
+	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", false, err
 	}
@@ -223,7 +223,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		Command:     command,
 		Args:        args,
 		OutputDir:   s.config.VODOutputDir,
-	}, "viewer")
+	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -303,11 +303,11 @@ func (s *VODService) startRecordingInternal(ctx context.Context, channelID, titl
 		StreamURL:   streamURL,
 		StreamName:  streamName,
 		ChannelName: channelName,
-		ProfileName: "recording",
+		ProfileName: session.ConsumerRecording,
 		Command:     command,
 		Args:        args,
 		OutputDir:   s.config.VODOutputDir,
-	}, "recording")
+	}, session.ConsumerRecording)
 	if err != nil {
 		return err
 	}
@@ -344,7 +344,7 @@ func (s *VODService) startRecordingInternal(ctx context.Context, channelID, titl
 			ChannelID:   channelID,
 			ChannelName: channelName,
 			ProfileName: title,
-			Type:        "recording",
+			Type: session.ConsumerRecording,
 		})
 	}
 

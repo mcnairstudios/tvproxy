@@ -7,6 +7,11 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 )
 
+const (
+	ConsumerViewer    = "viewer"
+	ConsumerRecording = "recording"
+)
+
 type Session struct {
 	ID           string
 	ChannelID    string
@@ -127,7 +132,7 @@ func (s *Session) HasRecordingConsumer() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, c := range s.consumers {
-		if c.Type == "recording" {
+		if c.Type == ConsumerRecording {
 			return true
 		}
 	}
@@ -138,7 +143,7 @@ func (s *Session) RecordingConsumerID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, c := range s.consumers {
-		if c.Type == "recording" {
+		if c.Type == ConsumerRecording {
 			return c.ID
 		}
 	}
