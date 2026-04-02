@@ -302,45 +302,6 @@ func (s *RecordingStoreImpl) GetMeta(streamHash, filename string) (*RecordingMet
 	return nil, nil
 }
 
-func (s *RecordingStoreImpl) Save(streamHash string, srcPath string, meta RecordingMeta) (string, error) {
-	if err := validatePathComponent(streamHash); err != nil {
-		return "", fmt.Errorf("invalid stream hash: %w", err)
-	}
-	dir := filepath.Join(s.rootDir, streamHash, "recorded")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", fmt.Errorf("creating recording dir: %w", err)
-	}
-
-	baseName := ffmpeg.SanitizeFilename(meta.ProgramTitle, meta.StoppedAt)
-	mp4Name := baseName + ".mp4"
-	destPath := filepath.Join(dir, mp4Name)
-
-	for i := 1; i <= 1000; i++ {
-		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			break
-		}
-		if i == 1000 {
-			return "", fmt.Errorf("too many filename collisions for %s", baseName)
-		}
-		mp4Name = fmt.Sprintf("%s_%d.mp4", baseName, i)
-		destPath = filepath.Join(dir, mp4Name)
-	}
-
-	if err := moveOrCopy(srcPath, destPath); err != nil {
-		return "", fmt.Errorf("saving recording file: %w", err)
-	}
-
-	jsonName := strings.TrimSuffix(mp4Name, ".mp4") + ".json"
-	metaData, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("marshaling metadata: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, jsonName), metaData, 0644); err != nil {
-		s.log.Warn().Err(err).Str("path", jsonName).Msg("failed to write metadata sidecar")
-	}
-
-	return mp4Name, nil
-}
 
 func (s *RecordingStoreImpl) List(userID string, isAdmin bool) ([]RecordingEntry, error) {
 	streamDirs, err := os.ReadDir(s.rootDir)

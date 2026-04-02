@@ -91,7 +91,6 @@ type RecordingReader interface {
 }
 
 type RecordingWriter interface {
-	Save(streamID string, srcPath string, meta RecordingMeta) (string, error)
 	Delete(streamID, filename string) error
 }
 
