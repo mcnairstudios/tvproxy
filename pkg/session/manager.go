@@ -110,7 +110,7 @@ func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string) 
 	return args
 }
 
-const lingerDuration = 30 * time.Second
+const lingerDuration = 5 * time.Minute
 
 
 func (m *Manager) AddRecordingConsumer(sessionKey string) string {

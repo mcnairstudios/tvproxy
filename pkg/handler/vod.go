@@ -522,6 +522,13 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 
 	mpd := string(data)
 
+	if strings.Contains(mpd, `type="static"`) {
+		mpd = strings.Replace(mpd, `type="static"`, `type="dynamic"`, 1)
+		if !strings.Contains(mpd, "minimumUpdatePeriod") {
+			mpd = strings.Replace(mpd, `type="dynamic"`, `type="dynamic" minimumUpdatePeriod="PT2S"`, 1)
+		}
+	}
+
 	if duration > 0 {
 		durStr := formatISODuration(duration)
 		if !strings.Contains(mpd, "mediaPresentationDuration") {
