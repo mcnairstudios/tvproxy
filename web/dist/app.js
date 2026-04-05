@@ -3000,7 +3000,15 @@
       var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       if (dashPlayer) {
         var win = dashPlayer.getDvrWindow();
-        var target = win.start + pct * win.size;
+        var knownDur = dvr.duration || epgDuration || 0;
+        var target;
+        if (knownDur > 0) {
+          target = pct * knownDur;
+        } else {
+          target = win.start + pct * win.size;
+        }
+        target = Math.max(win.start, Math.min(win.end - 1, target));
+        console.log('SEEK: pct=' + pct.toFixed(3), 'knownDur=' + knownDur, 'dvrWindow=', JSON.stringify(win), 'target=' + target.toFixed(1), 'currentTime=' + videoEl.currentTime.toFixed(1));
         dashPlayer.seek(target);
       } else {
         var dur = videoEl.duration;
@@ -3173,7 +3181,7 @@
         dashPlayer.updateSettings({
           streaming: {
             timeShiftBuffer: {
-              calcFromSegmentTimeline: isVOD,
+              calcFromSegmentTimeline: true,
               fallbackToSegmentTimeline: true
             },
             delay: {

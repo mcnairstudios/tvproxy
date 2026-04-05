@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"regexp"
 	"strings"
 	"time"
 
@@ -535,6 +536,13 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 			mpd = strings.Replace(mpd, `type="dynamic"`, `type="dynamic" mediaPresentationDuration="`+durStr+`"`, 1)
 		}
 		mpd = strings.Replace(mpd, `minimumUpdatePeriod="PT5S"`, `minimumUpdatePeriod="PT2S"`, 1)
+	}
+
+	buffered := h.vodService.GetBufferedSecs(channelID)
+	if buffered > 0 {
+		newAST := time.Now().UTC().Add(-time.Duration(buffered+30) * time.Second)
+		astRe := regexp.MustCompile(`availabilityStartTime="[^"]*"`)
+		mpd = astRe.ReplaceAllString(mpd, `availabilityStartTime="`+newAST.Format(time.RFC3339)+`"`)
 	}
 
 	data = []byte(mpd)
