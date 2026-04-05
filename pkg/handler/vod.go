@@ -149,7 +149,7 @@ func (h *VODHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		"request_headers": clientHeaders(r),
 	}
 	_, _, duration := h.vodService.GetProbeInfo(sessionID)
-	if duration > 0 {
+	if duration >= 30 {
 		resp["duration"] = duration
 	}
 	respondJSON(w, http.StatusOK, resp)
@@ -175,7 +175,7 @@ func (h *VODHandler) CreateChannelSession(w http.ResponseWriter, r *http.Request
 		"request_headers": clientHeaders(r),
 	}
 	_, _, duration := h.vodService.GetProbeInfo(sessionID)
-	if duration > 0 {
+	if duration >= 30 {
 		resp["duration"] = duration
 	}
 	respondJSON(w, http.StatusOK, resp)
@@ -214,7 +214,7 @@ func (h *VODHandler) Status(w http.ResponseWriter, r *http.Request) {
 	if len(audioTracks) > 0 {
 		resp["audio_tracks"] = audioTracks
 	}
-	if duration > 0 {
+	if duration >= 30 {
 		resp["duration"] = duration
 	}
 	respondJSON(w, http.StatusOK, resp)

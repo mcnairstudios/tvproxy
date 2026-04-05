@@ -84,7 +84,7 @@ func composeBuildArgs(opts BuildOptions) string {
 	}
 	parts = append(parts, encoderFlags(opts.HWAccel, outputCodec, s)...)
 	parts = append(parts, "-g", "50", "-keyint_min", "50")
-	parts = append(parts, buildAudioFlags(opts.Probe, opts.Container, opts.Delivery, opts.AudioCodec, s)...)
+	parts = append(parts, buildAudioFlags(opts.Probe, opts.Container, opts.Delivery, opts.AudioCodec, opts.StreamURL, s)...)
 
 	parts = append(parts, "-output_ts_offset", "0")
 
@@ -143,21 +143,27 @@ func hwInitFlags(hwaccel, outputCodec string) []string {
 	return nil
 }
 
-func buildAudioFlags(probe *ProbeResult, container, delivery, audioCodec string, s *defaults.FFmpegSettings) []string {
+func buildAudioFlags(probe *ProbeResult, container, delivery, audioCodec, streamURL string, s *defaults.FFmpegSettings) []string {
+	isRTSP := strings.HasPrefix(strings.ToLower(streamURL), "rtsp://")
+	var flags []string
 	switch audioCodec {
 	case "copy":
-		return []string{"-c:a", "copy"}
+		flags = []string{"-c:a", "copy"}
 	case "aac":
-		return []string{"-c:a", "aac", "-ac", "2", "-b:a", s.AudioBitrate}
+		flags = []string{"-c:a", "aac", "-ac", "2", "-b:a", s.AudioBitrate}
 	case "opus":
-		return []string{"-c:a", "libopus", "-b:a", s.AudioBitrate}
+		flags = []string{"-c:a", "libopus", "-b:a", s.AudioBitrate}
 	default:
 		if container == "webm" {
-			return []string{"-c:a", "libopus", "-b:a", s.AudioBitrate}
+			flags = []string{"-c:a", "libopus", "-b:a", s.AudioBitrate}
+		} else if delivery == "dash" {
+			flags = []string{"-c:a", "aac", "-ac", "2", "-b:a", s.AudioBitrate}
+		} else {
+			flags = audioEncoder(probe)
 		}
-		if delivery == "dash" {
-			return []string{"-c:a", "aac", "-ac", "2", "-b:a", s.AudioBitrate}
-		}
-		return audioEncoder(probe)
 	}
+	if isRTSP && audioCodec != "copy" {
+		flags = append(flags, "-af", "aresample=async=1000:first_pts=0")
+	}
+	return flags
 }

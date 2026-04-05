@@ -3225,6 +3225,7 @@
           if (isVOD) {
             dashPlayer.seek(0);
           }
+          videoEl.play().catch(function() {});
         });
         dashPlayer.extend('RequestModifier', function() {
           return {
