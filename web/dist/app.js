@@ -4923,33 +4923,48 @@
         return 'Unconfigured';
       }
 
-      function renderProfileStatus(ps) {
-        var card = h('div', { style: 'background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px;' + (ps.active ? 'border-left:3px solid var(--success);' : '') });
+      function renderActiveStatusPane(ps, profileName) {
+        var card = h('div', { style: 'background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--success);border-radius:8px;padding:16px;margin-bottom:20px;' });
         var st = ps.state || 'disconnected';
 
         if (st === 'error' && ps.error) {
-          card.appendChild(h('div', { style: 'color:var(--danger);margin-bottom:8px' }, ps.error));
+          card.style.borderLeftColor = 'var(--danger)';
+          card.appendChild(h('div', { style: 'color:var(--danger)' }, ps.error));
+          return card;
         }
 
-        if (st === 'connected') {
-          var grid = h('div', { style: 'display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:0.88em;color:var(--text-muted)' });
-          function addStat(label, value) {
-            grid.appendChild(h('span', { style: 'font-weight:500' }, label));
-            grid.appendChild(h('span', null, value));
-          }
-          addStat('Exit IP', ps.exit_ip || 'Checking...');
-          addStat('Session', fmtDuration(ps.connected_since));
-          addStat('Last Handshake', fmtRelative(ps.last_handshake));
-          addStat('TX', fmtBytes(ps.tx_bytes || 0));
-          addStat('RX', fmtBytes(ps.rx_bytes || 0));
-          if (ps.peer_endpoint) addStat('Peer', ps.peer_endpoint);
-          addStat('Health', ps.healthy ? '\u2705 Healthy' : '\u274C Unhealthy');
-          if (ps.last_healthcheck) addStat('Last Check', fmtRelative(ps.last_healthcheck));
-          if (ps.active) addStat('Routing', '\u2705 Active');
-          card.appendChild(grid);
+        if (st !== 'connected') {
+          card.style.display = 'none';
+          return card;
         }
 
+        var grid = h('div', { style: 'display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:0.88em;color:var(--text-muted)' });
+        function addStat(label, value) {
+          grid.appendChild(h('span', { style: 'font-weight:500' }, label));
+          grid.appendChild(h('span', null, value));
+        }
+        if (profileName) addStat('Profile', profileName);
+        addStat('Exit IP', ps.exit_ip || 'Checking...');
+        addStat('Session', fmtDuration(ps.connected_since));
+        addStat('Last Handshake', fmtRelative(ps.last_handshake));
+        addStat('TX', fmtBytes(ps.tx_bytes || 0));
+        addStat('RX', fmtBytes(ps.rx_bytes || 0));
+        if (ps.peer_endpoint) addStat('Peer', ps.peer_endpoint);
+        card.appendChild(grid);
         return card;
+      }
+
+      function renderProfileLine(ps) {
+        var row = h('div', { style: 'display:flex;align-items:center;gap:8px;padding:8px 0;' });
+        row.appendChild(h('span', { style: 'font-weight:600;min-width:120px' }, ps.name || 'Unnamed'));
+        var enabled = ps.state === 'connected' || ps.state === 'connecting';
+        row.appendChild(h('span', { style: 'font-size:0.85em' }, enabled ? '\u2705 Enabled' : '\u26D4 Disabled'));
+        if (enabled) {
+          if (ps.healthy === true) row.appendChild(h('span', { style: 'font-size:0.85em;color:var(--success)' }, '\u2705 Passing'));
+          else if (ps.healthy === false) row.appendChild(h('span', { style: 'font-size:0.85em;color:var(--danger)' }, '\u274C Failing'));
+          else row.appendChild(h('span', { style: 'font-size:0.85em;color:var(--text-muted)' }, '\u23F3 Pending'));
+        }
+        return row;
       }
 
       function renderProfileForm(profile) {
@@ -5100,6 +5115,14 @@
           controls.appendChild(addBtn);
           container.appendChild(controls);
 
+          var activeStatusDiv = h('div');
+          if (multiStatus.active_profile_id) {
+            var activePs = (multiStatus.profiles || []).find(function(p) { return p.id === multiStatus.active_profile_id; });
+            if (activePs) activeStatusDiv.appendChild(renderActiveStatusPane(activePs, multiStatus.active_profile_name));
+          }
+          container.appendChild(activeStatusDiv);
+          activeStatusRef = activeStatusDiv;
+
           contentDiv = h('div');
 
           selectedStatusRef = null;
@@ -5110,29 +5133,15 @@
           } else if (selectedProfileId) {
             var profile = profiles.find(function(p) { return p.id === selectedProfileId; });
             if (profile) {
-              var ps = (multiStatus.profiles || []).find(function(p) { return p.id === selectedProfileId; });
-              var statusDiv = h('div');
-              if (ps) statusDiv.appendChild(renderProfileStatus(ps));
-              contentDiv.appendChild(statusDiv);
-              selectedStatusRef = statusDiv;
               contentDiv.appendChild(renderProfileForm(profile));
             }
           } else if (profiles.length > 0) {
-            overviewRef = h('div');
+            overviewRef = h('div', { style: 'background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 16px;margin-bottom:16px;' });
             (multiStatus.profiles || []).forEach(function(ps) {
-              var card = h('div', { style: 'margin-bottom:12px;cursor:pointer' });
-              var nameRow = h('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:4px' });
-              nameRow.appendChild(h('span', { style: 'font-weight:600;font-size:1.05em' }, ps.name || 'Unnamed'));
-              var st = ps.state || 'disconnected';
-              nameRow.appendChild(h('span', { style: 'font-size:0.85em;color:' + stateColor(st) }, stateLabel(st)));
-              if (ps.active) nameRow.appendChild(h('span', { className: 'badge badge-success', style: 'font-size:0.75em' }, 'Active'));
-              if (ps.healthy === true) nameRow.appendChild(h('span', { style: 'font-size:0.85em;color:var(--success)' }, '\u2705'));
-              if (ps.healthy === false) nameRow.appendChild(h('span', { style: 'font-size:0.85em;color:var(--danger)' }, '\u274C'));
-              card.appendChild(nameRow);
-              if (ps.exit_ip) card.appendChild(h('div', { style: 'font-size:0.85em;color:var(--text-muted)' }, 'Exit: ' + ps.exit_ip));
-              card.style.cssText = 'background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px 16px;cursor:pointer;' + (ps.active ? 'border-left:3px solid var(--success);' : '');
-              card.onclick = function() { selectedProfileId = ps.id; renderPage(); };
-              overviewRef.appendChild(card);
+              var line = renderProfileLine(ps);
+              line.style.cursor = 'pointer';
+              line.onclick = function() { selectedProfileId = ps.id; renderPage(); };
+              overviewRef.appendChild(line);
             });
             contentDiv.appendChild(overviewRef);
           } else {
@@ -5148,6 +5157,7 @@
       }
 
       var statusBadgeRef = null;
+      var activeStatusRef = null;
       var overviewRef = null;
       var selectedStatusRef = null;
 
@@ -5161,28 +5171,20 @@
             statusBadgeRef.appendChild(h('span', { style: 'width:8px;height:8px;border-radius:50%;background:' + activeColor + ';display:inline-block' }));
             statusBadgeRef.appendChild(h('span', { style: 'font-weight:500;color:' + activeColor }, activeLabel));
           }
-          if (selectedStatusRef && selectedProfileId && selectedProfileId !== 'new') {
-            var ps = (multiStatus.profiles || []).find(function(p) { return p.id === selectedProfileId; });
-            if (ps) {
-              selectedStatusRef.innerHTML = '';
-              selectedStatusRef.appendChild(renderProfileStatus(ps));
+          if (activeStatusRef) {
+            activeStatusRef.innerHTML = '';
+            if (multiStatus.active_profile_id) {
+              var activePs = (multiStatus.profiles || []).find(function(p) { return p.id === multiStatus.active_profile_id; });
+              if (activePs) activeStatusRef.appendChild(renderActiveStatusPane(activePs, multiStatus.active_profile_name));
             }
           }
           if (overviewRef && !selectedProfileId) {
             overviewRef.innerHTML = '';
             (multiStatus.profiles || []).forEach(function(ps) {
-              var card = h('div', { style: 'background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px 16px;cursor:pointer;margin-bottom:12px;' + (ps.active ? 'border-left:3px solid var(--success);' : '') });
-              var nameRow = h('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:4px' });
-              nameRow.appendChild(h('span', { style: 'font-weight:600;font-size:1.05em' }, ps.name || 'Unnamed'));
-              var st = ps.state || 'disconnected';
-              nameRow.appendChild(h('span', { style: 'font-size:0.85em;color:' + stateColor(st) }, stateLabel(st)));
-              if (ps.active) nameRow.appendChild(h('span', { className: 'badge badge-success', style: 'font-size:0.75em' }, 'Active'));
-              if (ps.healthy === true) nameRow.appendChild(h('span', { style: 'font-size:0.85em;color:var(--success)' }, '\u2705'));
-              if (ps.healthy === false) nameRow.appendChild(h('span', { style: 'font-size:0.85em;color:var(--danger)' }, '\u274C'));
-              card.appendChild(nameRow);
-              if (ps.exit_ip) card.appendChild(h('div', { style: 'font-size:0.85em;color:var(--text-muted)' }, 'Exit: ' + ps.exit_ip));
-              card.onclick = function() { selectedProfileId = ps.id; renderPage(); };
-              overviewRef.appendChild(card);
+              var line = renderProfileLine(ps);
+              line.style.cursor = 'pointer';
+              line.onclick = function() { selectedProfileId = ps.id; renderPage(); };
+              overviewRef.appendChild(line);
             });
           }
         } catch (e) {}
