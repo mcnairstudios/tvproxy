@@ -265,3 +265,21 @@ type ScheduledRecording struct {
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
+
+type WireGuardProfile struct {
+	ID                 string    `json:"id"`
+	Name               string    `json:"name"`
+	PrivateKey         string    `json:"private_key,omitempty"`
+	Address            string    `json:"address"`
+	DNS                string    `json:"dns"`
+	PeerPublicKey      string    `json:"peer_public_key"`
+	PeerEndpoint       string    `json:"peer_endpoint"`
+	RouteHosts         string    `json:"route_hosts"`
+	HealthcheckURL     string    `json:"healthcheck_url,omitempty"`
+	HealthcheckMethod  string    `json:"healthcheck_method,omitempty"`
+	HealthcheckInterval int      `json:"healthcheck_interval,omitempty"`
+	IsEnabled          bool      `json:"is_enabled"`
+	Priority           int       `json:"priority"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
