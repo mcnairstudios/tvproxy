@@ -3137,7 +3137,7 @@
         function poll() {
           if (playerCtx.signal.aborted) { reject(new Error('cancelled')); return; }
           fetch('/vod/' + dvr.id + '/status').then(function(r) { return r.json(); }).then(function(st) {
-            if (st.buffered > 6) { if (st.duration > 0 && !dvr.duration) dvr.duration = st.duration; resolve(); return; }
+            if (st.buffered > 12) { if (st.duration > 0 && !dvr.duration) dvr.duration = st.duration; resolve(); return; }
             if (st.error) { reject(new Error(st.error)); return; }
             attempts++;
             if (attempts >= 60) { reject(new Error('stream timeout')); return; }
@@ -3163,7 +3163,9 @@
         if (epgDuration > 0) {
           streamSrc += (streamSrc.indexOf('?') >= 0 ? '&' : '?') + 'epg_duration=' + epgDuration;
         }
-        return fetch(streamSrc).then(function() {}).catch(function() {});
+        return fetch(streamSrc).then(function(r) { return r.text(); }).then(function(mpd) {
+          console.log('DASH manifest preflight (' + mpd.length + ' bytes):', mpd.substring(0, 500));
+        }).catch(function(e) { console.warn('Manifest preflight failed:', e); });
       }).then(function() {
         var isVOD = (dvr && dvr.duration > 0) || epgDuration > 0;
         dashPlayer = dashjs.MediaPlayer().create();
@@ -3201,6 +3203,9 @@
         });
         dashPlayer.on(dashjs.MediaPlayer.events.ERROR, function(e) {
           console.error('DASH ERROR:', e);
+          if (e.error && e.error.code === 32) {
+            fetch(streamSrc).then(function(r) { return r.text(); }).then(function(mpd) { console.error('MANIFEST AT ERROR:', mpd); });
+          }
           statusEl.style.color = '#ff6b6b';
           statusEl.textContent = 'Errored';
           statusEl.style.cursor = 'pointer';
@@ -3216,7 +3221,6 @@
             dashPlayer.seek(0);
           }
         });
-        dashPlayer.registerCustomCapabilitiesFilter(function() {});
         dashPlayer.extend('RequestModifier', function() {
           return {
             modifyRequestURL: function(url) {
