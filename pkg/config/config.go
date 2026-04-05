@@ -40,6 +40,11 @@ type Config struct {
 	RecordDefaultDuration time.Duration
 	RecordStopBuffer      time.Duration
 
+	HDHRFirmwareVersion string
+	HDHRDeviceAuth      string
+	HDHRModelNumber     string
+	HDHRFirmwareName    string
+
 	Settings *defaults.Settings
 }
 
@@ -65,6 +70,10 @@ func Load() *Config {
 		RecordDir:             envStr("TVPROXY_RECORD_DIR", "/record"),
 		RecordDefaultDuration: envDuration("TVPROXY_RECORD_DEFAULT_DURATION", 4*time.Hour),
 		RecordStopBuffer:      envDuration("TVPROXY_RECORD_STOP_BUFFER", 5*time.Minute),
+		HDHRFirmwareVersion:   envStr("TVPROXY_HDHR_FIRMWARE_VERSION", "20260326"),
+		HDHRDeviceAuth:        envStr("TVPROXY_HDHR_DEVICE_AUTH", ""),
+		HDHRModelNumber:       envStr("TVPROXY_HDHR_MODEL_NUMBER", "HDHR5-2DT"),
+		HDHRFirmwareName:      envStr("TVPROXY_HDHR_FIRMWARE_NAME", "hdhomerun5_dvbt"),
 	}
 }
 

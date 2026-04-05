@@ -204,7 +204,7 @@ func main() {
 	activityService := service.NewActivityService()
 	clientService := service.NewClientService(clientStore, profileStore, settingsService, log)
 	proxyService := service.NewProxyService(channelStore, streamStore, profileStore, clientService, activityService, cfg, wgHTTPClient, log)
-	hdhrService := service.NewHDHRService(hdhrStore, channelStore)
+	hdhrService := service.NewHDHRService(hdhrStore, channelStore, cfg)
 	outputService := service.NewOutputService(channelStore, channelGroupStore, epgStore, logoService, cfg, log)
 	recordingStore := store.NewRecordingStore(cfg.RecordDir, log)
 	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, recordingStore, log)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/xmlutil"
@@ -25,7 +26,6 @@ type DiscoverData struct {
 	DeviceAuth      string `json:"DeviceAuth"`
 	BaseURL         string `json:"BaseURL"`
 	LineupURL       string `json:"LineupURL"`
-	GuideURL        string `json:"GuideURL,omitempty"`
 	TunerCount      int    `json:"TunerCount"`
 }
 
@@ -61,15 +61,18 @@ type deviceXMLInner struct {
 type HDHRService struct {
 	hdhrStore    store.HDHRDeviceStore
 	channelStore store.ChannelStore
+	config       *config.Config
 }
 
 func NewHDHRService(
 	hdhrStore store.HDHRDeviceStore,
 	channelStore store.ChannelStore,
+	cfg *config.Config,
 ) *HDHRService {
 	return &HDHRService{
 		hdhrStore:    hdhrStore,
 		channelStore: channelStore,
+		config:       cfg,
 	}
 }
 
@@ -154,18 +157,27 @@ func (s *HDHRService) GetDeviceXML(ctx context.Context, baseURL string) (*Device
 }
 
 func (s *HDHRService) GetDiscoverDataForDevice(ctx context.Context, device *models.HDHRDevice, baseURL string) (*DiscoverData, error) {
+	modelNumber := s.config.HDHRModelNumber
+	firmwareName := s.config.HDHRFirmwareName
+	firmwareVersion := device.FirmwareVersion
+	if firmwareVersion == "" {
+		firmwareVersion = s.config.HDHRFirmwareVersion
+	}
+	deviceAuth := device.DeviceAuth
+	if deviceAuth == "" {
+		deviceAuth = s.config.HDHRDeviceAuth
+	}
 	return &DiscoverData{
 		FriendlyName:    device.Name,
 		Manufacturer:    "Silicondust",
 		ManufacturerURL: "https://www.silicondust.com/",
-		ModelNumber:     "HDTC-2US",
-		FirmwareName:    "hdhomerun_atsc",
-		FirmwareVersion: device.FirmwareVersion,
+		ModelNumber:     modelNumber,
+		FirmwareName:    firmwareName,
+		FirmwareVersion: firmwareVersion,
 		DeviceID:        device.DeviceID,
-		DeviceAuth:      device.DeviceAuth,
+		DeviceAuth:      deviceAuth,
 		BaseURL:         baseURL,
 		LineupURL:       baseURL + "/lineup.json",
-		GuideURL:        baseURL + "/output/epg",
 		TunerCount:      device.TunerCount,
 	}, nil
 }
