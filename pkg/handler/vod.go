@@ -518,6 +518,7 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 	if duration > 0 && duration < 30 {
 		duration = 0
 	}
+	isVOD := duration > 0
 
 	if duration == 0 {
 		if epgDurStr := r.URL.Query().Get("epg_duration"); epgDurStr != "" {
@@ -544,7 +545,7 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 		mpd = strings.Replace(mpd, `minimumUpdatePeriod="PT5S"`, `minimumUpdatePeriod="PT2S"`, 1)
 	}
 
-	if duration > 0 {
+	if isVOD {
 		buffered := h.vodService.GetBufferedSecs(channelID)
 		if buffered > 0 {
 			newAST := time.Now().UTC().Add(-time.Duration(buffered+30) * time.Second)

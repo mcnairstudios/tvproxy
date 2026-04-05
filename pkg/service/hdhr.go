@@ -25,6 +25,7 @@ type DiscoverData struct {
 	DeviceAuth      string `json:"DeviceAuth"`
 	BaseURL         string `json:"BaseURL"`
 	LineupURL       string `json:"LineupURL"`
+	GuideURL        string `json:"GuideURL,omitempty"`
 	TunerCount      int    `json:"TunerCount"`
 }
 
@@ -164,6 +165,7 @@ func (s *HDHRService) GetDiscoverDataForDevice(ctx context.Context, device *mode
 		DeviceAuth:      device.DeviceAuth,
 		BaseURL:         baseURL,
 		LineupURL:       baseURL + "/lineup.json",
+		GuideURL:        baseURL + "/output/epg",
 		TunerCount:      device.TunerCount,
 	}, nil
 }
