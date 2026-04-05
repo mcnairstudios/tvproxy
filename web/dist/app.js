@@ -3001,14 +3001,10 @@
       if (dashPlayer) {
         var win = dashPlayer.getDvrWindow();
         var knownDur = dvr.duration || epgDuration || 0;
-        var target;
-        if (knownDur > 0) {
-          target = pct * knownDur;
-        } else {
-          target = win.start + pct * win.size;
-        }
+        var effectiveDur = knownDur > 0 ? knownDur : win.end;
+        var target = pct * effectiveDur;
         target = Math.max(win.start, Math.min(win.end - 1, target));
-        console.log('SEEK: pct=' + pct.toFixed(3), 'knownDur=' + knownDur, 'dvrWindow=', JSON.stringify(win), 'target=' + target.toFixed(1), 'currentTime=' + videoEl.currentTime.toFixed(1));
+        console.log('SEEK: pct=' + pct.toFixed(3), 'effectiveDur=' + effectiveDur.toFixed(1), 'dvrWindow=', JSON.stringify(win), 'target=' + target.toFixed(1), 'currentTime=' + videoEl.currentTime.toFixed(1));
         dashPlayer.seek(target);
       } else {
         var dur = videoEl.duration;
@@ -3079,14 +3075,15 @@
 
       if (dashPlayer) {
         var win = dashPlayer.getDvrWindow();
-        if (win.size > 0 && knownDur > 0) {
-          seekPlayed.style.width = ((cur / knownDur) * 100) + '%';
-          seekThumb.style.left = ((cur / knownDur) * 100) + '%';
-          seekTranscoded.style.width = ((win.end / knownDur) * 100) + '%';
+        var effectiveDur = knownDur > 0 ? knownDur : win.end;
+        if (win.size > 0 && effectiveDur > 0) {
+          seekPlayed.style.width = ((cur / effectiveDur) * 100) + '%';
+          seekThumb.style.left = ((cur / effectiveDur) * 100) + '%';
+          seekTranscoded.style.width = ((win.end / effectiveDur) * 100) + '%';
           var bufEnd = 0;
           if (videoEl.buffered.length > 0) bufEnd = videoEl.buffered.end(videoEl.buffered.length - 1);
-          seekBuffered.style.width = ((bufEnd / knownDur) * 100) + '%';
-          timeDisplay.textContent = fmtCtrlTime(cur) + ' / ' + fmtCtrlTime(knownDur);
+          seekBuffered.style.width = ((bufEnd / effectiveDur) * 100) + '%';
+          timeDisplay.textContent = fmtCtrlTime(cur) + ' / ' + fmtCtrlTime(effectiveDur);
         } else {
           timeDisplay.textContent = fmtCtrlTime(cur);
         }

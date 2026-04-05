@@ -490,6 +490,9 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 
 	dashDir := dash.ChannelDir(channelID)
 	_, _, duration := h.vodService.GetProbeInfo(channelID)
+	if duration > 0 && duration < 30 {
+		duration = 0
+	}
 	remuxer, err := h.dashManager.GetOrStart(context.Background(), channelID, sess.FilePath, dashDir, false, duration)
 	if err != nil {
 		h.log.Error().Err(err).Str("channel_id", channelID).Msg("failed to start dash remuxer")
@@ -512,6 +515,9 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _, duration = h.vodService.GetProbeInfo(channelID)
+	if duration > 0 && duration < 30 {
+		duration = 0
+	}
 
 	if duration == 0 {
 		if epgDurStr := r.URL.Query().Get("epg_duration"); epgDurStr != "" {
@@ -538,11 +544,13 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 		mpd = strings.Replace(mpd, `minimumUpdatePeriod="PT5S"`, `minimumUpdatePeriod="PT2S"`, 1)
 	}
 
-	buffered := h.vodService.GetBufferedSecs(channelID)
-	if buffered > 0 {
-		newAST := time.Now().UTC().Add(-time.Duration(buffered+30) * time.Second)
-		astRe := regexp.MustCompile(`availabilityStartTime="[^"]*"`)
-		mpd = astRe.ReplaceAllString(mpd, `availabilityStartTime="`+newAST.Format(time.RFC3339)+`"`)
+	if duration > 0 {
+		buffered := h.vodService.GetBufferedSecs(channelID)
+		if buffered > 0 {
+			newAST := time.Now().UTC().Add(-time.Duration(buffered+30) * time.Second)
+			astRe := regexp.MustCompile(`availabilityStartTime="[^"]*"`)
+			mpd = astRe.ReplaceAllString(mpd, `availabilityStartTime="`+newAST.Format(time.RFC3339)+`"`)
+		}
 	}
 
 	data = []byte(mpd)
