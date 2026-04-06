@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -35,15 +36,25 @@ func (h *ChannelHandler) resolveLogoID(ctx context.Context, logoID *string, logo
 	if logo != nil {
 		return &logo.ID, nil
 	}
-	name := channelName
-	if name == "" {
-		name = "Auto"
-	}
+	name := logoName(logoURL, channelName)
 	logo = &models.Logo{Name: name, URL: logoURL}
 	if err := h.logoService.Create(ctx, logo); err != nil {
 		return nil, err
 	}
 	return &logo.ID, nil
+}
+
+func logoName(logoURL, channelName string) string {
+	prefix := "tvproxy"
+	u, err := url.Parse(logoURL)
+	if err == nil && u.Host != "" {
+		prefix = u.Host
+	}
+	name := channelName
+	if name == "" {
+		name = "Auto"
+	}
+	return prefix + "/" + name
 }
 
 func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
