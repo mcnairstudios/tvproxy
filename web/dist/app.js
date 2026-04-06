@@ -757,9 +757,11 @@
     titleEl.textContent = opts.title;
     titleBlock.appendChild(titleEl);
 
+    var metaRow = document.createElement('div');
+    metaRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-top:8px;';
+
     var metaLine = document.createElement('div');
-    metaLine.style.cssText = 'display:flex;align-items:center;gap:10px;margin-top:8px;font-size:14px;color:rgba(255,255,255,0.75);flex-wrap:wrap;';
-    metaLine.id = 'prog-meta-line';
+    metaLine.style.cssText = 'display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.75);flex-wrap:wrap;';
 
     var chanSpan = document.createElement('span');
     chanSpan.style.cssText = 'display:flex;align-items:center;gap:6px;';
@@ -773,8 +775,57 @@
       metaLine.appendChild(Object.assign(document.createElement('span'), { style: 'opacity:0.4', textContent: '\u2022' }));
       metaLine.appendChild(Object.assign(document.createElement('span'), { textContent: opts.time }));
     }
+    metaRow.appendChild(metaLine);
 
-    titleBlock.appendChild(metaLine);
+    var actionIcons = document.createElement('div');
+    actionIcons.style.cssText = 'display:flex;gap:8px;align-items:center;flex-shrink:0;';
+    var iconBtnStyle = 'background:rgba(0,0,0,0.5);border:none;color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:background 0.2s;';
+
+    if (opts.isLive || (!opts.isFuture && !opts.isLive)) {
+      var playIcon = document.createElement('button');
+      playIcon.style.cssText = iconBtnStyle;
+      playIcon.title = 'Watch Now';
+      playIcon.textContent = '\u25B6';
+      playIcon.onmouseenter = function() { playIcon.style.background = '#3b82f6'; };
+      playIcon.onmouseleave = function() { playIcon.style.background = 'rgba(0,0,0,0.5)'; };
+      playIcon.onclick = function() { overlay.remove(); play({ channelID: opts.channelID, name: opts.channelName, tvgId: opts.tvgId }); };
+      actionIcons.appendChild(playIcon);
+    }
+
+    if ((opts.isLive || opts.isFuture) && opts.stop) {
+      var recIcon = document.createElement('button');
+      recIcon.style.cssText = iconBtnStyle;
+      recIcon.title = opts.isFuture ? 'Schedule Recording' : 'Record';
+      recIcon.textContent = '\u23FA';
+      recIcon.onmouseenter = function() { recIcon.style.background = '#dc2626'; };
+      recIcon.onmouseleave = function() { recIcon.style.background = 'rgba(0,0,0,0.5)'; };
+      recIcon.onclick = function() {
+        recIcon.style.opacity = '0.5'; recIcon.disabled = true;
+        var req = opts.isFuture
+          ? api.post('/api/recordings/schedule', { channel_id: opts.channelID, channel_name: opts.channelName, program_title: opts.title, start_at: opts.start, stop_at: opts.stop })
+          : api.post('/api/vod/record/' + opts.channelID, { program_title: opts.title, channel_name: opts.channelName, stop_at: opts.stop });
+        req.then(function() { recIcon.textContent = '\u2713'; recIcon.style.background = '#16a34a'; })
+          .catch(function() { recIcon.textContent = '\u2717'; recIcon.style.opacity = '1'; recIcon.disabled = false; });
+      };
+      actionIcons.appendChild(recIcon);
+    }
+
+    if (opts.channelID) {
+      var copyIcon = document.createElement('button');
+      copyIcon.style.cssText = iconBtnStyle + 'font-size:15px;';
+      copyIcon.title = 'Copy stream URL';
+      copyIcon.textContent = '\uD83D\uDCCB';
+      copyIcon.onmouseenter = function() { copyIcon.style.background = 'rgba(255,255,255,0.2)'; };
+      copyIcon.onmouseleave = function() { copyIcon.style.background = 'rgba(0,0,0,0.5)'; };
+      copyIcon.onclick = function() {
+        var url = window.location.origin + '/channel/' + opts.channelID;
+        navigator.clipboard.writeText(url).then(function() { copyIcon.textContent = '\u2713'; setTimeout(function() { copyIcon.textContent = '\uD83D\uDCCB'; }, 1500); });
+      };
+      actionIcons.appendChild(copyIcon);
+    }
+
+    metaRow.appendChild(actionIcons);
+    titleBlock.appendChild(metaRow);
     backdrop.appendChild(titleBlock);
     modal.appendChild(backdrop);
 
@@ -799,50 +850,6 @@
     castArea.style.cssText = 'margin-bottom:24px;display:none;';
     body.appendChild(castArea);
 
-    var btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;';
-
-    if (opts.isLive || (!opts.isFuture && !opts.isLive)) {
-      var playBtn = document.createElement('button');
-      playBtn.style.cssText = 'background:#3b82f6;border:none;color:#fff;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background 0.2s;';
-      playBtn.innerHTML = '<span style="font-size:18px">\u25B6</span> Watch Now';
-      playBtn.onmouseenter = function() { playBtn.style.background = '#2563eb'; };
-      playBtn.onmouseleave = function() { playBtn.style.background = '#3b82f6'; };
-      playBtn.onclick = function() { overlay.remove(); play({ channelID: opts.channelID, name: opts.channelName, tvgId: opts.tvgId }); };
-      btnRow.appendChild(playBtn);
-    }
-
-    if (opts.isLive && opts.stop) {
-      var recLiveBtn = document.createElement('button');
-      recLiveBtn.style.cssText = 'background:#dc2626;border:none;color:#fff;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background 0.2s;';
-      recLiveBtn.innerHTML = '<span style="font-size:14px">\u23FA</span> Record';
-      recLiveBtn.onmouseenter = function() { recLiveBtn.style.background = '#b91c1c'; };
-      recLiveBtn.onmouseleave = function() { recLiveBtn.style.background = '#dc2626'; };
-      recLiveBtn.onclick = function() {
-        recLiveBtn.disabled = true; recLiveBtn.style.opacity = '0.7';
-        api.post('/api/vod/record/' + opts.channelID, { program_title: opts.title, channel_name: opts.channelName, stop_at: opts.stop })
-          .then(function() { recLiveBtn.innerHTML = '<span>\u2713</span> Recording'; recLiveBtn.style.background = '#16a34a'; })
-          .catch(function() { recLiveBtn.innerHTML = '<span>\u23FA</span> Failed'; recLiveBtn.disabled = false; recLiveBtn.style.opacity = '1'; });
-      };
-      btnRow.appendChild(recLiveBtn);
-    }
-
-    if (opts.isFuture && opts.start && opts.stop) {
-      var schedBtn = document.createElement('button');
-      schedBtn.style.cssText = 'background:#dc2626;border:none;color:#fff;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background 0.2s;';
-      schedBtn.innerHTML = '<span style="font-size:14px">\u23FA</span> Schedule Recording';
-      schedBtn.onmouseenter = function() { schedBtn.style.background = '#b91c1c'; };
-      schedBtn.onmouseleave = function() { schedBtn.style.background = '#dc2626'; };
-      schedBtn.onclick = function() {
-        schedBtn.disabled = true; schedBtn.style.opacity = '0.7';
-        api.post('/api/recordings/schedule', { channel_id: opts.channelID, channel_name: opts.channelName, program_title: opts.title, start_at: opts.start, stop_at: opts.stop })
-          .then(function() { schedBtn.innerHTML = '<span>\u2713</span> Scheduled'; schedBtn.style.background = '#16a34a'; })
-          .catch(function() { schedBtn.innerHTML = '<span>\u23FA</span> Failed'; schedBtn.disabled = false; schedBtn.style.opacity = '1'; });
-      };
-      btnRow.appendChild(schedBtn);
-    }
-
-    body.appendChild(btnRow);
     modal.appendChild(body);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
@@ -947,7 +954,7 @@
   function buildEpgGuidePage() {
     const HOUR_WIDTH = 240; // px per hour
     const PX_PER_MIN = HOUR_WIDTH / 60;
-    const CHANNEL_COL = 270;
+    const CHANNEL_COL = 80;
     let currentHours = 6;
     let windowOffset = 0; // in hours from initial start
 
@@ -1071,10 +1078,9 @@
           : '<div class="epg-channel-logo"></div>';
 
         return '<div class="epg-row">' +
-          '<div class="epg-channel" data-chid="' + esc(String(ch.id)) + '" data-tvgid="' + esc(ch.tvg_id || '') + '" data-chname="' + esc(ch.name) + '">' +
+          '<div class="epg-channel" data-chid="' + esc(String(ch.id)) + '" data-tvgid="' + esc(ch.tvg_id || '') + '" data-chname="' + esc(ch.name) + '" title="' + esc(ch.name) + '">' +
             '<span class="epg-channel-num">' + channelCounter + '</span>' +
             logoHtml +
-            '<span class="epg-channel-name">' + esc(ch.name) + '</span>' +
           '</div>' +
           '<div class="epg-programs" style="width:' + totalWidth + 'px">' + programsHtml + '</div>' +
         '</div>';
@@ -4213,27 +4219,71 @@
       },
       columns: [
         { key: 'logo', label: '', thStyle: 'width:110px;padding-right:0;text-align:center', tdStyle: 'padding-right:0;text-align:center', render: item => {
-          var copyUrl = function() {
-            var url = window.location.origin + '/channel/' + item.id + '?profile=Copy';
-            navigator.clipboard.writeText(url).then(function() { toast.success('Copied!'); }).catch(function() { toast.error('Copy failed'); });
+          var openModal = function() {
+            var p = item._now_program;
+            var pStart = p && p.start ? new Date(p.start).getTime() : 0;
+            var pStop = p && p.stop ? new Date(p.stop).getTime() : 0;
+            var nowMs = Date.now();
+            showProgrammeModal({
+              title: (p && p.title) || item._now_playing || item.name,
+              time: p ? (new Date(p.start).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) + ' - ' + new Date(p.stop).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})) : '',
+              description: (p && p.description) || '',
+              channelName: item.name,
+              channelID: item.id,
+              tvgId: item.tvg_id,
+              channelLogo: item.logo || '',
+              isLive: pStart > 0 && pStart <= nowMs && pStop > nowMs,
+              isFuture: pStart > nowMs,
+              start: (p && p.start) || '',
+              stop: (p && p.stop) || '',
+            });
           };
           if (item.logo) {
             var img = h('img', { src: item.logo, style: 'max-width:100px;max-height:40px;object-fit:contain;border-radius:2px;vertical-align:middle;cursor:pointer;' });
-            img.onclick = copyUrl;
+            img.onclick = function(e) {
+              e.stopPropagation();
+              play({ channelID: item.id, name: item.name, tvgId: item.tvg_id || undefined });
+            };
             return img;
           }
-          var link = h('span', { style: 'cursor:pointer;font-size:18px;' }, '\uD83D\uDD17');
-          link.onclick = copyUrl;
-          return link;
+          var icon = h('span', { style: 'cursor:pointer;font-size:24px;' }, '\u25B6');
+          icon.onclick = function(e) {
+            e.stopPropagation();
+            play({ channelID: item.id, name: item.name, tvgId: item.tvg_id || undefined });
+          };
+          return icon;
         }},
-        { key: 'name', label: 'Name', render: item => {
-          const span = h('span', null, item.name);
-          if (item.fail_count > 0) {
-            span.appendChild(h('span', { className: 'play-fail-badge' }, '! ' + item.fail_count));
+        { key: 'name', label: 'Channel', render: item => {
+          var wrap = h('div', { style: 'display:flex;flex-direction:column;gap:2px;cursor:pointer', title: item.name, onClick: function(e) {
+            e.stopPropagation();
+            var p = item._now_program;
+            var pStart = p && p.start ? new Date(p.start).getTime() : 0;
+            var pStop = p && p.stop ? new Date(p.stop).getTime() : 0;
+            var nowMs = Date.now();
+            showProgrammeModal({
+              title: (p && p.title) || item._now_playing || item.name,
+              time: p ? (new Date(p.start).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) + ' - ' + new Date(p.stop).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})) : '',
+              description: (p && p.description) || '',
+              channelName: item.name,
+              channelID: item.id,
+              tvgId: item.tvg_id,
+              channelLogo: item.logo || '',
+              isLive: pStart > 0 && pStart <= nowMs && pStop > nowMs,
+              isFuture: pStart > nowMs,
+              start: (p && p.start) || '',
+              stop: (p && p.stop) || '',
+            });
+          }});
+          var nameEl = h('span', { style: 'font-weight:600' }, item.name);
+          if (item.fail_count > 0) nameEl.appendChild(h('span', { className: 'play-fail-badge' }, '! ' + item.fail_count));
+          if (!item.is_enabled) nameEl.appendChild(h('span', { className: 'badge badge-danger', style: 'margin-left:6px;font-size:10px' }, 'Off'));
+          wrap.appendChild(nameEl);
+          if (item._now_playing) {
+            wrap.appendChild(h('span', { style: 'font-size:12px;color:var(--text-muted)' }, item._now_playing));
           }
-          return span;
+          return wrap;
         }},
-        { key: '_now_playing', label: 'Now Playing', tdStyle: 'font-weight:normal;color:var(--text-secondary);font-size:13px', render: item => {
+        { key: '_now_playing', label: 'Now Playing', tdStyle: 'font-weight:normal;color:var(--text-secondary);font-size:13px;display:none', thStyle: 'display:none', render: item => {
           if (!item._now_playing) return h('span', { style: 'color:var(--text-muted)' }, '-');
           var span = h('span', { style: 'cursor:pointer;', onClick: function(e) {
             e.stopPropagation();
@@ -4258,10 +4308,8 @@
           }}, item._now_playing);
           return span;
         }},
-        { key: 'is_enabled', label: 'Status', thStyle: 'width:80px', render: item =>
-          h('span', { className: 'badge ' + (item.is_enabled ? 'badge-success' : 'badge-danger') }, item.is_enabled ? 'Enabled' : 'Disabled')
-        },
       ],
+      delete: false,
       fields: [
         { key: 'name', label: 'Channel Name', placeholder: 'BBC One' },
         {
@@ -4320,17 +4368,6 @@
           },
         },
         { key: 'is_enabled', label: 'Enabled', type: 'checkbox', default: true },
-      ],
-      rowActions: (item, reload, openFormFn) => [
-        { label: 'Play', icon: '\u25B6', handler: () => play({ channelID: item.id, name: item.name, tvgId: item.tvg_id || undefined }) },
-        { label: 'Record', icon: '\u23FA', handler: async () => {
-          try {
-            await api.post('/channel/' + item.id + '/record', { program_title: item.name, channel_name: item.name });
-            toast.success('Recording started: ' + item.name);
-          } catch (err) {
-            toast.error('Record failed: ' + err.message);
-          }
-        }},
       ],
       postFormSetup: (inputs, isEdit, item) => {
         if (isEdit && inputs._stream && item.id) {
@@ -4588,8 +4625,10 @@
       title: 'Logos',
       singular: 'Logo',
       apiPath: '/api/logos',
+      cache: logosCache,
       create: true,
       update: true,
+      onChange: () => logosCache.invalidate(),
       columns: [
         { key: 'url', label: 'Logo', render: item => {
           const url = item.url || '';
