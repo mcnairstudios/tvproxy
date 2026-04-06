@@ -78,6 +78,20 @@ func (c *Cache) Resolve(logoURL string) string {
 	return Placeholder
 }
 
+func (c *Cache) Prefetch(logoURL string) {
+	if logoURL == "" || !strings.HasPrefix(logoURL, "http") {
+		return
+	}
+	hash := hashURL(logoURL)
+	c.mu.RLock()
+	_, ok := c.index[hash]
+	c.mu.RUnlock()
+	if ok {
+		return
+	}
+	go c.fetch(context.Background(), logoURL, hash)
+}
+
 func (c *Cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logoURL := r.URL.Query().Get("url")
 	if logoURL == "" {

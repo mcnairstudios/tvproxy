@@ -35,6 +35,7 @@ func (s *LogoService) Create(ctx context.Context, logo *models.Logo) error {
 	if err := s.store.Create(ctx, logo); err != nil {
 		return err
 	}
+	s.cache.Prefetch(logo.URL)
 	s.rev.Bump()
 	return nil
 }

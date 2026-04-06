@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -52,9 +54,26 @@ func (s *LogoStoreImpl) save() error {
 	return os.WriteFile(s.filePath, data, 0644)
 }
 
+func normalizeLogoURL(raw string) string {
+	if strings.HasPrefix(raw, "/logo?url=") {
+		encoded := strings.TrimPrefix(raw, "/logo?url=")
+		if decoded, err := url.QueryUnescape(encoded); err == nil {
+			return decoded
+		}
+	}
+	return raw
+}
+
 func (s *LogoStoreImpl) Create(_ context.Context, logo *models.Logo) error {
+	logo.URL = normalizeLogoURL(logo.URL)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for i := range s.logos {
+		if s.logos[i].URL == logo.URL {
+			logo.ID = s.logos[i].ID
+			return nil
+		}
+	}
 	if logo.ID == "" {
 		logo.ID = uuid.New().String()
 	}

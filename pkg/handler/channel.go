@@ -26,7 +26,13 @@ func (h *ChannelHandler) resolveLogoID(ctx context.Context, logoID *string, logo
 	if logoID != nil {
 		return logoID, nil
 	}
-	if logoURL == "" || strings.HasPrefix(logoURL, "data:") {
+	if logoURL == "" || strings.HasPrefix(logoURL, "data:") || strings.HasPrefix(logoURL, "/logo?") {
+		return nil, nil
+	}
+	if !strings.HasPrefix(logoURL, "http://") && !strings.HasPrefix(logoURL, "https://") {
+		return nil, nil
+	}
+	if strings.Contains(logoURL, "placeholder") {
 		return nil, nil
 	}
 	logo, err := h.logoService.GetByURL(ctx, logoURL)
