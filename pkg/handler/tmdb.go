@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,19 +21,57 @@ type TMDBHandler struct {
 	client   *http.Client
 	log      zerolog.Logger
 	cache    sync.Map
+	cacheDir string
 }
 
-type tmdbCacheEntry struct {
-	data      any
-	expiresAt time.Time
-}
-
-func NewTMDBHandler(settings *service.SettingsService, log zerolog.Logger) *TMDBHandler {
-	return &TMDBHandler{
+func NewTMDBHandler(settings *service.SettingsService, cacheDir string, log zerolog.Logger) *TMDBHandler {
+	h := &TMDBHandler{
 		settings: settings,
 		client:   &http.Client{Timeout: 10 * time.Second},
 		log:      log,
+		cacheDir: cacheDir,
 	}
+	h.loadDiskCache()
+	return h
+}
+
+func (h *TMDBHandler) loadDiskCache() {
+	if h.cacheDir == "" {
+		return
+	}
+	entries, err := os.ReadDir(h.cacheDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(h.cacheDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var result any
+		if json.Unmarshal(data, &result) == nil {
+			key := strings.TrimSuffix(e.Name(), ".json")
+			h.cache.Store(key, result)
+		}
+	}
+}
+
+func (h *TMDBHandler) saveToDisk(key string, data any) {
+	if h.cacheDir == "" {
+		return
+	}
+	os.MkdirAll(h.cacheDir, 0755)
+	safe := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, key)
+	raw, _ := json.Marshal(data)
+	os.WriteFile(filepath.Join(h.cacheDir, safe+".json"), raw, 0644)
 }
 
 func (h *TMDBHandler) Search(w http.ResponseWriter, r *http.Request) {
@@ -46,13 +87,10 @@ func (h *TMDBHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cacheKey := "search:" + query
+	cacheKey := "search_" + query
 	if cached, ok := h.cache.Load(cacheKey); ok {
-		entry := cached.(*tmdbCacheEntry)
-		if time.Now().Before(entry.expiresAt) {
-			respondJSON(w, http.StatusOK, entry.data)
-			return
-		}
+		respondJSON(w, http.StatusOK, cached)
+		return
 	}
 
 	searchURL := fmt.Sprintf("https://api.themoviedb.org/3/search/multi?api_key=%s&query=%s&language=en-GB",
@@ -69,7 +107,8 @@ func (h *TMDBHandler) Search(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(resp.Body).Decode(&result)
 
 	if results, ok := result["results"].([]any); ok && len(results) > 0 {
-		h.cache.Store(cacheKey, &tmdbCacheEntry{data: result, expiresAt: time.Now().Add(24 * time.Hour)})
+		h.cache.Store(cacheKey, result)
+		h.saveToDisk(cacheKey, result)
 	}
 
 	respondJSON(w, http.StatusOK, result)
@@ -89,13 +128,10 @@ func (h *TMDBHandler) Details(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cacheKey := "detail:" + mediaType + ":" + id
+	cacheKey := "detail_" + mediaType + "_" + id
 	if cached, ok := h.cache.Load(cacheKey); ok {
-		entry := cached.(*tmdbCacheEntry)
-		if time.Now().Before(entry.expiresAt) {
-			respondJSON(w, http.StatusOK, entry.data)
-			return
-		}
+		respondJSON(w, http.StatusOK, cached)
+		return
 	}
 
 	detailURL := fmt.Sprintf("https://api.themoviedb.org/3/%s/%s?api_key=%s&language=en-GB&append_to_response=images,credits",
@@ -111,7 +147,8 @@ func (h *TMDBHandler) Details(w http.ResponseWriter, r *http.Request) {
 	var result any
 	json.NewDecoder(resp.Body).Decode(&result)
 
-	h.cache.Store(cacheKey, &tmdbCacheEntry{data: result, expiresAt: time.Now().Add(24 * time.Hour)})
+	h.cache.Store(cacheKey, result)
+	h.saveToDisk(cacheKey, result)
 
 	respondJSON(w, http.StatusOK, result)
 }

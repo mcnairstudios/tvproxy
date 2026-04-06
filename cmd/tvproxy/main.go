@@ -254,7 +254,7 @@ func main() {
 		dlna:         handler.NewDLNAHandler(dlnaService, authService, settingsService, cfg, log),
 		wireguard:      handler.NewWireGuardHandler(wgService, log),
 		wireguardMulti: handler.NewMultiWireGuardHandler(wgMultiService, wgProfileStore, log),
-		tmdb:         handler.NewTMDBHandler(settingsService, log),
+		tmdb:         handler.NewTMDBHandler(settingsService, filepath.Join(filepath.Dir(cfg.DatabasePath), "tmdb_cache"), log),
 		logoCache:    logoCache,
 		log:          log,
 	}, authMW)
