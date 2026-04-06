@@ -414,10 +414,17 @@
     loader: async () => {
       const [channels, nowMap] = await Promise.all([
         api.get('/api/channels', { cache: 'no-store' }),
-        api.get('/api/epg/now').catch(() => ({})),
+        api.get('/api/epg/now?full=true').catch(() => ({})),
       ]);
       channels.forEach(ch => {
-        ch._now_playing = (ch.tvg_id && nowMap[ch.tvg_id]) || '';
+        var prog = ch.tvg_id && nowMap[ch.tvg_id];
+        if (prog && typeof prog === 'object') {
+          ch._now_playing = prog.title || '';
+          ch._now_program = prog;
+        } else {
+          ch._now_playing = (typeof prog === 'string' ? prog : '') || '';
+          ch._now_program = null;
+        }
       });
       return channels;
     },
@@ -4226,9 +4233,31 @@
           }
           return span;
         }},
-        { key: '_now_playing', label: 'Now Playing', tdStyle: 'font-weight:normal;color:var(--text-secondary);font-size:13px', render: item =>
-          item._now_playing ? h('span', null, item._now_playing) : h('span', { style: 'color:var(--text-muted)' }, '-')
-        },
+        { key: '_now_playing', label: 'Now Playing', tdStyle: 'font-weight:normal;color:var(--text-secondary);font-size:13px', render: item => {
+          if (!item._now_playing) return h('span', { style: 'color:var(--text-muted)' }, '-');
+          var span = h('span', { style: 'cursor:pointer;', onClick: function(e) {
+            e.stopPropagation();
+            if (!item._now_program) return;
+            var p = item._now_program;
+            var pStart = p.start ? new Date(p.start).getTime() : 0;
+            var pStop = p.stop ? new Date(p.stop).getTime() : 0;
+            var nowMs = Date.now();
+            showProgrammeModal({
+              title: p.title || item._now_playing,
+              time: (p.start ? new Date(p.start).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) : '') + (p.stop ? ' - ' + new Date(p.stop).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) : ''),
+              description: p.description || '',
+              channelName: item.name,
+              channelID: item.id,
+              tvgId: item.tvg_id,
+              channelLogo: item.logo || '',
+              isLive: pStart <= nowMs && pStop > nowMs,
+              isFuture: pStart > nowMs,
+              start: p.start || '',
+              stop: p.stop || '',
+            });
+          }}, item._now_playing);
+          return span;
+        }},
         { key: 'is_enabled', label: 'Status', thStyle: 'width:80px', render: item =>
           h('span', { className: 'badge ' + (item.is_enabled ? 'badge-success' : 'badge-danger') }, item.is_enabled ? 'Enabled' : 'Disabled')
         },

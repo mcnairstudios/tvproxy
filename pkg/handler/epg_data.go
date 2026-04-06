@@ -89,6 +89,15 @@ func (h *EPGDataHandler) NowPlaying(w http.ResponseWriter, r *http.Request) {
 	channelID := r.URL.Query().Get("channel_id")
 
 	if channelID == "" {
+		if r.URL.Query().Get("full") == "true" {
+			fullMap, err := h.epgStore.ListNowPlayingFull(r.Context(), time.Now())
+			if err != nil {
+				respondError(w, http.StatusInternalServerError, "failed to list now playing")
+				return
+			}
+			respondJSON(w, http.StatusOK, fullMap)
+			return
+		}
 		nowMap, err := h.epgStore.ListNowPlaying(r.Context(), time.Now())
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to list now playing")

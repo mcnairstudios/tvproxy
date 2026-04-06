@@ -141,6 +141,32 @@ func (s *EPGStoreImpl) ListNowPlaying(_ context.Context, now time.Time) (map[str
 	return result, nil
 }
 
+func (s *EPGStoreImpl) ListNowPlayingFull(_ context.Context, now time.Time) (map[string]map[string]any, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make(map[string]map[string]any)
+	for chID, epgID := range s.epgByChannelID {
+		for _, pid := range s.programsByEPGID[epgID] {
+			p, exists := s.programs[pid]
+			if !exists {
+				continue
+			}
+			if !p.Start.After(now) && p.Stop.After(now) {
+				result[chID] = map[string]any{
+					"title":       p.Title,
+					"description": p.Description,
+					"start":       p.Start,
+					"stop":        p.Stop,
+					"category":    p.Category,
+				}
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
 func (s *EPGStoreImpl) ListForGuide(_ context.Context, start, end time.Time) ([]models.GuideProgram, error) {
 	s.mu.RLock()
 	var result []models.GuideProgram
