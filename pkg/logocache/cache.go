@@ -52,6 +52,14 @@ func (c *Cache) buildIndex() {
 			continue
 		}
 		name := e.Name()
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.Size() < 200 {
+			os.Remove(filepath.Join(c.dir, name))
+			continue
+		}
 		hash := strings.TrimSuffix(name, filepath.Ext(name))
 		c.index[hash] = name
 	}
@@ -84,9 +92,15 @@ func (c *Cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.mu.RUnlock()
 
 	if ok {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		http.ServeFile(w, r, filepath.Join(c.dir, filename))
-		return
+		cachedPath := filepath.Join(c.dir, filename)
+		if _, err := os.Stat(cachedPath); err == nil {
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+			http.ServeFile(w, r, cachedPath)
+			return
+		}
+		c.mu.Lock()
+		delete(c.index, hash)
+		c.mu.Unlock()
 	}
 
 	filename = c.fetch(r.Context(), logoURL, hash)
@@ -110,7 +124,12 @@ func (c *Cache) fetch(ctx context.Context, logoURL, hash string) string {
 		return ""
 	}
 
-	ext := detectExtension(resp.Header.Get("Content-Type"), logoURL)
+	ct := resp.Header.Get("Content-Type")
+	if ct != "" && !strings.HasPrefix(ct, "image/") {
+		return ""
+	}
+
+	ext := detectExtension(ct, logoURL)
 	filename := hash + ext
 	path := filepath.Join(c.dir, filename)
 
