@@ -3469,13 +3469,16 @@
         var knownDur = dvr.duration || epgDuration || 0;
         var effectiveDur = knownDur > 0 ? knownDur : win.end;
         var target = pct * effectiveDur;
-        if (target > win.end && dvr && dvr.duration > 0) {
+        if (target > win.end && dvr && dvr.duration > 0 && !seekRow._seeking) {
+          seekRow._seeking = true;
           statusEl.style.color = '#ffa726';
           statusEl.textContent = 'Seeking...';
           fetch('/vod/' + dvr.id + '/seek?position=' + target.toFixed(1), { method: 'POST' }).then(function() {
             restartPlayback();
           }).catch(function() {
             statusEl.textContent = 'Seek failed';
+          }).finally(function() {
+            seekRow._seeking = false;
           });
           return;
         }

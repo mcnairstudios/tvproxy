@@ -39,6 +39,7 @@ type StartOpts struct {
 	OutputContainer  string
 	OutputHWAccel    string
 	KnownDuration    float64
+	SeekOffset       float64
 	Command          string
 	Args             string
 	OutputDir        string
@@ -263,7 +264,7 @@ func (m *Manager) GetBufferedSecs(channelID string) float64 {
 	if !ok {
 		return 0
 	}
-	return s.getBuffered()
+	return s.SeekOffset + s.getBuffered()
 }
 
 func (m *Manager) GetError(channelID string) error {
@@ -294,24 +295,50 @@ func (m *Manager) RestartWithSeek(ctx context.Context, channelID string, positio
 		return
 	}
 	opts := s.startOpts
-	m.mu.Unlock()
-
 	s.cancel()
-	<-s.done
-
-	m.mu.Lock()
 	delete(m.sessions, channelID)
 	m.mu.Unlock()
 
+	select {
+	case <-s.done:
+	case <-time.After(3 * time.Second):
+	}
+
 	seekStr := fmt.Sprintf("%.1f", position)
 	origArgs := opts.Args
+	if strings.Contains(origArgs, " -ss ") {
+		origArgs = strings.Join(removeSSArgs(strings.Fields(origArgs)), " ")
+	}
+	if strings.Contains(origArgs, "{input}") && opts.StreamURL != "" {
+		origArgs = strings.Replace(origArgs, "{input}", opts.StreamURL, 1)
+	}
 	if idx := strings.Index(origArgs, "-i "); idx >= 0 {
 		opts.Args = origArgs[:idx] + "-ss " + seekStr + " " + origArgs[idx:]
 	}
 
+	opts.KnownDuration = s.Duration
+	opts.SeekOffset = position
+
 	m.log.Info().Str("channel_id", channelID).Float64("position", position).Msg("restarting session with seek")
 
 	m.GetOrCreateWithConsumer(ctx, opts, ConsumerViewer)
+}
+
+func removeSSArgs(args []string) []string {
+	var out []string
+	skip := false
+	for _, a := range args {
+		if a == "-ss" {
+			skip = true
+			continue
+		}
+		if skip {
+			skip = false
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, consumerType string) (*Session, string, error) {
@@ -381,6 +408,7 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 		OutputContainer:  opts.OutputContainer,
 		OutputHWAccel:    opts.OutputHWAccel,
 		Duration:         opts.KnownDuration,
+		SeekOffset:       opts.SeekOffset,
 		FilePath:         filePath,
 		TempDir:          tempDir,
 		startOpts:   opts,
