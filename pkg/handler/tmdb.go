@@ -93,8 +93,21 @@ func (h *TMDBHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	searchURL := fmt.Sprintf("https://api.themoviedb.org/3/search/multi?api_key=%s&query=%s&language=en-GB",
-		url.QueryEscape(apiKey), url.QueryEscape(query))
+	searchQuery := query
+	yearParam := ""
+	if idx := strings.LastIndex(query, "("); idx > 0 {
+		end := strings.Index(query[idx:], ")")
+		if end > 0 {
+			year := strings.TrimSpace(query[idx+1 : idx+end])
+			if len(year) == 4 && year[0] >= '1' && year[0] <= '2' {
+				yearParam = "&year=" + year
+				searchQuery = strings.TrimSpace(query[:idx])
+			}
+		}
+	}
+
+	searchURL := fmt.Sprintf("https://api.themoviedb.org/3/search/multi?api_key=%s&query=%s&language=en-GB%s",
+		url.QueryEscape(apiKey), url.QueryEscape(searchQuery), yearParam)
 
 	resp, err := h.client.Get(searchURL)
 	if err != nil {
