@@ -286,6 +286,34 @@ func (m *Manager) IsDone(channelID string) bool {
 	return s.isDone()
 }
 
+func (m *Manager) RestartWithSeek(ctx context.Context, channelID string, position float64) {
+	m.mu.Lock()
+	s, ok := m.sessions[channelID]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	opts := s.startOpts
+	m.mu.Unlock()
+
+	s.cancel()
+	<-s.done
+
+	m.mu.Lock()
+	delete(m.sessions, channelID)
+	m.mu.Unlock()
+
+	seekStr := fmt.Sprintf("%.1f", position)
+	origArgs := opts.Args
+	if idx := strings.Index(origArgs, "-i "); idx >= 0 {
+		opts.Args = origArgs[:idx] + "-ss " + seekStr + " " + origArgs[idx:]
+	}
+
+	m.log.Info().Str("channel_id", channelID).Float64("position", position).Msg("restarting session with seek")
+
+	m.GetOrCreateWithConsumer(ctx, opts, ConsumerViewer)
+}
+
 func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, consumerType string) (*Session, string, error) {
 	m.mu.Lock()
 	if s, ok := m.sessions[opts.ChannelID]; ok {
@@ -355,6 +383,7 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 		Duration:         opts.KnownDuration,
 		FilePath:         filePath,
 		TempDir:          tempDir,
+		startOpts:   opts,
 		consumers:   make(map[string]*Consumer),
 		cancel:      cancel,
 		done:        make(chan struct{}),

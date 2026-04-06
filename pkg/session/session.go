@@ -28,8 +28,10 @@ type Session struct {
 	TempDir         string
 	BufferedSecs    float64
 	Duration        float64
+	SeekOffset      float64
 	Video           *ffmpeg.VideoInfo
 	AudioTracks     []ffmpeg.AudioTrack
+	startOpts    StartOpts
 	consumers    map[string]*Consumer
 	cancel       func()
 	done         chan struct{}

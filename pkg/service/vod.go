@@ -302,6 +302,16 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 	return sessionKey, consumerID, sa.Container, duration, audioOnly, nil
 }
 
+func (s *VODService) SeekSession(ctx context.Context, channelID string, position float64) error {
+	sess := s.sessionMgr.Get(channelID)
+	if sess == nil {
+		return fmt.Errorf("session not found")
+	}
+
+	s.sessionMgr.RestartWithSeek(ctx, channelID, position)
+	return nil
+}
+
 func (s *VODService) StopWatching(channelID string, consumerID string) {
 	if s.activity != nil {
 		s.activity.Remove(consumerID)

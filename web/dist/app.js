@@ -860,15 +860,16 @@
 
   var tmdbQueue = [];
   var tmdbRunning = false;
-  function tmdbSearch(query, callback) {
-    tmdbQueue.push({ query: query, callback: callback });
+  function tmdbSearch(query, callback, mediaType) {
+    tmdbQueue.push({ query: query, callback: callback, type: mediaType || '' });
     if (!tmdbRunning) tmdbDrain();
   }
   function tmdbDrain() {
     if (tmdbQueue.length === 0) { tmdbRunning = false; return; }
     tmdbRunning = true;
     var item = tmdbQueue.shift();
-    api.get('/api/tmdb/search?query=' + encodeURIComponent(item.query)).then(function(data) {
+    var typeParam = item.type ? '&type=' + encodeURIComponent(item.type) : '';
+    api.get('/api/tmdb/search?query=' + encodeURIComponent(item.query) + typeParam).then(function(data) {
       item.callback(data);
     }).catch(function() {
       item.callback(null);
@@ -3468,6 +3469,16 @@
         var knownDur = dvr.duration || epgDuration || 0;
         var effectiveDur = knownDur > 0 ? knownDur : win.end;
         var target = pct * effectiveDur;
+        if (target > win.end && dvr && dvr.duration > 0) {
+          statusEl.style.color = '#ffa726';
+          statusEl.textContent = 'Seeking...';
+          fetch('/vod/' + dvr.id + '/seek?position=' + target.toFixed(1), { method: 'POST' }).then(function() {
+            restartPlayback();
+          }).catch(function() {
+            statusEl.textContent = 'Seek failed';
+          });
+          return;
+        }
         target = Math.max(win.start, Math.min(win.end - 1, target));
         console.log('SEEK: pct=' + pct.toFixed(3), 'effectiveDur=' + effectiveDur.toFixed(1), 'dvrWindow=', JSON.stringify(win), 'target=' + target.toFixed(1), 'currentTime=' + videoEl.currentTime.toFixed(1));
         dashPlayer.seek(target);
@@ -5084,6 +5095,8 @@
           return;
         }
 
+        items.sort(function(a, b) { return a.name.localeCompare(b.name); });
+
         var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:24px' });
         header.appendChild(h('h2', { style: 'margin:0' }, 'Movies'));
         header.appendChild(h('span', { style: 'color:var(--text-muted);font-size:0.95em' }, items.length + ' titles'));
@@ -5144,7 +5157,7 @@
 
           tmdbSearch(item.name, function(data) {
             if (!data || !data.results) return;
-            var match = data.results.find(function(r) { return r.media_type === 'movie'; });
+            var match = data.results[0];
             if (match && match.poster_path) {
               var wrap = document.getElementById('poster-' + item.id);
               if (wrap) {
@@ -5152,7 +5165,7 @@
                 wrap.appendChild(h('img', { src: 'https://image.tmdb.org/t/p/w342' + match.poster_path, style: 'width:100%;height:100%;object-fit:cover;' }));
               }
             }
-          });
+          }, 'movie');
         });
 
         container.appendChild(grid);
@@ -5224,7 +5237,7 @@
 
           tmdbSearch(show.name, function(data) {
             if (!data || !data.results) return;
-            var match = data.results.find(function(r) { return r.media_type === 'tv'; });
+            var match = data.results[0];
             if (match && match.poster_path) {
               var wrap = document.getElementById('series-poster-' + show.name.replace(/[^a-zA-Z0-9]/g, '_'));
               if (wrap) {
@@ -5232,7 +5245,7 @@
                 wrap.appendChild(h('img', { src: 'https://image.tmdb.org/t/p/w342' + match.poster_path, style: 'width:100%;height:100%;object-fit:cover;' }));
               }
             }
-          }).catch(function() {});
+          }, 'tv');
         });
 
         container.appendChild(grid);

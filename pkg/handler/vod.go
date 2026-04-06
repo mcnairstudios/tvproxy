@@ -149,6 +149,11 @@ func (h *VODHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		"request_headers": clientHeaders(r),
 	}
 	_, _, duration := h.vodService.GetProbeInfo(sessionID)
+	if duration < 30 {
+		if sess := h.vodService.GetSession(sessionID); sess != nil && sess.Duration >= 30 {
+			duration = sess.Duration
+		}
+	}
 	if duration >= 30 {
 		resp["duration"] = duration
 	}
@@ -218,10 +223,38 @@ func (h *VODHandler) Status(w http.ResponseWriter, r *http.Request) {
 	if len(audioTracks) > 0 {
 		resp["audio_tracks"] = audioTracks
 	}
+	if duration < 30 && sess.Duration >= 30 {
+		duration = sess.Duration
+	}
 	if duration >= 30 {
 		resp["duration"] = duration
 	}
 	respondJSON(w, http.StatusOK, resp)
+}
+
+func (h *VODHandler) Seek(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "sessionID")
+	posStr := r.URL.Query().Get("position")
+	if posStr == "" {
+		respondError(w, http.StatusBadRequest, "position required")
+		return
+	}
+	var position float64
+	if _, err := fmt.Sscanf(posStr, "%f", &position); err != nil || position < 0 {
+		respondError(w, http.StatusBadRequest, "invalid position")
+		return
+	}
+
+	if err := h.vodService.SeekSession(r.Context(), channelID, position); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if h.dashManager != nil {
+		h.dashManager.Stop(channelID)
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"position": position})
 }
 
 func (h *VODHandler) Stream(w http.ResponseWriter, r *http.Request) {

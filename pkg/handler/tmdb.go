@@ -87,7 +87,12 @@ func (h *TMDBHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mediaHint := r.URL.Query().Get("type")
+
 	cacheKey := "search_" + query
+	if mediaHint != "" {
+		cacheKey += "_" + mediaHint
+	}
 	if cached, ok := h.cache.Load(cacheKey); ok {
 		respondJSON(w, http.StatusOK, cached)
 		return
@@ -106,8 +111,15 @@ func (h *TMDBHandler) Search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	searchURL := fmt.Sprintf("https://api.themoviedb.org/3/search/multi?api_key=%s&query=%s&language=en-GB%s",
-		url.QueryEscape(apiKey), url.QueryEscape(searchQuery), yearParam)
+	searchEndpoint := "search/multi"
+	if mediaHint == "movie" {
+		searchEndpoint = "search/movie"
+	} else if mediaHint == "tv" || mediaHint == "series" {
+		searchEndpoint = "search/tv"
+	}
+
+	searchURL := fmt.Sprintf("https://api.themoviedb.org/3/%s?api_key=%s&query=%s&language=en-GB%s",
+		searchEndpoint, url.QueryEscape(apiKey), url.QueryEscape(searchQuery), yearParam)
 
 	resp, err := h.client.Get(searchURL)
 	if err != nil {

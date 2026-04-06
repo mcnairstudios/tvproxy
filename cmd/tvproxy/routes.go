@@ -77,6 +77,7 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 	r.Post("/stream/{streamID}/vod", h.vod.CreateSession)
 	r.Post("/channel/{channelID}/vod", h.vod.CreateChannelSession)
 	r.Get("/vod/{sessionID}/status", h.vod.Status)
+	r.Post("/vod/{sessionID}/seek", h.vod.Seek)
 	r.Get("/vod/{sessionID}/stream", h.vod.Stream)
 	r.Get("/vod/{sessionID}/dash/manifest.mpd", h.vod.DASHManifest)
 	r.Get("/vod/{sessionID}/dash/{segment}", h.vod.DASHSegment)
