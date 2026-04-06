@@ -254,6 +254,7 @@ func main() {
 		dlna:         handler.NewDLNAHandler(dlnaService, authService, settingsService, cfg, log),
 		wireguard:      handler.NewWireGuardHandler(wgService, log),
 		wireguardMulti: handler.NewMultiWireGuardHandler(wgMultiService, wgProfileStore, log),
+		tmdb:         handler.NewTMDBHandler(settingsService, log),
 		logoCache:    logoCache,
 		log:          log,
 	}, authMW)

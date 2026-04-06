@@ -709,6 +709,234 @@
     tooltipEl.style.opacity = '0';
   }
 
+  var TMDB_GENRES = {10759:'Action & Adventure',10762:'Kids',10763:'News',10764:'Reality',10765:'Sci-Fi & Fantasy',10766:'Soap',10767:'Talk',10768:'War & Politics',28:'Action',12:'Adventure',16:'Animation',35:'Comedy',80:'Crime',99:'Documentary',18:'Drama',10751:'Family',14:'Fantasy',36:'History',27:'Horror',10402:'Music',9648:'Mystery',10749:'Romance',878:'Science Fiction',53:'Thriller',10752:'War',37:'Western'};
+
+  function showProgrammeModal(opts) {
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);';
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+    document.addEventListener('keydown', function onKey(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); } });
+
+    var modal = document.createElement('div');
+    modal.style.cssText = 'width:90%;max-width:1080px;max-height:92vh;background:#1a1d23;border-radius:16px;overflow:hidden;position:relative;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.6);';
+
+    var backdrop = document.createElement('div');
+    backdrop.style.cssText = 'width:100%;height:360px;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);position:relative;overflow:hidden;flex-shrink:0;transition:background-image 0.5s;';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u2715';
+    closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.6);border:none;color:#fff;font-size:18px;width:40px;height:40px;border-radius:50%;cursor:pointer;z-index:3;transition:background 0.2s;';
+    closeBtn.onmouseenter = function() { closeBtn.style.background = 'rgba(255,255,255,0.2)'; };
+    closeBtn.onmouseleave = function() { closeBtn.style.background = 'rgba(0,0,0,0.6)'; };
+    closeBtn.onclick = function() { overlay.remove(); };
+    backdrop.appendChild(closeBtn);
+
+    if (opts.isLive) {
+      var liveBadge = document.createElement('div');
+      liveBadge.style.cssText = 'position:absolute;top:16px;left:16px;background:#e53e3e;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:4px;letter-spacing:1px;z-index:3;';
+      liveBadge.textContent = 'LIVE';
+      backdrop.appendChild(liveBadge);
+    }
+
+    var gradOverlay = document.createElement('div');
+    gradOverlay.style.cssText = 'position:absolute;bottom:0;left:0;right:0;height:200px;background:linear-gradient(transparent,#1a1d23);';
+    backdrop.appendChild(gradOverlay);
+
+    var titleBlock = document.createElement('div');
+    titleBlock.style.cssText = 'position:absolute;bottom:24px;left:32px;right:32px;z-index:1;';
+
+    var titleEl = document.createElement('div');
+    titleEl.style.cssText = 'font-size:32px;font-weight:800;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,0.7);letter-spacing:-0.5px;';
+    titleEl.textContent = opts.title;
+    titleBlock.appendChild(titleEl);
+
+    var metaLine = document.createElement('div');
+    metaLine.style.cssText = 'display:flex;align-items:center;gap:10px;margin-top:8px;font-size:14px;color:rgba(255,255,255,0.75);flex-wrap:wrap;';
+    metaLine.id = 'prog-meta-line';
+
+    var chanSpan = document.createElement('span');
+    chanSpan.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    if (opts.channelLogo) {
+      chanSpan.innerHTML = '<img src="' + esc(opts.channelLogo) + '" style="height:20px;border-radius:3px"> ';
+    }
+    chanSpan.appendChild(document.createTextNode(opts.channelName));
+    metaLine.appendChild(chanSpan);
+
+    if (opts.time) {
+      metaLine.appendChild(Object.assign(document.createElement('span'), { style: 'opacity:0.4', textContent: '\u2022' }));
+      metaLine.appendChild(Object.assign(document.createElement('span'), { textContent: opts.time }));
+    }
+
+    titleBlock.appendChild(metaLine);
+    backdrop.appendChild(titleBlock);
+    modal.appendChild(backdrop);
+
+    var body = document.createElement('div');
+    body.style.cssText = 'padding:28px 32px;overflow-y:auto;flex:1;';
+
+    var tmdbMeta = document.createElement('div');
+    tmdbMeta.style.cssText = 'display:flex;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap;min-height:24px;';
+    body.appendChild(tmdbMeta);
+
+    var descArea = document.createElement('div');
+    descArea.style.cssText = 'margin-bottom:24px;';
+    if (opts.description) {
+      var descEl = document.createElement('p');
+      descEl.style.cssText = 'color:#b0b8c8;font-size:15px;line-height:1.7;margin:0;';
+      descEl.textContent = opts.description;
+      descArea.appendChild(descEl);
+    }
+    body.appendChild(descArea);
+
+    var castArea = document.createElement('div');
+    castArea.style.cssText = 'margin-bottom:24px;display:none;';
+    body.appendChild(castArea);
+
+    var btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;';
+
+    if (opts.isLive || (!opts.isFuture && !opts.isLive)) {
+      var playBtn = document.createElement('button');
+      playBtn.style.cssText = 'background:#3b82f6;border:none;color:#fff;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background 0.2s;';
+      playBtn.innerHTML = '<span style="font-size:18px">\u25B6</span> Watch Now';
+      playBtn.onmouseenter = function() { playBtn.style.background = '#2563eb'; };
+      playBtn.onmouseleave = function() { playBtn.style.background = '#3b82f6'; };
+      playBtn.onclick = function() { overlay.remove(); play({ channelID: opts.channelID, name: opts.channelName, tvgId: opts.tvgId }); };
+      btnRow.appendChild(playBtn);
+    }
+
+    if (opts.isLive && opts.stop) {
+      var recLiveBtn = document.createElement('button');
+      recLiveBtn.style.cssText = 'background:#dc2626;border:none;color:#fff;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background 0.2s;';
+      recLiveBtn.innerHTML = '<span style="font-size:14px">\u23FA</span> Record';
+      recLiveBtn.onmouseenter = function() { recLiveBtn.style.background = '#b91c1c'; };
+      recLiveBtn.onmouseleave = function() { recLiveBtn.style.background = '#dc2626'; };
+      recLiveBtn.onclick = function() {
+        recLiveBtn.disabled = true; recLiveBtn.style.opacity = '0.7';
+        api.post('/api/vod/record/' + opts.channelID, { program_title: opts.title, channel_name: opts.channelName, stop_at: opts.stop })
+          .then(function() { recLiveBtn.innerHTML = '<span>\u2713</span> Recording'; recLiveBtn.style.background = '#16a34a'; })
+          .catch(function() { recLiveBtn.innerHTML = '<span>\u23FA</span> Failed'; recLiveBtn.disabled = false; recLiveBtn.style.opacity = '1'; });
+      };
+      btnRow.appendChild(recLiveBtn);
+    }
+
+    if (opts.isFuture && opts.start && opts.stop) {
+      var schedBtn = document.createElement('button');
+      schedBtn.style.cssText = 'background:#dc2626;border:none;color:#fff;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background 0.2s;';
+      schedBtn.innerHTML = '<span style="font-size:14px">\u23FA</span> Schedule Recording';
+      schedBtn.onmouseenter = function() { schedBtn.style.background = '#b91c1c'; };
+      schedBtn.onmouseleave = function() { schedBtn.style.background = '#dc2626'; };
+      schedBtn.onclick = function() {
+        schedBtn.disabled = true; schedBtn.style.opacity = '0.7';
+        api.post('/api/recordings/schedule', { channel_id: opts.channelID, channel_name: opts.channelName, program_title: opts.title, start_at: opts.start, stop_at: opts.stop })
+          .then(function() { schedBtn.innerHTML = '<span>\u2713</span> Scheduled'; schedBtn.style.background = '#16a34a'; })
+          .catch(function() { schedBtn.innerHTML = '<span>\u23FA</span> Failed'; schedBtn.disabled = false; schedBtn.style.opacity = '1'; });
+      };
+      btnRow.appendChild(schedBtn);
+    }
+
+    body.appendChild(btnRow);
+    modal.appendChild(body);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    api.get('/api/tmdb/search?query=' + encodeURIComponent(opts.title)).then(function(data) {
+      if (!data || !data.results || data.results.length === 0) return;
+      var match = data.results.find(function(r) { return r.media_type === 'tv' || r.media_type === 'movie'; });
+      if (!match) return;
+
+      if (match.backdrop_path) {
+        var img = new Image();
+        img.onload = function() {
+          backdrop.style.backgroundImage = 'url(https://image.tmdb.org/t/p/w1280' + match.backdrop_path + ')';
+          backdrop.style.backgroundSize = 'cover';
+          backdrop.style.backgroundPosition = 'center 20%';
+        };
+        img.src = 'https://image.tmdb.org/t/p/w1280' + match.backdrop_path;
+      }
+
+      var pills = [];
+      if (match.vote_average > 0) {
+        var stars = match.vote_average.toFixed(1);
+        var starColor = match.vote_average >= 7 ? '#22c55e' : match.vote_average >= 5 ? '#eab308' : '#ef4444';
+        pills.push('<span style="background:' + starColor + '20;color:' + starColor + ';padding:3px 10px;border-radius:6px;font-weight:700;font-size:13px">\u2605 ' + stars + '</span>');
+      }
+      var year = match.first_air_date ? match.first_air_date.substring(0, 4) : (match.release_date ? match.release_date.substring(0, 4) : '');
+      if (year) pills.push('<span style="color:#9ca3af;font-size:13px">' + year + '</span>');
+      var mediaLabel = match.media_type === 'tv' ? 'TV Series' : 'Film';
+      pills.push('<span style="background:rgba(255,255,255,0.1);color:#9ca3af;padding:3px 10px;border-radius:6px;font-size:12px">' + mediaLabel + '</span>');
+      if (match.genre_ids) {
+        match.genre_ids.slice(0, 3).forEach(function(gid) {
+          var name = TMDB_GENRES[gid];
+          if (name) pills.push('<span style="background:rgba(59,130,246,0.15);color:#60a5fa;padding:3px 10px;border-radius:6px;font-size:12px">' + esc(name) + '</span>');
+        });
+      }
+      if (match.original_language && match.original_language !== 'en') {
+        pills.push('<span style="color:#9ca3af;font-size:12px">' + match.original_language.toUpperCase() + '</span>');
+      }
+      tmdbMeta.innerHTML = pills.join('');
+
+      if (match.overview && !opts.description) {
+        var descEl = document.createElement('p');
+        descEl.style.cssText = 'color:#b0b8c8;font-size:15px;line-height:1.7;margin:0;';
+        descEl.textContent = match.overview;
+        descArea.appendChild(descEl);
+      }
+
+      var tmdbId = match.id;
+      var tmdbType = match.media_type;
+      api.get('/api/tmdb/details?type=' + tmdbType + '&id=' + tmdbId).then(function(detail) {
+        if (!detail) return;
+
+        if (detail.tagline) {
+          var tagEl = document.createElement('div');
+          tagEl.style.cssText = 'color:#6b7280;font-style:italic;font-size:14px;margin-bottom:12px;';
+          tagEl.textContent = '"' + detail.tagline + '"';
+          descArea.insertBefore(tagEl, descArea.firstChild);
+        }
+
+        if (detail.number_of_seasons) {
+          var seasonsEl = document.createElement('span');
+          seasonsEl.style.cssText = 'color:#9ca3af;font-size:12px';
+          seasonsEl.textContent = detail.number_of_seasons + ' season' + (detail.number_of_seasons > 1 ? 's' : '');
+          tmdbMeta.appendChild(seasonsEl);
+        }
+        if (detail.runtime) {
+          var rtEl = document.createElement('span');
+          rtEl.style.cssText = 'color:#9ca3af;font-size:12px';
+          var hrs = Math.floor(detail.runtime / 60);
+          var mins = detail.runtime % 60;
+          rtEl.textContent = (hrs > 0 ? hrs + 'h ' : '') + mins + 'm';
+          tmdbMeta.appendChild(rtEl);
+        }
+
+        if (detail.credits && detail.credits.cast && detail.credits.cast.length > 0) {
+          castArea.style.display = 'block';
+          var castTitle = document.createElement('div');
+          castTitle.style.cssText = 'color:#9ca3af;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;';
+          castTitle.textContent = 'Cast';
+          castArea.appendChild(castTitle);
+          var castGrid = document.createElement('div');
+          castGrid.style.cssText = 'display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;';
+          detail.credits.cast.slice(0, 8).forEach(function(person) {
+            var card = document.createElement('div');
+            card.style.cssText = 'flex-shrink:0;text-align:center;width:72px;';
+            var imgUrl = person.profile_path ? 'https://image.tmdb.org/t/p/w185' + person.profile_path : '';
+            if (imgUrl) {
+              card.innerHTML = '<img src="' + imgUrl + '" style="width:64px;height:64px;border-radius:50%;object-fit:cover;margin-bottom:6px">';
+            } else {
+              card.innerHTML = '<div style="width:64px;height:64px;border-radius:50%;background:#374151;margin:0 auto 6px;display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:24px">\u263A</div>';
+            }
+            card.innerHTML += '<div style="font-size:11px;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(person.name) + '</div>' +
+              '<div style="font-size:10px;color:#6b7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(person.character || '') + '</div>';
+            castGrid.appendChild(card);
+          });
+          castArea.appendChild(castGrid);
+        }
+      }).catch(function() {});
+    }).catch(function() {});
+  }
+
   function buildEpgGuidePage() {
     const HOUR_WIDTH = 240; // px per hour
     const PX_PER_MIN = HOUR_WIDTH / 60;
@@ -815,7 +1043,10 @@
           var isScheduled = !!scheduledSet[schedKey];
           var recBtnCls = 'epg-record-btn' + (isScheduled ? ' scheduled' : '');
           var recBtnHtml = isPast ? '' : '<button class="' + recBtnCls + '" data-ptitle="' + esc(p.title) + '" data-pstart="' + esc(p.start) + '" data-pstop="' + esc(p.stop) + '"' + (isScheduled ? ' data-scheduled="' + esc(scheduledSet[schedKey]) + '"' : '') + '>\u23FA</button>';
-          programsHtml += '<div class="' + cls + '" style="left:' + leftPx + 'px;width:' + widthPx + 'px" title="' + tooltip + '">' +
+          programsHtml += '<div class="' + cls + '" style="left:' + leftPx + 'px;width:' + widthPx + 'px" title="' + tooltip + '"' +
+            ' data-desc="' + esc(p.description || '') + '"' +
+            ' data-pstart="' + esc(p.start || '') + '"' +
+            ' data-pstop="' + esc(p.stop || '') + '">' +
             recBtnHtml +
             '<div class="epg-program-title">' + esc(p.title) + '</div>' +
             '<div class="epg-program-time">' + timeStr + '</div>' +
@@ -1043,7 +1274,29 @@
             if (!row) return;
             ch = row.querySelector('.epg-channel');
             if (!ch) return;
-            play({ channelID: ch.dataset.chid, name: ch.dataset.chname, tvgId: ch.dataset.tvgid || undefined });
+            var titleEl = prog.querySelector('.epg-program-title');
+            var timeEl = prog.querySelector('.epg-program-time');
+            var progTitle = titleEl ? titleEl.textContent : '';
+            var progTime = timeEl ? timeEl.textContent : '';
+            var progDesc = prog.dataset.desc || '';
+            var pStart = prog.dataset.pstart || '';
+            var pStop = prog.dataset.pstop || '';
+            var pStartTime = pStart ? new Date(pStart).getTime() : 0;
+            var isLive = pStartTime <= Date.now() && (!pStop || new Date(pStop).getTime() > Date.now());
+            var isFuture = pStartTime > Date.now();
+            showProgrammeModal({
+              title: progTitle,
+              time: progTime,
+              description: progDesc,
+              channelName: ch.dataset.chname || '',
+              channelID: ch.dataset.chid,
+              tvgId: ch.dataset.tvgid || undefined,
+              channelLogo: ch.querySelector('.epg-channel-logo') ? ch.querySelector('.epg-channel-logo').src : '',
+              isLive: isLive,
+              isFuture: isFuture,
+              start: pStart,
+              stop: pStop,
+            });
           }
         });
 
@@ -4903,6 +5156,32 @@
             ),
             h('p', { style: 'color: var(--text-muted); margin-top: 8px; font-size: 13px' },
               'When enabled, all HTTP requests are logged (including static files, VOD status polls, and DLNA pings). DLNA SOAP actions, proxy request headers, and client detection rule evaluation are also logged. When disabled, noisy requests are suppressed for cleaner logs.'),
+          ),
+        ));
+
+        const currentTmdbKey = ((Array.isArray(settings) ? settings : []).find(s => s.key === 'tmdb_api_key') || {}).value || '';
+        const tmdbInput = h('input', { type: 'text', id: 'setting-tmdb-key', value: currentTmdbKey, placeholder: 'Enter TMDB API key', style: 'padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:14px;width:300px' });
+        const tmdbSaveBtn = h('button', { className: 'btn btn-sm btn-primary', style: 'margin-left:8px', onClick: async function() {
+          tmdbSaveBtn.disabled = true;
+          try {
+            await api.put('/api/settings', { tmdb_api_key: tmdbInput.value.trim() });
+            toast.success('TMDB API key saved');
+          } catch(err) {
+            toast.error(err.message);
+          }
+          tmdbSaveBtn.disabled = false;
+        }}, 'Save');
+
+        container.appendChild(h('div', { className: 'table-container', style: 'margin-top: 24px' },
+          h('div', { className: 'table-header' }, h('h3', null, 'TMDB Integration')),
+          h('div', { style: 'padding: 16px; font-size: 15px' },
+            h('div', { style: 'display:flex;align-items:center;gap:8px' },
+              h('label', { for: 'setting-tmdb-key', style: 'margin:0;min-width:80px' }, 'API Key:'),
+              tmdbInput,
+              tmdbSaveBtn,
+            ),
+            h('p', { style: 'color: var(--text-muted); margin-top: 8px; font-size: 13px' },
+              'Free API key from themoviedb.org. Enables programme artwork (backdrops, posters) and rich metadata in the EPG guide. Sign up at themoviedb.org/signup then go to Settings > API.'),
           ),
         ));
 

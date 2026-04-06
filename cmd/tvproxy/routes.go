@@ -38,6 +38,7 @@ type routeHandlers struct {
 	dlna         *handler.DLNAHandler
 	wireguard      *handler.WireGuardHandler
 	wireguardMulti *handler.MultiWireGuardHandler
+	tmdb           *handler.TMDBHandler
 	logoCache      *logocache.Cache
 	log            zerolog.Logger
 }
@@ -233,6 +234,9 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 			r.Get("/schedule/{id}", h.scheduler.Get)
 			r.Delete("/schedule/{id}", h.scheduler.Delete)
 		})
+
+		r.Get("/api/tmdb/search", h.tmdb.Search)
+		r.Get("/api/tmdb/details", h.tmdb.Details)
 
 		r.Route("/api/activity", func(r chi.Router) {
 			r.Use(authMW.RequireAdmin)

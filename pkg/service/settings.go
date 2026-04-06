@@ -81,6 +81,7 @@ var apiVisibleKeys = map[string]bool{
 	"default_video_codec":        true,
 	"dlna_enabled":               true,
 	"debug_enabled":              true,
+	"tmdb_api_key":               true,
 }
 
 func IsAPISettable(key string) bool {
