@@ -81,3 +81,62 @@ func (h *StreamHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *StreamHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
+	streams, err := h.streamStore.List(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to list streams")
+		return
+	}
+
+	vodType := r.URL.Query().Get("type")
+	series := r.URL.Query().Get("series")
+
+	type vodItem struct {
+		ID        string  `json:"id"`
+		Name      string  `json:"name"`
+		URL       string  `json:"url"`
+		Logo      string  `json:"logo,omitempty"`
+		Type      string  `json:"type"`
+		Series    string  `json:"series,omitempty"`
+		Season    int     `json:"season,omitempty"`
+		Episode   int     `json:"episode,omitempty"`
+		VCodec    string  `json:"vcodec,omitempty"`
+		ACodec    string  `json:"acodec,omitempty"`
+		Res       string  `json:"resolution,omitempty"`
+		Audio     string  `json:"audio,omitempty"`
+		Duration  float64 `json:"duration,omitempty"`
+	}
+
+	var items []vodItem
+	for _, s := range streams {
+		if s.VODType == "" {
+			continue
+		}
+		if vodType != "" && s.VODType != vodType {
+			continue
+		}
+		if series != "" && s.VODSeries != series {
+			continue
+		}
+		items = append(items, vodItem{
+			ID:       s.ID,
+			Name:     s.Name,
+			URL:      s.URL,
+			Logo:     h.logoService.Resolve(s.Logo),
+			Type:     s.VODType,
+			Series:   s.VODSeries,
+			Season:   s.VODSeason,
+			Episode:  s.VODEpisode,
+			VCodec:   s.VODVCodec,
+			ACodec:   s.VODACodec,
+			Res:      s.VODRes,
+			Audio:    s.VODAudio,
+			Duration: s.VODDuration,
+		})
+	}
+	if items == nil {
+		items = []vodItem{}
+	}
+	respondJSON(w, http.StatusOK, items)
+}

@@ -7,12 +7,21 @@ import (
 )
 
 type Entry struct {
-	Name    string
-	URL     string
-	Group   string
-	Logo    string
-	TvgID   string
-	TvgName string
+	Name       string
+	URL        string
+	Group      string
+	Logo       string
+	TvgID      string
+	TvgName    string
+	TVPType    string
+	TVPSeries  string
+	TVPSeason  string
+	TVPEpisode string
+	TVPVCodec  string
+	TVPACodec  string
+	TVPRes     string
+	TVPAudio   string
+	TVPDur     string
 }
 
 func Parse(r io.Reader) ([]Entry, error) {
@@ -43,6 +52,15 @@ func parseExtInf(line string, entry *Entry) {
 	entry.TvgName = extractAttr(line, "tvg-name")
 	entry.Logo = extractAttr(line, "tvg-logo")
 	entry.Group = extractAttr(line, "group-title")
+	entry.TVPType = extractAttr(line, "tvp-type")
+	entry.TVPSeries = extractAttr(line, "tvp-series")
+	entry.TVPSeason = extractAttr(line, "tvp-season")
+	entry.TVPEpisode = extractAttr(line, "tvp-episode")
+	entry.TVPVCodec = extractAttr(line, "tvp-vcodec")
+	entry.TVPACodec = extractAttr(line, "tvp-acodec")
+	entry.TVPRes = extractAttr(line, "tvp-resolution")
+	entry.TVPAudio = extractAttr(line, "tvp-audio")
+	entry.TVPDur = extractAttr(line, "tvp-duration")
 
 	if idx := strings.LastIndex(line, ","); idx >= 0 {
 		entry.Name = strings.TrimSpace(line[idx+1:])

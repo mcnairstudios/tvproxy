@@ -199,7 +199,7 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 		seen[hash] = struct{}{}
 		id := deterministicStreamID(hash)
 		keepIDs = append(keepIDs, id)
-		streams = append(streams, models.Stream{
+		s := models.Stream{
 			ID:           id,
 			M3UAccountID: account.ID,
 			Name:         entry.Name,
@@ -210,7 +210,23 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 			TvgName:      entry.TvgName,
 			ContentHash:  hash,
 			IsActive:     true,
-		})
+			VODType:      entry.TVPType,
+			VODSeries:    entry.TVPSeries,
+			VODVCodec:    entry.TVPVCodec,
+			VODACodec:    entry.TVPACodec,
+			VODRes:       entry.TVPRes,
+			VODAudio:     entry.TVPAudio,
+		}
+		if entry.TVPSeason != "" {
+			fmt.Sscanf(entry.TVPSeason, "%d", &s.VODSeason)
+		}
+		if entry.TVPEpisode != "" {
+			fmt.Sscanf(entry.TVPEpisode, "%d", &s.VODEpisode)
+		}
+		if entry.TVPDur != "" {
+			fmt.Sscanf(entry.TVPDur, "%f", &s.VODDuration)
+		}
+		streams = append(streams, s)
 	}
 
 	return s.upsertAndFinalize(ctx, account, streams, keepIDs)

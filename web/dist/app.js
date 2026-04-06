@@ -688,6 +688,8 @@
     { id: 'clients', label: 'Client Detection', icon: '\ud83d\udd0d', tip: 'Auto-detect players by HTTP headers and assign stream profiles', adminOnly: true },
     { id: 'logos', label: 'Logos', icon: '\ud83d\uddbc', tip: 'Saved channel logos for quick reuse', adminOnly: true },
     { section: 'Streams' },
+    { id: 'movies', label: 'Movies', icon: '\uD83C\uDFAC', tip: 'Browse movie library' },
+    { id: 'tv-series', label: 'TV Series', icon: '\uD83D\uDCFA', tip: 'Browse TV series library' },
     { id: 'recordings', label: 'Recordings', icon: '\u23FA', tip: 'View active and completed recordings' },
     { section: 'System', adminOnly: true },
     { id: 'now-playing', label: 'Now Playing', icon: '\u25B6', tip: 'Active streams and viewers', adminOnly: true },
@@ -714,6 +716,146 @@
   function hideTooltip() {
     clearTimeout(tooltipTimer);
     tooltipEl.style.opacity = '0';
+  }
+
+  function showSeriesDetail(show) {
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);';
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+    document.addEventListener('keydown', function onKey(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); } });
+
+    var modal = document.createElement('div');
+    modal.style.cssText = 'width:90%;max-width:1080px;max-height:92vh;background:#1a1d23;border-radius:16px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.6);';
+
+    var backdrop = document.createElement('div');
+    backdrop.style.cssText = 'width:100%;height:280px;background:linear-gradient(135deg,#1a1a2e,#0f3460);position:relative;overflow:hidden;flex-shrink:0;';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u2715';
+    closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.6);border:none;color:#fff;font-size:18px;width:40px;height:40px;border-radius:50%;cursor:pointer;z-index:3;';
+    closeBtn.onclick = function() { overlay.remove(); };
+    backdrop.appendChild(closeBtn);
+
+    backdrop.appendChild(Object.assign(document.createElement('div'), {
+      style: 'position:absolute;bottom:0;left:0;right:0;height:150px;background:linear-gradient(transparent,#1a1d23);'
+    }));
+
+    var titleBlock = document.createElement('div');
+    titleBlock.style.cssText = 'position:absolute;bottom:24px;left:32px;z-index:1;';
+    titleBlock.innerHTML = '<div style="font-size:32px;font-weight:800;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,0.7)">' + esc(show.name) + '</div>';
+    var seasonCount = Object.keys(show.seasons).length;
+    titleBlock.innerHTML += '<div style="color:rgba(255,255,255,0.7);font-size:14px;margin-top:4px">' + seasonCount + ' season' + (seasonCount > 1 ? 's' : '') + ' \u2022 ' + show.episodes.length + ' episodes</div>';
+    backdrop.appendChild(titleBlock);
+    modal.appendChild(backdrop);
+
+    var body = document.createElement('div');
+    body.style.cssText = 'padding:24px 32px;overflow-y:auto;flex:1;';
+
+    var tmdbMeta = document.createElement('div');
+    tmdbMeta.style.cssText = 'margin-bottom:20px;min-height:24px;';
+    body.appendChild(tmdbMeta);
+
+    var seasonNums = Object.keys(show.seasons).map(Number).sort(function(a, b) { return a - b; });
+
+    var tabBar = document.createElement('div');
+    tabBar.style.cssText = 'display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;';
+
+    var epList = document.createElement('div');
+
+    function renderSeason(num) {
+      epList.innerHTML = '';
+      tabBar.querySelectorAll('button').forEach(function(btn) {
+        btn.style.background = btn.dataset.season == num ? '#3b82f6' : 'rgba(255,255,255,0.1)';
+      });
+      var eps = show.seasons[num] || [];
+      eps.sort(function(a, b) { return a.episode - b.episode; });
+      eps.forEach(function(ep) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:16px;padding:12px 16px;border-radius:8px;cursor:pointer;transition:background 0.15s;';
+        row.onmouseenter = function() { row.style.background = 'rgba(255,255,255,0.05)'; };
+        row.onmouseleave = function() { row.style.background = ''; };
+
+        var epNum = document.createElement('span');
+        epNum.style.cssText = 'font-size:24px;font-weight:700;color:var(--text-muted);min-width:40px;text-align:center;';
+        epNum.textContent = ep.episode || '?';
+        row.appendChild(epNum);
+
+        var epInfo = document.createElement('div');
+        epInfo.style.cssText = 'flex:1;min-width:0;';
+        epInfo.appendChild(Object.assign(document.createElement('div'), { style: 'font-size:14px;font-weight:600;color:var(--text-primary);', textContent: ep.name || ('Episode ' + ep.episode) }));
+        var meta = [];
+        if (ep.resolution) meta.push(ep.resolution);
+        if (ep.vcodec) meta.push(ep.vcodec);
+        if (ep.audio) meta.push(ep.audio);
+        if (ep.duration > 0) { var m = Math.floor(ep.duration / 60); meta.push(m + 'm'); }
+        if (meta.length) epInfo.appendChild(Object.assign(document.createElement('div'), { style: 'font-size:12px;color:var(--text-muted);margin-top:2px;', textContent: meta.join(' \u2022 ') }));
+        row.appendChild(epInfo);
+
+        var playBtn = document.createElement('button');
+        playBtn.style.cssText = 'background:#3b82f6;border:none;color:#fff;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;flex-shrink:0;';
+        playBtn.textContent = '\u25B6';
+        playBtn.onclick = function(e) {
+          e.stopPropagation();
+          overlay.remove();
+          play({ streamID: ep.id, name: show.name + ' S' + String(ep.season).padStart(2,'0') + 'E' + String(ep.episode).padStart(2,'0') });
+        };
+        row.appendChild(playBtn);
+
+        row.onclick = function() {
+          overlay.remove();
+          play({ streamID: ep.id, name: show.name + ' S' + String(ep.season).padStart(2,'0') + 'E' + String(ep.episode).padStart(2,'0') });
+        };
+
+        epList.appendChild(row);
+      });
+    }
+
+    seasonNums.forEach(function(num) {
+      var btn = document.createElement('button');
+      btn.style.cssText = 'background:rgba(255,255,255,0.1);border:none;color:#fff;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;';
+      btn.textContent = 'Season ' + num;
+      btn.dataset.season = num;
+      btn.onclick = function() { renderSeason(num); };
+      tabBar.appendChild(btn);
+    });
+
+    body.appendChild(tabBar);
+    body.appendChild(epList);
+    modal.appendChild(body);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    if (seasonNums.length > 0) renderSeason(seasonNums[0]);
+
+    api.get('/api/tmdb/search?query=' + encodeURIComponent(show.name)).then(function(data) {
+      if (!data || !data.results) return;
+      var match = data.results.find(function(r) { return r.media_type === 'tv'; });
+      if (!match) return;
+      if (match.backdrop_path) {
+        backdrop.style.backgroundImage = 'url(https://image.tmdb.org/t/p/w1280' + match.backdrop_path + ')';
+        backdrop.style.backgroundSize = 'cover';
+        backdrop.style.backgroundPosition = 'center 20%';
+      }
+      var pills = [];
+      if (match.vote_average > 0) {
+        var starColor = match.vote_average >= 7 ? '#22c55e' : match.vote_average >= 5 ? '#eab308' : '#ef4444';
+        pills.push('<span style="background:' + starColor + '20;color:' + starColor + ';padding:3px 10px;border-radius:6px;font-weight:700;font-size:13px">\u2605 ' + match.vote_average.toFixed(1) + '</span>');
+      }
+      if (match.first_air_date) pills.push('<span style="color:#9ca3af;font-size:13px">' + match.first_air_date.substring(0, 4) + '</span>');
+      if (match.genre_ids) {
+        match.genre_ids.slice(0, 3).forEach(function(gid) {
+          var name = TMDB_GENRES[gid];
+          if (name) pills.push('<span style="background:rgba(59,130,246,0.15);color:#60a5fa;padding:3px 10px;border-radius:6px;font-size:12px">' + esc(name) + '</span>');
+        });
+      }
+      if (pills.length) tmdbMeta.innerHTML = pills.join('');
+      if (match.overview) {
+        var desc = document.createElement('p');
+        desc.style.cssText = 'color:#b0b8c8;font-size:14px;line-height:1.6;margin:0 0 16px 0;';
+        desc.textContent = match.overview;
+        body.insertBefore(desc, tabBar);
+      }
+    }).catch(function() {});
   }
 
   var TMDB_GENRES = {10759:'Action & Adventure',10762:'Kids',10763:'News',10764:'Reality',10765:'Sci-Fi & Fantasy',10766:'Soap',10767:'Talk',10768:'War & Politics',28:'Action',12:'Adventure',16:'Animation',35:'Comedy',80:'Crime',99:'Documentary',18:'Drama',10751:'Family',14:'Fantasy',36:'History',27:'Horror',10402:'Music',9648:'Mystery',10749:'Romance',878:'Science Fiction',53:'Thriller',10752:'War',37:'Western'};
@@ -788,7 +930,14 @@
       playIcon.textContent = '\u25B6';
       playIcon.onmouseenter = function() { playIcon.style.background = '#3b82f6'; };
       playIcon.onmouseleave = function() { playIcon.style.background = 'rgba(0,0,0,0.5)'; };
-      playIcon.onclick = function() { overlay.remove(); play({ channelID: opts.channelID, name: opts.channelName, tvgId: opts.tvgId }); };
+      playIcon.onclick = function() {
+        overlay.remove();
+        if (opts.vodStreamID) {
+          play({ streamID: opts.vodStreamID, name: opts.title });
+        } else {
+          play({ channelID: opts.channelID, name: opts.channelName, tvgId: opts.tvgId });
+        }
+      };
       actionIcons.appendChild(playIcon);
     }
 
@@ -4880,6 +5029,180 @@
         },
       ],
     }),
+
+    movies: async function(container) {
+      container.innerHTML = '';
+      container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading movies...'));
+
+      try {
+        var items = await api.get('/api/vod/library?type=movie');
+        container.innerHTML = '';
+
+        if (items.length === 0) {
+          container.appendChild(h('div', { style: 'text-align:center;padding:48px;color:var(--text-muted)' },
+            h('div', { style: 'font-size:3em;margin-bottom:12px;opacity:0.4' }, '\uD83C\uDFAC'),
+            h('p', { style: 'font-size:1.1em' }, 'No movies found. Add a tvproxy-streams M3U source to import your movie library.')
+          ));
+          return;
+        }
+
+        var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:24px' });
+        header.appendChild(h('h2', { style: 'margin:0' }, 'Movies'));
+        header.appendChild(h('span', { style: 'color:var(--text-muted);font-size:0.95em' }, items.length + ' titles'));
+        container.appendChild(header);
+
+        var grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:20px;' });
+
+        items.forEach(function(item) {
+          var card = h('div', { style: 'cursor:pointer;border-radius:12px;overflow:hidden;background:var(--bg-card);border:1px solid var(--border);transition:transform 0.2s,box-shadow 0.2s;' });
+          card.onmouseenter = function() { card.style.transform = 'scale(1.03)'; card.style.boxShadow = '0 8px 30px rgba(0,0,0,0.3)'; };
+          card.onmouseleave = function() { card.style.transform = ''; card.style.boxShadow = ''; };
+
+          var posterWrap = h('div', { style: 'width:100%;aspect-ratio:2/3;background:linear-gradient(135deg,#1a1a2e,#16213e);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;' });
+          var titleOnPoster = h('div', { style: 'padding:12px;text-align:center;color:#fff;font-size:14px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.5);' }, item.name);
+          posterWrap.appendChild(titleOnPoster);
+          posterWrap.id = 'poster-' + item.id;
+          card.appendChild(posterWrap);
+
+          var info = h('div', { style: 'padding:10px 12px;' });
+          var titleRow = h('div', { style: 'font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, item.name);
+          info.appendChild(titleRow);
+
+          var badges = [];
+          if (item.resolution) badges.push(item.resolution);
+          if (item.vcodec) badges.push(item.vcodec);
+          if (item.audio) badges.push(item.audio);
+          if (item.duration > 0) {
+            var hrs = Math.floor(item.duration / 3600);
+            var mins = Math.floor((item.duration % 3600) / 60);
+            badges.push(hrs > 0 ? hrs + 'h ' + mins + 'm' : mins + 'm');
+          }
+          if (badges.length) {
+            var badgeRow = h('div', { style: 'display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;' });
+            badges.forEach(function(b) {
+              badgeRow.appendChild(h('span', { style: 'font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.08);color:var(--text-muted);' }, b));
+            });
+            info.appendChild(badgeRow);
+          }
+
+          card.appendChild(info);
+
+          card.onclick = function() {
+            showProgrammeModal({
+              title: item.name,
+              time: badges.filter(function(b) { return b.includes('h') || b.includes('m'); }).join(''),
+              description: '',
+              channelName: '',
+              channelID: null,
+              tvgId: null,
+              isLive: false,
+              isFuture: false,
+              vodStreamURL: item.url,
+              vodStreamID: item.id,
+            });
+          };
+
+          grid.appendChild(card);
+
+          api.get('/api/tmdb/search?query=' + encodeURIComponent(item.name)).then(function(data) {
+            if (!data || !data.results) return;
+            var match = data.results.find(function(r) { return r.media_type === 'movie'; });
+            if (match && match.poster_path) {
+              var wrap = document.getElementById('poster-' + item.id);
+              if (wrap) {
+                wrap.innerHTML = '';
+                wrap.appendChild(h('img', { src: 'https://image.tmdb.org/t/p/w342' + match.poster_path, style: 'width:100%;height:100%;object-fit:cover;' }));
+              }
+            }
+          }).catch(function() {});
+        });
+
+        container.appendChild(grid);
+      } catch(err) {
+        container.innerHTML = '';
+        container.appendChild(h('p', { style: 'color:var(--danger)' }, 'Failed to load: ' + err.message));
+      }
+    },
+
+    'tv-series': async function(container) {
+      container.innerHTML = '';
+      container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading TV series...'));
+
+      try {
+        var items = await api.get('/api/vod/library?type=series');
+        container.innerHTML = '';
+
+        if (items.length === 0) {
+          container.appendChild(h('div', { style: 'text-align:center;padding:48px;color:var(--text-muted)' },
+            h('div', { style: 'font-size:3em;margin-bottom:12px;opacity:0.4' }, '\uD83D\uDCFA'),
+            h('p', { style: 'font-size:1.1em' }, 'No TV series found. Add a tvproxy-streams M3U source to import your TV library.')
+          ));
+          return;
+        }
+
+        var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:24px' });
+        header.appendChild(h('h2', { style: 'margin:0' }, 'TV Series'));
+        container.appendChild(header);
+
+        var seriesMap = {};
+        items.forEach(function(item) {
+          var key = item.series || item.name;
+          if (!seriesMap[key]) seriesMap[key] = { name: key, seasons: {}, episodes: [] };
+          seriesMap[key].episodes.push(item);
+          if (item.season > 0) {
+            if (!seriesMap[key].seasons[item.season]) seriesMap[key].seasons[item.season] = [];
+            seriesMap[key].seasons[item.season].push(item);
+          }
+        });
+
+        var seriesList = Object.values(seriesMap).sort(function(a, b) { return a.name.localeCompare(b.name); });
+        header.appendChild(h('span', { style: 'color:var(--text-muted);font-size:0.95em' }, seriesList.length + ' series'));
+
+        var grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:20px;' });
+
+        seriesList.forEach(function(show) {
+          var card = h('div', { style: 'cursor:pointer;border-radius:12px;overflow:hidden;background:var(--bg-card);border:1px solid var(--border);transition:transform 0.2s,box-shadow 0.2s;' });
+          card.onmouseenter = function() { card.style.transform = 'scale(1.03)'; card.style.boxShadow = '0 8px 30px rgba(0,0,0,0.3)'; };
+          card.onmouseleave = function() { card.style.transform = ''; card.style.boxShadow = ''; };
+
+          var posterWrap = h('div', { style: 'width:100%;aspect-ratio:2/3;background:linear-gradient(135deg,#1a1a2e,#0f3460);display:flex;align-items:center;justify-content:center;position:relative;' });
+          posterWrap.appendChild(h('div', { style: 'padding:12px;text-align:center;color:#fff;font-size:14px;font-weight:600;' }, show.name));
+          posterWrap.id = 'series-poster-' + show.name.replace(/[^a-zA-Z0-9]/g, '_');
+          card.appendChild(posterWrap);
+
+          var info = h('div', { style: 'padding:10px 12px;' });
+          info.appendChild(h('div', { style: 'font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, show.name));
+          var seasonCount = Object.keys(show.seasons).length;
+          var epCount = show.episodes.length;
+          info.appendChild(h('div', { style: 'font-size:11px;color:var(--text-muted);margin-top:2px;' },
+            (seasonCount > 0 ? seasonCount + ' season' + (seasonCount > 1 ? 's' : '') + ' \u2022 ' : '') + epCount + ' episode' + (epCount > 1 ? 's' : '')));
+          card.appendChild(info);
+
+          card.onclick = function() {
+            showSeriesDetail(show);
+          };
+
+          grid.appendChild(card);
+
+          api.get('/api/tmdb/search?query=' + encodeURIComponent(show.name)).then(function(data) {
+            if (!data || !data.results) return;
+            var match = data.results.find(function(r) { return r.media_type === 'tv'; });
+            if (match && match.poster_path) {
+              var wrap = document.getElementById('series-poster-' + show.name.replace(/[^a-zA-Z0-9]/g, '_'));
+              if (wrap) {
+                wrap.innerHTML = '';
+                wrap.appendChild(h('img', { src: 'https://image.tmdb.org/t/p/w342' + match.poster_path, style: 'width:100%;height:100%;object-fit:cover;' }));
+              }
+            }
+          }).catch(function() {});
+        });
+
+        container.appendChild(grid);
+      } catch(err) {
+        container.innerHTML = '';
+        container.appendChild(h('p', { style: 'color:var(--danger)' }, 'Failed to load: ' + err.message));
+      }
+    },
 
     recordings: async function(container) {
       container.innerHTML = '';

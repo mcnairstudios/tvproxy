@@ -64,6 +64,15 @@ type Stream struct {
 	TvgID         string        `json:"tvg_id,omitempty"`
 	TvgName       string        `json:"tvg_name,omitempty"`
 	ContentHash   string        `json:"content_hash"`
+	VODType       string        `json:"vod_type,omitempty"`
+	VODSeries     string        `json:"vod_series,omitempty"`
+	VODSeason     int           `json:"vod_season,omitempty"`
+	VODEpisode    int           `json:"vod_episode,omitempty"`
+	VODVCodec     string        `json:"vod_vcodec,omitempty"`
+	VODACodec     string        `json:"vod_acodec,omitempty"`
+	VODRes        string        `json:"vod_resolution,omitempty"`
+	VODAudio      string        `json:"vod_audio,omitempty"`
+	VODDuration   float64       `json:"vod_duration,omitempty"`
 	IsActive      bool          `json:"is_active"`
 	Tracks        []StreamTrack `json:"tracks,omitempty"`
 	CreatedAt     time.Time     `json:"created_at"`

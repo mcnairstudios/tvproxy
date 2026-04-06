@@ -237,6 +237,7 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 
 		r.Get("/api/tmdb/search", h.tmdb.Search)
 		r.Get("/api/tmdb/details", h.tmdb.Details)
+		r.Get("/api/vod/library", h.stream.VODLibrary)
 
 		r.Route("/api/activity", func(r chi.Router) {
 			r.Use(authMW.RequireAdmin)
