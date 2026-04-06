@@ -38,6 +38,7 @@ type StartOpts struct {
 	OutputAudioCodec string
 	OutputContainer  string
 	OutputHWAccel    string
+	KnownDuration    float64
 	Command          string
 	Args             string
 	OutputDir        string
@@ -351,6 +352,7 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 		OutputAudioCodec: opts.OutputAudioCodec,
 		OutputContainer:  opts.OutputContainer,
 		OutputHWAccel:    opts.OutputHWAccel,
+		Duration:         opts.KnownDuration,
 		FilePath:         filePath,
 		TempDir:          tempDir,
 		consumers:   make(map[string]*Consumer),

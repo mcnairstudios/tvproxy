@@ -227,6 +227,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		Command:          sa.Command,
 		Args:             sa.Args,
 		OutputDir:        s.config.VODOutputDir,
+		KnownDuration:    stream.VODDuration,
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", err
