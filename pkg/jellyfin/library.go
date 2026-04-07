@@ -254,6 +254,15 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) getFilters(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, map[string]any{
+		"Genres":          []string{},
+		"Tags":            []string{},
+		"OfficialRatings": []string{},
+		"Years":           []int{},
+	})
+}
+
 func (s *Server) getLatest(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, []BaseItemDto{})
 }
@@ -284,23 +293,28 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	stream, err := s.streams.GetByID(ctx, addDashes(itemID))
-	if err != nil || stream == nil {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
+	if err == nil && stream != nil {
+		lookupName := stream.Name
+		mediaType := stream.VODType
+		if stream.VODType == "series" && stream.VODSeries != "" {
+			lookupName = stream.VODSeries
+		}
+
+		posterURL := s.tmdbClient.LookupPoster(lookupName, mediaType)
+		if posterURL != "" {
+			http.Redirect(w, r, s.baseURL+":8080"+posterURL, http.StatusTemporaryRedirect)
+			return
+		}
+
+		if s.logoService != nil && stream.Logo != "" {
+			http.Redirect(w, r, s.baseURL+":8080"+s.logoService.Resolve(stream.Logo), http.StatusTemporaryRedirect)
+			return
+		}
 	}
 
-	lookupName := stream.Name
-	if stream.VODType == "series" && stream.VODSeries != "" {
-		lookupName = stream.VODSeries
-	}
-
-	posterURL := s.tmdbClient.LookupPoster(lookupName, stream.VODType)
-	if posterURL == "" && s.logoService != nil && stream.Logo != "" {
-		posterURL = s.logoService.Resolve(stream.Logo)
-	}
-
-	if posterURL != "" {
-		http.Redirect(w, r, posterURL, http.StatusTemporaryRedirect)
+	channel, err := s.channels.GetByID(ctx, addDashes(itemID))
+	if err == nil && channel != nil && channel.Logo != "" {
+		http.Redirect(w, r, s.baseURL+":8080"+s.logoService.Resolve(channel.Logo), http.StatusTemporaryRedirect)
 		return
 	}
 

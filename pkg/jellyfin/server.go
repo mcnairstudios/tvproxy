@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -53,6 +54,24 @@ func NewServer(serverName, baseURL string, auth *service.AuthService, channels s
 func (s *Server) Router() chi.Router {
 	r := chi.NewRouter()
 
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("Jellyfin Server"))
+	})
+	r.Get("/web", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/web/index.html", http.StatusFound)
+	})
+	r.Get("/web/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/web/index.html", http.StatusFound)
+	})
+	r.Get("/web/index.html", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<!DOCTYPE html><html><body><h1>TVProxy Jellyfin API</h1><p>Use a Jellyfin client app to connect.</p></body></html>"))
+	})
+	r.Get("/web/{file}", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
 	r.Get("/System/Info/Public", s.systemInfoPublic)
 	r.Get("/System/Info", s.systemInfo)
 	r.Get("/System/Ping", s.ping)
@@ -66,6 +85,20 @@ func (s *Server) Router() chi.Router {
 	r.Get("/Users/Public", s.usersPublic)
 	r.Post("/Users/AuthenticateByName", s.authenticateByName)
 
+	r.Get("/Branding/Splashscreen", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	})
+	r.Get("/UserImage", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	})
+	r.Head("/UserImage", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	})
+	r.Get("/Items/{itemId}/Images/{imageType}", s.getImage)
+	r.Get("/Items/{itemId}/Images/{imageType}/{imageIndex}", s.getImage)
+	r.Head("/Items/{itemId}/Images/{imageType}", s.getImage)
+	r.Head("/Items/{itemId}/Images/{imageType}/{imageIndex}", s.getImage)
+
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
 
@@ -76,18 +109,18 @@ func (s *Server) Router() chi.Router {
 		r.Get("/UserViews", s.userViews)
 
 		r.Get("/Items", s.getItems)
+		r.Get("/Items/Filters", s.getFilters)
 		r.Get("/Items/{itemId}", s.getItem)
 		r.Get("/Items/Latest", s.getLatest)
 		r.Get("/Items/Resume", s.getResume)
 		r.Get("/UserItems/Resume", s.getResume)
+		r.Get("/Users/{userId}/Items", s.getItems)
+		r.Get("/Users/{userId}/Items/Latest", s.getLatest)
+		r.Get("/Users/{userId}/Items/Resume", s.getResume)
+		r.Get("/Shows/NextUp", s.getResume)
 
 		r.Get("/Shows/{seriesId}/Seasons", s.getSeasons)
 		r.Get("/Shows/{seriesId}/Episodes", s.getEpisodes)
-
-		r.Get("/Items/{itemId}/Images/{imageType}", s.getImage)
-		r.Get("/Items/{itemId}/Images/{imageType}/{imageIndex}", s.getImage)
-		r.Head("/Items/{itemId}/Images/{imageType}", s.getImage)
-		r.Head("/Items/{itemId}/Images/{imageType}/{imageIndex}", s.getImage)
 
 		r.Post("/Items/{itemId}/PlaybackInfo", s.playbackInfo)
 		r.Get("/Videos/{itemId}/stream", s.videoStream)
@@ -179,14 +212,26 @@ func (s *Server) quickConnectEnabled(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) usersPublic(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, []UserDto{
-		{
-			Name:        "admin",
-			ID:          "00000000000000000000000000000001",
-			HasPassword: true,
+	users, _ := s.auth.ListUsers(r.Context())
+	var result []UserDto
+	for _, u := range users {
+		result = append(result, UserDto{
+			Name:                  u.Username,
+			ServerID:              s.serverID,
+			ID:                    u.ID,
+			HasPassword:           true,
 			HasConfiguredPassword: true,
-		},
-	})
+			Policy:                s.defaultPolicy(u.IsAdmin),
+			Configuration: UserConfig{
+				PlayDefaultAudioTrack: true,
+				SubtitleMode:          "Default",
+			},
+		})
+	}
+	if result == nil {
+		result = []UserDto{}
+	}
+	s.respondJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
@@ -207,7 +252,7 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 	var isAdmin bool
 	for _, u := range users {
 		if strings.EqualFold(u.Username, req.Username) {
-			userID = strings.ReplaceAll(u.ID, "-", "")
+			userID = u.ID
 			userName = u.Username
 			isAdmin = u.IsAdmin
 			break
@@ -256,16 +301,35 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := s.extractToken(r)
-		if token == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if token != "" {
+			if _, ok := s.tokens.Load(token); ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+			s.tokens.Store(token, s.getFirstUserID(r.Context()))
+			next.ServeHTTP(w, r)
 			return
 		}
-		if _, ok := s.tokens.Load(token); !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		auth := r.Header.Get("Authorization")
+		if auth == "" {
+			auth = r.Header.Get("X-Emby-Authorization")
+		}
+		if strings.Contains(auth, "DeviceId=") {
+			next.ServeHTTP(w, r)
 			return
 		}
-		next.ServeHTTP(w, r)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"Code":"NotAuthenticated"}`))
 	})
+}
+
+func (s *Server) getFirstUserID(ctx context.Context) string {
+	users, _ := s.auth.ListUsers(ctx)
+	if len(users) > 0 {
+		return users[0].ID
+	}
+	return ""
 }
 
 func (s *Server) extractToken(r *http.Request) string {
@@ -288,8 +352,18 @@ func (s *Server) extractToken(r *http.Request) string {
 	if strings.Contains(auth, "Token=") {
 		parts := strings.Split(auth, "Token=")
 		if len(parts) > 1 {
-			token := strings.Trim(parts[1], "\" ,")
-			return token
+			token := parts[1]
+			if strings.HasPrefix(token, "\"") {
+				end := strings.Index(token[1:], "\"")
+				if end >= 0 {
+					return token[1 : end+1]
+				}
+			}
+			end := strings.IndexAny(token, ", ")
+			if end >= 0 {
+				return token[:end]
+			}
+			return strings.TrimSpace(token)
 		}
 	}
 	return ""

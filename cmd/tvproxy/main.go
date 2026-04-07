@@ -281,16 +281,24 @@ func main() {
 		jfRouter.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				auth := r.Header.Get("Authorization")
-				if len(auth) > 60 {
-					auth = auth[:60]
+				if len(auth) > 120 {
+					auth = auth[:120]
 				}
 				log.Info().Str("method", r.Method).Str("path", r.URL.Path).Str("query", r.URL.RawQuery).Str("auth", auth).Msg("jellyfin request")
 				next.ServeHTTP(w, r)
 			})
 		})
+		jfRouter.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.URL.Path = canonicalJellyfinPath(r.URL.Path)
+				next.ServeHTTP(w, r)
+			})
+		})
 		jfRouter.NotFound(func(w http.ResponseWriter, r *http.Request) {
 			log.Warn().Str("method", r.Method).Str("path", r.URL.Path).Msg("jellyfin 404 - unhandled endpoint")
-			http.Error(w, "not found", http.StatusNotFound)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"Items":[],"TotalRecordCount":0}`))
 		})
 		jfRouter.Mount("/", jellyfinServer.Router())
 		jfAddr := ":8096"
@@ -438,6 +446,55 @@ func setupRouter(cfg *config.Config, log zerolog.Logger, settingsService *servic
 	})
 
 	return r
+}
+
+func canonicalJellyfinPath(path string) string {
+	lower := strings.ToLower(path)
+	routes := map[string]string{
+		"/system/info/public":        "/System/Info/Public",
+		"/system/info":               "/System/Info",
+		"/system/ping":               "/System/Ping",
+		"/branding/configuration":    "/Branding/Configuration",
+		"/branding/css":              "/Branding/Css",
+		"/quickconnect/enabled":      "/QuickConnect/Enabled",
+		"/users/public":              "/Users/Public",
+		"/users/authenticatebyname":  "/Users/AuthenticateByName",
+		"/users/me":                  "/Users/Me",
+		"/users":                     "/Users",
+		"/userviews":                 "/UserViews",
+		"/items/latest":              "/Items/Latest",
+		"/items/resume":              "/Items/Resume",
+		"/useritems/resume":          "/UserItems/Resume",
+		"/items":                     "/Items",
+		"/livetv/info":               "/LiveTv/Info",
+		"/livetv/channels":           "/LiveTv/Channels",
+		"/livetv/programs":           "/LiveTv/Programs",
+		"/livetv/guideinfo":          "/LiveTv/GuideInfo",
+		"/sessions/capabilities/full": "/Sessions/Capabilities/Full",
+		"/sessions/playing":          "/Sessions/Playing",
+		"/sessions/playing/progress": "/Sessions/Playing/Progress",
+		"/sessions/playing/stopped":  "/Sessions/Playing/Stopped",
+		"/userimage":                 "/UserImage",
+		"/branding/splashscreen":     "/Branding/Splashscreen",
+		"/shows/nextup":              "/Shows/NextUp",
+	}
+	if mapped, ok := routes[lower]; ok {
+		return mapped
+	}
+	for prefix, mapped := range map[string]string{
+		"/items/":           "/Items/",
+		"/users/":           "/Users/",
+		"/videos/":          "/Videos/",
+		"/shows/":           "/Shows/",
+		"/displaypreferences/": "/DisplayPreferences/",
+		"/userplayeditems/": "/UserPlayedItems/",
+		"/userfavoriteitems/": "/UserFavoriteItems/",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return mapped + path[len(prefix):]
+		}
+	}
+	return path
 }
 
 func buildVersionedIndex(distFS fs.FS) []byte {
