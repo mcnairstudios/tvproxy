@@ -309,8 +309,9 @@ func (m *Manager) RestartWithSeek(ctx context.Context, channelID string, positio
 	if strings.Contains(origArgs, " -ss ") {
 		origArgs = strings.Join(removeSSArgs(strings.Fields(origArgs)), " ")
 	}
-	if strings.Contains(origArgs, "{input}") && opts.StreamURL != "" {
+	if opts.StreamURL != "" {
 		origArgs = strings.Replace(origArgs, "{input}", opts.StreamURL, 1)
+		origArgs = strings.Replace(origArgs, "pipe:0", opts.StreamURL, 1)
 	}
 	if idx := strings.Index(origArgs, "-i "); idx >= 0 {
 		opts.Args = origArgs[:idx] + "-ss " + seekStr + " " + origArgs[idx:]
