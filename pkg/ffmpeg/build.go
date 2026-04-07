@@ -57,8 +57,8 @@ func composeBuildArgs(opts BuildOptions) string {
 	} else if isHTTPURL(opts.StreamURL) {
 		if opts.Probe != nil && opts.Probe.Video != nil {
 			parts = append(parts,
-				"-analyzeduration", "0",
-				"-probesize", "32")
+				"-analyzeduration", "1000000",
+				"-probesize", "1000000")
 		} else {
 			parts = append(parts,
 				"-analyzeduration", strconv.Itoa(s.AnalyzeDuration),
