@@ -231,12 +231,13 @@ func main() {
 	)
 
 	r := setupRouter(cfg, log, settingsService)
+	tmdbHandler := handler.NewTMDBHandler(settingsService, filepath.Join(filepath.Dir(cfg.DatabasePath), "cache", "tmdb"), log)
 	registerRoutes(r, routeHandlers{
 		auth:         handler.NewAuthHandler(authService),
 		user:         handler.NewUserHandler(authService),
 		m3uAccount:   handler.NewM3UAccountHandler(m3uService),
 		satip:        handler.NewSatIPHandler(satipService),
-		stream:       handler.NewStreamHandler(streamStore, streamStore, logoService),
+		stream:       handler.NewStreamHandler(streamStore, streamStore, logoService, tmdbHandler),
 		channel:      handler.NewChannelHandler(channelService, logoService),
 		channelGroup: handler.NewChannelGroupHandler(channelService),
 		logo:         handler.NewLogoHandler(logoService),
@@ -254,7 +255,7 @@ func main() {
 		dlna:         handler.NewDLNAHandler(dlnaService, authService, settingsService, cfg, log),
 		wireguard:      handler.NewWireGuardHandler(wgService, log),
 		wireguardMulti: handler.NewMultiWireGuardHandler(wgMultiService, wgProfileStore, log),
-		tmdb:         handler.NewTMDBHandler(settingsService, filepath.Join(filepath.Dir(cfg.DatabasePath), "tmdb_cache"), log),
+		tmdb:         tmdbHandler,
 		logoCache:    logoCache,
 		log:          log,
 	}, authMW)

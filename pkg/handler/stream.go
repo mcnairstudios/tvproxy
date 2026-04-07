@@ -13,10 +13,11 @@ type StreamHandler struct {
 	streamStore store.StreamReader
 	versioned   store.Versioned
 	logoService *service.LogoService
+	tmdb        *TMDBHandler
 }
 
-func NewStreamHandler(streamStore store.StreamReader, versioned store.Versioned, logoService *service.LogoService) *StreamHandler {
-	return &StreamHandler{streamStore: streamStore, versioned: versioned, logoService: logoService}
+func NewStreamHandler(streamStore store.StreamReader, versioned store.Versioned, logoService *service.LogoService, tmdb *TMDBHandler) *StreamHandler {
+	return &StreamHandler{streamStore: streamStore, versioned: versioned, logoService: logoService, tmdb: tmdb}
 }
 
 func (h *StreamHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +98,7 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 		Name      string  `json:"name"`
 		URL       string  `json:"url"`
 		Logo      string  `json:"logo,omitempty"`
+		PosterURL string  `json:"poster_url,omitempty"`
 		Type      string  `json:"type"`
 		Series    string  `json:"series,omitempty"`
 		Season    int     `json:"season,omitempty"`
@@ -109,6 +111,9 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var items []vodItem
+	var uncached []struct{ Name, MediaType string }
+	seen := make(map[string]bool)
+
 	for _, s := range streams {
 		if s.VODType == "" {
 			continue
@@ -119,22 +124,47 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 		if series != "" && s.VODSeries != series {
 			continue
 		}
+
+		lookupName := s.Name
+		mediaType := "movie"
+		if s.VODType == "series" {
+			if s.VODSeries != "" {
+				lookupName = s.VODSeries
+			}
+			mediaType = "tv"
+		}
+
+		posterURL := ""
+		if h.tmdb != nil {
+			posterURL = h.tmdb.LookupPosterURL(lookupName, mediaType)
+			if posterURL == "" && !seen[lookupName+"_"+mediaType] {
+				seen[lookupName+"_"+mediaType] = true
+				uncached = append(uncached, struct{ Name, MediaType string }{lookupName, mediaType})
+			}
+		}
+
 		items = append(items, vodItem{
-			ID:       s.ID,
-			Name:     s.Name,
-			URL:      s.URL,
-			Logo:     h.logoService.Resolve(s.Logo),
-			Type:     s.VODType,
-			Series:   s.VODSeries,
-			Season:   s.VODSeason,
-			Episode:  s.VODEpisode,
-			VCodec:   s.VODVCodec,
-			ACodec:   s.VODACodec,
-			Res:      s.VODRes,
-			Audio:    s.VODAudio,
-			Duration: s.VODDuration,
+			ID:        s.ID,
+			Name:      s.Name,
+			URL:       s.URL,
+			Logo:      h.logoService.Resolve(s.Logo),
+			PosterURL: posterURL,
+			Type:      s.VODType,
+			Series:    s.VODSeries,
+			Season:    s.VODSeason,
+			Episode:   s.VODEpisode,
+			VCodec:    s.VODVCodec,
+			ACodec:    s.VODACodec,
+			Res:       s.VODRes,
+			Audio:     s.VODAudio,
+			Duration:  s.VODDuration,
 		})
 	}
+
+	if h.tmdb != nil && len(uncached) > 0 {
+		h.tmdb.EnrichInBackground(uncached)
+	}
+
 	if items == nil {
 		items = []vodItem{}
 	}

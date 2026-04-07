@@ -187,7 +187,6 @@
       state.refreshToken = null;
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
-      tmdbClearQueue();
       auth.invalidateCaches();
       render();
     },
@@ -859,34 +858,6 @@
     }).catch(function() {});
   }
 
-  var tmdbQueue = [];
-  var tmdbRunning = false;
-  var tmdbErrors = 0;
-  function tmdbSearch(query, callback, mediaType) {
-    if (!state.accessToken || tmdbErrors > 3) return;
-    tmdbQueue.push({ query: query, callback: callback, type: mediaType || '' });
-    if (!tmdbRunning) tmdbDrain();
-  }
-  function tmdbClearQueue() { tmdbQueue = []; tmdbRunning = false; tmdbErrors = 0; }
-  function tmdbDrain() {
-    if (tmdbQueue.length === 0 || !state.accessToken || tmdbErrors > 3) {
-      tmdbRunning = false;
-      if (tmdbErrors > 3) tmdbQueue = [];
-      return;
-    }
-    tmdbRunning = true;
-    var item = tmdbQueue.shift();
-    var typeParam = item.type ? '&type=' + encodeURIComponent(item.type) : '';
-    api.get('/api/tmdb/search?query=' + encodeURIComponent(item.query) + typeParam).then(function(data) {
-      tmdbErrors = 0;
-      item.callback(data);
-    }).catch(function() {
-      tmdbErrors++;
-      item.callback(null);
-    }).finally(function() {
-      setTimeout(tmdbDrain, 250);
-    });
-  }
 
   var TMDB_GENRES = {10759:'Action & Adventure',10762:'Kids',10763:'News',10764:'Reality',10765:'Sci-Fi & Fantasy',10766:'Soap',10767:'Talk',10768:'War & Politics',28:'Action',12:'Adventure',16:'Animation',35:'Comedy',80:'Crime',99:'Documentary',18:'Drama',10751:'Family',14:'Fantasy',36:'History',27:'Horror',10402:'Music',9648:'Mystery',10749:'Romance',878:'Science Fiction',53:'Thriller',10752:'War',37:'Western'};
 
@@ -5132,9 +5103,11 @@
           card.onmouseleave = function() { card.style.transform = ''; card.style.boxShadow = ''; };
 
           var posterWrap = h('div', { style: 'width:100%;aspect-ratio:2/3;background:linear-gradient(135deg,#1a1a2e,#16213e);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;' });
-          var titleOnPoster = h('div', { style: 'padding:12px;text-align:center;color:#fff;font-size:14px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.5);' }, item.name);
-          posterWrap.appendChild(titleOnPoster);
-          posterWrap.id = 'poster-' + item.id;
+          if (item.poster_url) {
+            posterWrap.appendChild(h('img', { src: item.poster_url, style: 'width:100%;height:100%;object-fit:cover;' }));
+          } else {
+            posterWrap.appendChild(h('div', { style: 'padding:12px;text-align:center;color:#fff;font-size:14px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.5);' }, item.name));
+          }
           card.appendChild(posterWrap);
 
           var info = h('div', { style: 'padding:10px 12px;' });
@@ -5176,18 +5149,6 @@
           };
 
           grid.appendChild(card);
-
-          tmdbSearch(item.name, function(data) {
-            if (!data || !data.results) return;
-            var match = data.results[0];
-            if (match && match.poster_path) {
-              var wrap = document.getElementById('poster-' + item.id);
-              if (wrap) {
-                wrap.innerHTML = '';
-                wrap.appendChild(h('img', { src: 'https://image.tmdb.org/t/p/w342' + match.poster_path, style: 'width:100%;height:100%;object-fit:cover;' }));
-              }
-            }
-          }, 'movie');
         });
 
         container.appendChild(grid);
@@ -5239,8 +5200,13 @@
           card.onmouseleave = function() { card.style.transform = ''; card.style.boxShadow = ''; };
 
           var posterWrap = h('div', { style: 'width:100%;aspect-ratio:2/3;background:linear-gradient(135deg,#1a1a2e,#0f3460);display:flex;align-items:center;justify-content:center;position:relative;' });
-          posterWrap.appendChild(h('div', { style: 'padding:12px;text-align:center;color:#fff;font-size:14px;font-weight:600;' }, show.name));
-          posterWrap.id = 'series-poster-' + show.name.replace(/[^a-zA-Z0-9]/g, '_');
+          var showPoster = '';
+          show.episodes.some(function(ep) { if (ep.poster_url) { showPoster = ep.poster_url; return true; } return false; });
+          if (showPoster) {
+            posterWrap.appendChild(h('img', { src: showPoster, style: 'width:100%;height:100%;object-fit:cover;' }));
+          } else {
+            posterWrap.appendChild(h('div', { style: 'padding:12px;text-align:center;color:#fff;font-size:14px;font-weight:600;' }, show.name));
+          }
           card.appendChild(posterWrap);
 
           var info = h('div', { style: 'padding:10px 12px;' });
@@ -5256,18 +5222,6 @@
           };
 
           grid.appendChild(card);
-
-          tmdbSearch(show.name, function(data) {
-            if (!data || !data.results) return;
-            var match = data.results[0];
-            if (match && match.poster_path) {
-              var wrap = document.getElementById('series-poster-' + show.name.replace(/[^a-zA-Z0-9]/g, '_'));
-              if (wrap) {
-                wrap.innerHTML = '';
-                wrap.appendChild(h('img', { src: 'https://image.tmdb.org/t/p/w342' + match.poster_path, style: 'width:100%;height:100%;object-fit:cover;' }));
-              }
-            }
-          }, 'tv');
         });
 
         container.appendChild(grid);
