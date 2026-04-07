@@ -12,9 +12,10 @@ type M3URefresher interface {
 }
 
 type M3URefreshWorker struct {
-	service  M3URefresher
-	interval time.Duration
-	log      zerolog.Logger
+	service       M3URefresher
+	interval      time.Duration
+	onRefreshDone func()
+	log           zerolog.Logger
 }
 
 func NewM3URefreshWorker(service M3URefresher, interval time.Duration, log zerolog.Logger) *M3URefreshWorker {
@@ -23,6 +24,10 @@ func NewM3URefreshWorker(service M3URefresher, interval time.Duration, log zerol
 		interval: interval,
 		log:      log,
 	}
+}
+
+func (w *M3URefreshWorker) SetOnRefreshDone(fn func()) {
+	w.onRefreshDone = fn
 }
 
 func (w *M3URefreshWorker) Run(ctx context.Context) {
@@ -39,6 +44,9 @@ func (w *M3URefreshWorker) Run(ctx context.Context) {
 				w.log.Error().Err(err).Msg("M3U refresh cycle failed")
 			} else {
 				w.log.Info().Msg("M3U refresh cycle completed")
+				if w.onRefreshDone != nil {
+					w.onRefreshDone()
+				}
 			}
 		}
 	}

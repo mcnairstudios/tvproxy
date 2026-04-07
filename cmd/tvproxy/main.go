@@ -25,6 +25,7 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/logocache"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
+	"github.com/gavinmcnair/tvproxy/pkg/tmdb"
 	"github.com/gavinmcnair/tvproxy/pkg/session"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/worker"
@@ -231,13 +232,18 @@ func main() {
 	)
 
 	r := setupRouter(cfg, log, settingsService)
-	tmdbHandler := handler.NewTMDBHandler(settingsService, filepath.Join(filepath.Dir(cfg.DatabasePath), "cache", "tmdb"), log)
+	tmdbClient := tmdb.NewClient(
+		filepath.Join(filepath.Dir(cfg.DatabasePath), "cache", "tmdb"),
+		func() string { v, _ := settingsService.Get(ctx, "tmdb_api_key"); return v },
+		log,
+	)
+	tmdbHandler := handler.NewTMDBHandler(tmdbClient)
 	registerRoutes(r, routeHandlers{
 		auth:         handler.NewAuthHandler(authService),
 		user:         handler.NewUserHandler(authService),
 		m3uAccount:   handler.NewM3UAccountHandler(m3uService),
 		satip:        handler.NewSatIPHandler(satipService),
-		stream:       handler.NewStreamHandler(streamStore, streamStore, logoService, tmdbHandler),
+		stream:       handler.NewStreamHandler(streamStore, streamStore, logoService, tmdbClient),
 		channel:      handler.NewChannelHandler(channelService, logoService),
 		channelGroup: handler.NewChannelGroupHandler(channelService),
 		logo:         handler.NewLogoHandler(logoService),
@@ -268,8 +274,45 @@ func main() {
 	staticRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "static")
 	registerStaticRoutes(r, staticRoot, distFS, versionedIndexBytes)
 
+	syncTMDB := func() {
+		streams, err := streamStore.List(ctx)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to list streams for TMDB sync")
+			return
+		}
+		var items []tmdb.VODItem
+		seen := make(map[string]bool)
+		for _, s := range streams {
+			if s.VODType == "" {
+				continue
+			}
+			name := s.Name
+			mediaType := "movie"
+			if s.VODType == "series" {
+				if s.VODSeries != "" {
+					name = s.VODSeries
+				}
+				mediaType = "tv"
+			}
+			key := name + "_" + mediaType
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			items = append(items, tmdb.VODItem{Name: name, MediaType: mediaType})
+		}
+		if len(items) > 0 {
+			tmdbClient.Sync(items)
+		}
+	}
+
+	go syncTMDB()
+
+	m3uWorker := worker.NewM3URefreshWorker(m3uService, cfg.M3URefreshInterval, log)
+	m3uWorker.SetOnRefreshDone(syncTMDB)
+
 	wm := worker.NewManager(log)
-	wm.Add("m3u_refresh", worker.NewM3URefreshWorker(m3uService, cfg.M3URefreshInterval, log))
+	wm.Add("m3u_refresh", m3uWorker)
 	wm.Add("epg_refresh", worker.NewEPGRefreshWorker(epgService, cfg.EPGRefreshInterval, log))
 	wm.Add("ssdp", worker.NewSSDPWorker(hdhrStore, cfg.BaseURL, cfg.Settings.Workers.RetryDelay, cfg.Settings.Workers.SSDPAnnounceInterval, log))
 	wm.Add("hdhr_discover", worker.NewHDHRDiscoverWorker(hdhrStore, cfg, cfg.BaseURL, cfg.Settings.Workers.RetryDelay, log))

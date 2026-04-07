@@ -7,17 +7,18 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
+	"github.com/gavinmcnair/tvproxy/pkg/tmdb"
 )
 
 type StreamHandler struct {
 	streamStore store.StreamReader
 	versioned   store.Versioned
 	logoService *service.LogoService
-	tmdb        *TMDBHandler
+	tmdb        *tmdb.Client
 }
 
-func NewStreamHandler(streamStore store.StreamReader, versioned store.Versioned, logoService *service.LogoService, tmdb *TMDBHandler) *StreamHandler {
-	return &StreamHandler{streamStore: streamStore, versioned: versioned, logoService: logoService, tmdb: tmdb}
+func NewStreamHandler(streamStore store.StreamReader, versioned store.Versioned, logoService *service.LogoService, tmdbClient *tmdb.Client) *StreamHandler {
+	return &StreamHandler{streamStore: streamStore, versioned: versioned, logoService: logoService, tmdb: tmdbClient}
 }
 
 func (h *StreamHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +137,7 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 
 		posterURL := ""
 		if h.tmdb != nil {
-			posterURL = h.tmdb.LookupPosterURL(lookupName, mediaType)
+			posterURL = h.tmdb.LookupPoster(lookupName, mediaType)
 			if posterURL == "" && !seen[lookupName+"_"+mediaType] {
 				seen[lookupName+"_"+mediaType] = true
 				uncached = append(uncached, struct{ Name, MediaType string }{lookupName, mediaType})
@@ -162,7 +163,11 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.tmdb != nil && len(uncached) > 0 {
-		h.tmdb.EnrichInBackground(uncached)
+		var items []tmdb.VODItem
+		for _, u := range uncached {
+			items = append(items, tmdb.VODItem{Name: u.Name, MediaType: u.MediaType})
+		}
+		h.tmdb.Sync(items)
 	}
 
 	if items == nil {
