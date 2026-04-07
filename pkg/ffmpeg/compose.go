@@ -179,10 +179,11 @@ func h264Flags(hwaccel string, s *defaults.FFmpegSettings) []string {
 	case "vaapi":
 		return append([]string{"-c:v", "h264_vaapi"}, hw.Flags()...)
 	case "videotoolbox":
-		return append([]string{"-c:v", "h264_videotoolbox"}, hw.Flags()...)
+		flags := append([]string{"-c:v", "h264_videotoolbox", "-realtime", "1"}, hw.Flags()...)
+		return flags
 	default:
 		sw := getEncoderHW(s, "h264", "none")
-		return append([]string{"-c:v", "libx264"}, sw.Flags()...)
+		return append([]string{"-c:v", "libx264", "-tune", "zerolatency"}, sw.Flags()...)
 	}
 }
 

@@ -3637,7 +3637,8 @@
         function poll() {
           if (playerCtx.signal.aborted) { reject(new Error('cancelled')); return; }
           fetch('/vod/' + dvr.id + '/status').then(function(r) { return r.json(); }).then(function(st) {
-            if (st.buffered > 12) { if (st.duration > 0 && !dvr.duration) dvr.duration = st.duration; resolve(); return; }
+            var bufThreshold = (dvr && dvr.duration > 0) ? 4 : 12;
+            if (st.buffered > bufThreshold) { if (st.duration > 0 && !dvr.duration) dvr.duration = st.duration; resolve(); return; }
             if (st.error) { reject(new Error(st.error)); return; }
             attempts++;
             if (attempts >= 60) { reject(new Error('stream timeout')); return; }

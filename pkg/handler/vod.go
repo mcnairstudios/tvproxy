@@ -558,6 +558,9 @@ func (h *VODHandler) DASHManifest(w http.ResponseWriter, r *http.Request) {
 	if duration > 0 && duration < 30 {
 		duration = 0
 	}
+	if duration == 0 && sess.Duration >= 30 {
+		duration = sess.Duration
+	}
 	isVOD := duration > 0
 
 	if duration == 0 {

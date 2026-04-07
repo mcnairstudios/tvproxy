@@ -55,9 +55,15 @@ func composeBuildArgs(opts BuildOptions) string {
 				"-max_delay", "500000")
 		}
 	} else if isHTTPURL(opts.StreamURL) {
-		parts = append(parts,
-			"-analyzeduration", strconv.Itoa(s.AnalyzeDuration),
-			"-probesize", strconv.Itoa(s.ProbeSize))
+		if opts.Probe != nil && opts.Probe.Video != nil {
+			parts = append(parts,
+				"-analyzeduration", "0",
+				"-probesize", "32")
+		} else {
+			parts = append(parts,
+				"-analyzeduration", strconv.Itoa(s.AnalyzeDuration),
+				"-probesize", strconv.Itoa(s.ProbeSize))
+		}
 	}
 
 	if opts.UserAgent != "" {
