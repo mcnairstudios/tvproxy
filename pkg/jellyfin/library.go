@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -242,6 +243,47 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 	stream, err := s.streams.GetByID(ctx, addDashes(itemID))
 	if err == nil && stream != nil {
 		item := s.streamToItem(stream)
+
+		lookupName := stream.Name
+		mediaType := stream.VODType
+		if stream.VODType == "series" && stream.VODSeries != "" {
+			lookupName = stream.VODSeries
+		}
+
+		if mediaType == "movie" {
+			if m := s.tmdbClient.LookupMovie(lookupName); m != nil {
+				item.Overview = m.Overview
+				item.CommunityRating = m.Rating
+				item.OfficialRating = m.Certification
+				item.Genres = m.Genres
+				if m.Year != "" {
+					if yr, err := strconv.Atoi(m.Year); err == nil {
+						item.ProductionYear = yr
+					}
+				}
+				if m.PosterPath != "" {
+					item.ImageTags = map[string]string{"Primary": "tmdb"}
+					item.BackdropImageTags = []string{"tmdb"}
+				}
+			}
+		} else if mediaType == "series" {
+			if sr := s.tmdbClient.LookupSeries(lookupName); sr != nil {
+				item.Overview = sr.Overview
+				item.CommunityRating = sr.Rating
+				item.OfficialRating = sr.Certification
+				item.Genres = sr.Genres
+				if sr.Year != "" {
+					if yr, err := strconv.Atoi(sr.Year); err == nil {
+						item.ProductionYear = yr
+					}
+				}
+				if sr.PosterPath != "" {
+					item.ImageTags = map[string]string{"Primary": "tmdb"}
+					item.BackdropImageTags = []string{"tmdb"}
+				}
+			}
+		}
+
 		s.respondJSON(w, http.StatusOK, item)
 		return
 	}
@@ -252,6 +294,17 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 		ID:       itemID,
 		Type:     "Video",
 	})
+}
+
+func (s *Server) getSimilar(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{
+		Items:            []BaseItemDto{},
+		TotalRecordCount: 0,
+	})
+}
+
+func (s *Server) getSpecialFeatures(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, []BaseItemDto{})
 }
 
 func (s *Server) getFilters(w http.ResponseWriter, r *http.Request) {
@@ -324,8 +377,6 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
 
-	streamURL := fmt.Sprintf("%s/channel/%s?profile=Browser", s.baseURL, addDashes(itemID))
-
 	s.respondJSON(w, http.StatusOK, map[string]any{
 		"MediaSources": []MediaSource{
 			{
@@ -333,12 +384,19 @@ func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request) {
 				ID:                   itemID,
 				Type:                 "Default",
 				Name:                 "Default",
+				Container:            "mp4",
 				IsRemote:             true,
-				SupportsTranscoding:  false,
+				SupportsTranscoding:  true,
 				SupportsDirectStream: true,
-				SupportsDirectPlay:   true,
+				SupportsDirectPlay:   false,
 				IsInfiniteStream:     false,
-				TranscodingURL:       streamURL,
+				TranscodingURL:       fmt.Sprintf("/Videos/%s/stream.mp4?static=true", itemID),
+				TranscodingSubProtocol: "http",
+				TranscodingContainer: "mp4",
+				MediaStreams: []MediaStream{
+					{Type: "Video", Codec: "h264", Index: 0, IsDefault: true},
+					{Type: "Audio", Codec: "aac", Index: 1, IsDefault: true, Channels: 2},
+				},
 			},
 		},
 		"PlaySessionId": itemID[:16],
@@ -347,8 +405,36 @@ func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) videoStream(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
-	streamURL := fmt.Sprintf("%s/channel/%s", s.baseURL, addDashes(itemID))
-	http.Redirect(w, r, streamURL, http.StatusTemporaryRedirect)
+	streamID := addDashes(itemID)
+
+	ctx := r.Context()
+	stream, err := s.streams.GetByID(ctx, streamID)
+	if err == nil && stream != nil && stream.URL != "" {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Transfer-Encoding", "chunked")
+
+		cmd := exec.CommandContext(ctx, "ffmpeg",
+			"-analyzeduration", "2000000",
+			"-probesize", "2000000",
+			"-i", stream.URL,
+			"-c:v", "copy",
+			"-c:a", "aac",
+			"-b:a", "192k",
+			"-ac", "2",
+			"-movflags", "frag_keyframe+empty_moov+default_base_moof",
+			"-f", "mp4",
+			"pipe:1",
+		)
+		cmd.Stdout = w
+		cmd.Stderr = nil
+
+		if err := cmd.Run(); err != nil {
+			s.log.Debug().Err(err).Str("stream", streamID).Msg("ffmpeg stream ended")
+		}
+		return
+	}
+
+	http.Error(w, "stream not found", http.StatusNotFound)
 }
 
 func (s *Server) liveTvInfo(w http.ResponseWriter, r *http.Request) {
@@ -413,22 +499,56 @@ func (s *Server) liveTvGuideInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) streamToItem(st *models.Stream) BaseItemDto {
+	itemID := strings.ReplaceAll(st.ID, "-", "")
 	item := BaseItemDto{
 		Name:         st.Name,
 		ServerID:     s.serverID,
-		ID:           strings.ReplaceAll(st.ID, "-", ""),
+		ID:           itemID,
 		Type:         "Video",
 		MediaType:    "Video",
 		IsFolder:     false,
 		LocationType: "FileSystem",
 		ImageTags:    map[string]string{},
 		UserData:     &UserItemData{Key: st.ID},
+		MediaSources: []MediaSource{
+			{
+				Protocol:             "Http",
+				ID:                   itemID,
+				Type:                 "Default",
+				Name:                 st.Name,
+				IsRemote:             true,
+				SupportsTranscoding:  true,
+				SupportsDirectStream: true,
+				SupportsDirectPlay:   false,
+				IsInfiniteStream:     false,
+				Container:            "mp4",
+				MediaStreams: []MediaStream{
+					{
+						Type:    "Video",
+						Codec:   "h264",
+						Index:   0,
+						IsDefault: true,
+					},
+					{
+						Type:      "Audio",
+						Codec:     "aac",
+						Index:     1,
+						IsDefault: true,
+						Channels:  2,
+					},
+				},
+				TranscodingURL:         fmt.Sprintf("/Videos/%s/stream.mp4?static=true", itemID),
+				TranscodingSubProtocol: "http",
+				TranscodingContainer:   "mp4",
+			},
+		},
 	}
 	if st.VODType == "movie" {
 		item.Type = "Movie"
 	}
 	if st.VODDuration > 0 {
 		item.RunTimeTicks = int64(st.VODDuration * 10000000)
+		item.MediaSources[0].RunTimeTicks = item.RunTimeTicks
 	}
 	return item
 }

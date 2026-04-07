@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -98,6 +99,10 @@ func (s *Server) Router() chi.Router {
 	r.Get("/Items/{itemId}/Images/{imageType}/{imageIndex}", s.getImage)
 	r.Head("/Items/{itemId}/Images/{imageType}", s.getImage)
 	r.Head("/Items/{itemId}/Images/{imageType}/{imageIndex}", s.getImage)
+	r.Get("/Videos/{itemId}/stream", s.videoStream)
+	r.Get("/Videos/{itemId}/stream.{container}", s.videoStream)
+	r.Head("/Videos/{itemId}/stream", s.videoStream)
+	r.Head("/Videos/{itemId}/stream.{container}", s.videoStream)
 
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
@@ -122,17 +127,19 @@ func (s *Server) Router() chi.Router {
 		r.Get("/Shows/{seriesId}/Seasons", s.getSeasons)
 		r.Get("/Shows/{seriesId}/Episodes", s.getEpisodes)
 
-		r.Post("/Items/{itemId}/PlaybackInfo", s.playbackInfo)
-		r.Get("/Videos/{itemId}/stream", s.videoStream)
-		r.Get("/Videos/{itemId}/stream.{container}", s.videoStream)
-		r.Head("/Videos/{itemId}/stream", s.videoStream)
-		r.Head("/Videos/{itemId}/stream.{container}", s.videoStream)
+		r.Get("/Items/{itemId}/Similar", s.getSimilar)
+		r.Get("/Items/{itemId}/LocalTrailers", s.getSpecialFeatures)
+		r.Get("/Items/{itemId}/SpecialFeatures", s.getSpecialFeatures)
+		r.Get("/Items/{itemId}/ThemeMedia", s.getSpecialFeatures)
 
+		r.Post("/Items/{itemId}/PlaybackInfo", s.playbackInfo)
 		r.Get("/LiveTv/Info", s.liveTvInfo)
 		r.Get("/LiveTv/Channels", s.liveTvChannels)
 		r.Get("/LiveTv/Programs", s.liveTvPrograms)
 		r.Post("/LiveTv/Programs", s.liveTvPrograms)
 		r.Get("/LiveTv/GuideInfo", s.liveTvGuideInfo)
+
+		r.Get("/Playback/BitrateTest", s.bitrateTest)
 
 		r.Post("/Sessions/Capabilities/Full", s.sessionsCapabilities)
 		r.Post("/Sessions/Playing", s.sessionsPlaying)
@@ -495,6 +502,27 @@ func (s *Server) sessionsCapabilities(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) sessionsPlaying(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) bitrateTest(w http.ResponseWriter, r *http.Request) {
+	size := 1000000
+	if s := r.URL.Query().Get("size"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 10000000 {
+			size = n
+		}
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(size))
+	buf := make([]byte, 65536)
+	written := 0
+	for written < size {
+		chunk := size - written
+		if chunk > len(buf) {
+			chunk = len(buf)
+		}
+		w.Write(buf[:chunk])
+		written += chunk
+	}
 }
 
 func (s *Server) displayPreferences(w http.ResponseWriter, r *http.Request) {
