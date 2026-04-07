@@ -19,20 +19,26 @@ type TrackInfo struct {
 }
 
 type FragmentEntry struct {
-	Number     int
-	FileOffset int64
-	Size       int64
-	DecodeTime uint64
-	Duration   uint64
+	Number          int
+	FileOffset      int64
+	Size            int64
+	DecodeTime      uint64
+	Duration        uint64
+	AudioDecodeTime uint64
+	AudioDuration   uint64
 }
 
 type MP4Index struct {
 	initSize       int64
 	initData       []byte
+	parsedInit     *mp4.InitSegment
+	videoInitData  []byte
+	audioInitData  []byte
 	tracks         map[uint32]*TrackInfo
 	videoTrackID   uint32
 	audioTrackID   uint32
 	videoTimescale uint32
+	audioTimescale uint32
 	fragments      []FragmentEntry
 	fileOffset     int64
 	filePath       string
@@ -89,6 +95,7 @@ func (idx *MP4Index) parseInit() error {
 
 	idx.mu.Lock()
 	idx.initData = initBuf.Bytes()
+	idx.parsedInit = parsed.Init
 	idx.initSize = int64(len(idx.initData))
 	idx.fileOffset = idx.initSize
 
@@ -116,7 +123,23 @@ func (idx *MP4Index) parseInit() error {
 			}
 			if ti.HandlerType == "soun" && idx.audioTrackID == 0 {
 				idx.audioTrackID = ti.TrackID
+				idx.audioTimescale = ti.Timescale
 			}
+		}
+	}
+
+	if idx.videoTrackID > 0 {
+		if vInit, err := filterInitForTrack(idx.initData, idx.videoTrackID); err == nil {
+			idx.videoInitData = vInit
+		} else {
+			idx.log.Warn().Err(err).Msg("failed to create video-only init")
+		}
+	}
+	if idx.audioTrackID > 0 {
+		if aInit, err := filterInitForTrack(idx.initData, idx.audioTrackID); err == nil {
+			idx.audioInitData = aInit
+		} else {
+			idx.log.Warn().Err(err).Msg("failed to create audio-only init")
 		}
 	}
 
@@ -134,6 +157,8 @@ func (idx *MP4Index) parseInit() error {
 		Int("fragments", len(idx.fragments)).
 		Uint32("video_track", idx.videoTrackID).
 		Uint32("audio_track", idx.audioTrackID).
+		Uint32("video_timescale", idx.videoTimescale).
+		Uint32("audio_timescale", idx.audioTimescale).
 		Msg("mp4 index initialized")
 
 	return nil
@@ -150,60 +175,52 @@ func (idx *MP4Index) indexFragment(frag *mp4.Fragment) {
 		fragSize += int64(child.Size())
 	}
 
-	var decodeTime, duration uint64
-	for _, traf := range frag.Moof.Trafs {
-		if traf.Tfhd == nil || traf.Tfdt == nil {
-			continue
-		}
-		if traf.Tfhd.TrackID == idx.videoTrackID {
-			decodeTime = traf.Tfdt.BaseMediaDecodeTime()
-			for _, trun := range traf.Truns {
-				for _, sample := range trun.Samples {
-					if sample.Dur > 0 {
-						duration += uint64(sample.Dur)
-					} else if traf.Tfhd.HasDefaultSampleDuration() {
-						duration += uint64(traf.Tfhd.DefaultSampleDuration)
-					}
-				}
-			}
-			break
-		}
-	}
-
-	if duration == 0 {
-		for _, traf := range frag.Moof.Trafs {
-			if traf.Tfhd == nil || traf.Tfdt == nil {
-				continue
-			}
-			decodeTime = traf.Tfdt.BaseMediaDecodeTime()
-			for _, trun := range traf.Truns {
-				for _, sample := range trun.Samples {
-					if sample.Dur > 0 {
-						duration += uint64(sample.Dur)
-					} else if traf.Tfhd.HasDefaultSampleDuration() {
-						duration += uint64(traf.Tfhd.DefaultSampleDuration)
-					}
-				}
-			}
-			if duration > 0 {
-				break
-			}
-		}
-	}
-
 	entry := FragmentEntry{
 		Number:     len(idx.fragments),
 		FileOffset: fragOffset,
 		Size:       fragSize,
-		DecodeTime: decodeTime,
-		Duration:   duration,
 	}
+
+	for _, traf := range frag.Moof.Trafs {
+		if traf.Tfhd == nil || traf.Tfdt == nil {
+			continue
+		}
+		dur := trafDuration(traf)
+		if traf.Tfhd.TrackID == idx.videoTrackID {
+			entry.DecodeTime = traf.Tfdt.BaseMediaDecodeTime()
+			entry.Duration = dur
+		}
+		if traf.Tfhd.TrackID == idx.audioTrackID {
+			entry.AudioDecodeTime = traf.Tfdt.BaseMediaDecodeTime()
+			entry.AudioDuration = dur
+		}
+	}
+
+	if entry.Duration == 0 && entry.AudioDuration > 0 {
+		entry.DecodeTime = entry.AudioDecodeTime
+		entry.Duration = entry.AudioDuration
+	}
+
 	idx.fragments = append(idx.fragments, entry)
 
 	endOffset := fragOffset + fragSize
 	if endOffset > idx.fileOffset {
 		idx.fileOffset = endOffset
 	}
+}
+
+func trafDuration(traf *mp4.TrafBox) uint64 {
+	var dur uint64
+	for _, trun := range traf.Truns {
+		for _, sample := range trun.Samples {
+			if sample.Dur > 0 {
+				dur += uint64(sample.Dur)
+			} else if traf.Tfhd.HasDefaultSampleDuration() {
+				dur += uint64(traf.Tfhd.DefaultSampleDuration)
+			}
+		}
+	}
+	return dur
 }
 
 func (idx *MP4Index) pollLoop() {
@@ -294,53 +311,37 @@ func (idx *MP4Index) scanNewFragments() {
 
 			fragSize := moofSize + int64(mdatHdr.Size)
 
-			var decodeTime, duration uint64
 			idx.mu.RLock()
 			vidTrack := idx.videoTrackID
+			audTrack := idx.audioTrackID
 			idx.mu.RUnlock()
+
+			entry := FragmentEntry{
+				FileOffset: moofStart,
+				Size:       fragSize,
+			}
 
 			for _, traf := range moofBox.Trafs {
 				if traf.Tfhd == nil || traf.Tfdt == nil {
 					continue
 				}
-				if vidTrack > 0 && traf.Tfhd.TrackID != vidTrack {
-					continue
+				dur := trafDuration(traf)
+				if vidTrack > 0 && traf.Tfhd.TrackID == vidTrack {
+					entry.DecodeTime = traf.Tfdt.BaseMediaDecodeTime()
+					entry.Duration = dur
 				}
-				decodeTime = traf.Tfdt.BaseMediaDecodeTime()
-				for _, trun := range traf.Truns {
-					for _, sample := range trun.Samples {
-						if sample.Dur > 0 {
-							duration += uint64(sample.Dur)
-						} else if traf.Tfhd.HasDefaultSampleDuration() {
-							duration += uint64(traf.Tfhd.DefaultSampleDuration)
-						}
-					}
-				}
-				break
-			}
-
-			if duration == 0 && len(moofBox.Trafs) > 0 {
-				traf := moofBox.Trafs[0]
-				if traf.Tfhd != nil && traf.Tfdt != nil {
-					decodeTime = traf.Tfdt.BaseMediaDecodeTime()
-					for _, trun := range traf.Truns {
-						for _, sample := range trun.Samples {
-							if sample.Dur > 0 {
-								duration += uint64(sample.Dur)
-							} else if traf.Tfhd.HasDefaultSampleDuration() {
-								duration += uint64(traf.Tfhd.DefaultSampleDuration)
-							}
-						}
-					}
+				if audTrack > 0 && traf.Tfhd.TrackID == audTrack {
+					entry.AudioDecodeTime = traf.Tfdt.BaseMediaDecodeTime()
+					entry.AudioDuration = dur
 				}
 			}
 
-			newFragments = append(newFragments, FragmentEntry{
-				FileOffset: moofStart,
-				Size:       fragSize,
-				DecodeTime: decodeTime,
-				Duration:   duration,
-			})
+			if entry.Duration == 0 && entry.AudioDuration > 0 {
+				entry.DecodeTime = entry.AudioDecodeTime
+				entry.Duration = entry.AudioDuration
+			}
+
+			newFragments = append(newFragments, entry)
 
 			pos = moofStart + fragSize
 			if _, err := f.Seek(pos, io.SeekStart); err != nil {
@@ -424,6 +425,30 @@ func (idx *MP4Index) AudioTrackID() uint32 {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.audioTrackID
+}
+
+func (idx *MP4Index) AudioTimescale() uint32 {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.audioTimescale
+}
+
+func (idx *MP4Index) VideoInitData() []byte {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.videoInitData
+}
+
+func (idx *MP4Index) AudioInitData() []byte {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.audioInitData
+}
+
+func (idx *MP4Index) ParsedInit() *mp4.InitSegment {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.parsedInit
 }
 
 func (idx *MP4Index) MarkDone() {

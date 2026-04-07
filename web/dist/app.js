@@ -3650,8 +3650,8 @@
               fallbackToSegmentTimeline: true
             },
             delay: {
-              liveDelay: isVOD ? 0 : 4,
-              useSuggestedPresentationDelay: !isVOD
+              liveDelay: 4,
+              useSuggestedPresentationDelay: false
             },
             liveCatchup: {
               enabled: !isVOD

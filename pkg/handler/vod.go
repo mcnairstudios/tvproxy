@@ -680,31 +680,45 @@ func (h *VODHandler) dashSegmentMP4(w http.ResponseWriter, r *http.Request, chan
 	w.Header().Set("Cache-Control", "no-cache, no-store")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	if segment == "init.mp4" {
-		data, err := segmenter.ServeInit()
-		if err != nil {
-			respondError(w, http.StatusInternalServerError, "init segment error")
+	var data []byte
+	var err error
+	var contentType string
+
+	switch {
+	case segment == "init_v.mp4":
+		contentType = "video/mp4"
+		data, err = segmenter.ServeVideoInit()
+	case segment == "init_a.mp4":
+		contentType = "audio/mp4"
+		data, err = segmenter.ServeAudioInit()
+	case strings.HasPrefix(segment, "seg_v_"):
+		contentType = "video/mp4"
+		var segNum int
+		if _, scanErr := fmt.Sscanf(segment, "seg_v_%d.m4s", &segNum); scanErr != nil {
+			respondError(w, http.StatusBadRequest, "invalid segment name")
 			return
 		}
-		w.Header().Set("Content-Type", "video/mp4")
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
-		w.Write(data)
-		return
-	}
-
-	var segNum int
-	if _, err := fmt.Sscanf(segment, "seg_%d.m4s", &segNum); err != nil {
+		data, err = segmenter.ServeVideoSegment(segNum)
+	case strings.HasPrefix(segment, "seg_a_"):
+		contentType = "audio/mp4"
+		var segNum int
+		if _, scanErr := fmt.Sscanf(segment, "seg_a_%d.m4s", &segNum); scanErr != nil {
+			respondError(w, http.StatusBadRequest, "invalid segment name")
+			return
+		}
+		data, err = segmenter.ServeAudioSegment(segNum)
+	default:
 		respondError(w, http.StatusBadRequest, "invalid segment name")
 		return
 	}
 
-	data, err := segmenter.ServeSegment(segNum)
 	if err != nil {
+		h.log.Debug().Err(err).Str("segment", segment).Msg("segment serve error")
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.Write(data)
 }
