@@ -458,6 +458,24 @@
 
   function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
+  function setupGridKeyJump(grid) {
+    function onKey(e) {
+      if (!document.body.contains(grid)) { document.removeEventListener('keydown', onKey); return; }
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+      if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+      var letter = e.key.toUpperCase();
+      var cards = grid.querySelectorAll('[data-sort-name]');
+      for (var i = 0; i < cards.length; i++) {
+        var name = (cards[i].dataset.sortName || '').toUpperCase();
+        if (name >= letter) {
+          cards[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
+          break;
+        }
+      }
+    }
+    document.addEventListener('keydown', onKey);
+  }
+
   function h(tag, attrs, ...children) {
     const el = document.createElement(tag);
     if (attrs) {
@@ -756,6 +774,10 @@
     body.appendChild(tmdbMeta);
 
     var seasonNums = Object.keys(show.seasons).map(Number).sort(function(a, b) { return a - b; });
+    if (seasonNums.length === 0 && show.episodes.length > 0) {
+      show.seasons[0] = show.episodes;
+      seasonNums = [0];
+    }
 
     var tabBar = document.createElement('div');
     tabBar.style.cssText = 'display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;';
@@ -771,28 +793,39 @@
       eps.sort(function(a, b) { return a.episode - b.episode; });
       eps.forEach(function(ep) {
         var row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;gap:16px;padding:12px 16px;border-radius:8px;cursor:pointer;transition:background 0.15s;';
+        row.style.cssText = 'display:flex;align-items:flex-start;gap:16px;padding:12px 16px;border-radius:8px;cursor:pointer;transition:background 0.15s;';
         row.onmouseenter = function() { row.style.background = 'rgba(255,255,255,0.05)'; };
         row.onmouseleave = function() { row.style.background = ''; };
 
+        if (ep.episode_still) {
+          row.appendChild(h('img', { src: ep.episode_still, style: 'width:120px;height:68px;object-fit:cover;border-radius:6px;flex-shrink:0;' }));
+        }
+
         var epNum = document.createElement('span');
-        epNum.style.cssText = 'font-size:24px;font-weight:700;color:var(--text-muted);min-width:40px;text-align:center;';
+        epNum.style.cssText = 'font-size:24px;font-weight:700;color:var(--text-muted);min-width:40px;text-align:center;flex-shrink:0;padding-top:2px;';
         epNum.textContent = ep.episode || '?';
         row.appendChild(epNum);
 
         var epInfo = document.createElement('div');
         epInfo.style.cssText = 'flex:1;min-width:0;';
-        epInfo.appendChild(Object.assign(document.createElement('div'), { style: 'font-size:14px;font-weight:600;color:var(--text-primary);', textContent: ep.name || ('Episode ' + ep.episode) }));
+
+        epInfo.appendChild(Object.assign(document.createElement('div'), { style: 'font-size:14px;font-weight:600;color:var(--text-primary);', textContent: ep.episode_name || ('Episode ' + ep.episode) }));
+
         var meta = [];
         if (ep.resolution) meta.push(ep.resolution);
         if (ep.vcodec) meta.push(ep.vcodec);
         if (ep.audio) meta.push(ep.audio);
         if (ep.duration > 0) { var m = Math.floor(ep.duration / 60); meta.push(m + 'm'); }
         if (meta.length) epInfo.appendChild(Object.assign(document.createElement('div'), { style: 'font-size:12px;color:var(--text-muted);margin-top:2px;', textContent: meta.join(' \u2022 ') }));
+
+        if (ep.episode_overview) {
+          epInfo.appendChild(Object.assign(document.createElement('div'), { style: 'font-size:12px;color:#9ca3af;margin-top:6px;line-height:1.5;', textContent: ep.episode_overview }));
+        }
+
         row.appendChild(epInfo);
 
         var playBtn = document.createElement('button');
-        playBtn.style.cssText = 'background:#3b82f6;border:none;color:#fff;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;flex-shrink:0;';
+        playBtn.style.cssText = 'background:#3b82f6;border:none;color:#fff;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;flex-shrink:0;margin-top:2px;';
         playBtn.textContent = '\u25B6';
         playBtn.onclick = function(e) {
           e.stopPropagation();
@@ -813,7 +846,7 @@
     seasonNums.forEach(function(num) {
       var btn = document.createElement('button');
       btn.style.cssText = 'background:rgba(255,255,255,0.1);border:none;color:#fff;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;';
-      btn.textContent = 'Season ' + num;
+      btn.textContent = num === 0 ? 'All Episodes' : 'Season ' + num;
       btn.dataset.season = num;
       btn.onclick = function() { renderSeason(num); };
       tabBar.appendChild(btn);
@@ -827,9 +860,9 @@
 
     if (seasonNums.length > 0) renderSeason(seasonNums[0]);
 
-    api.get('/api/tmdb/search?query=' + encodeURIComponent(show.name)).then(function(data) {
-      if (!data || !data.results) return;
-      var match = data.results.find(function(r) { return r.media_type === 'tv'; });
+    api.get('/api/tmdb/search?query=' + encodeURIComponent(show.name) + '&type=tv').then(function(data) {
+      if (!data || !data.results || !data.results.length) return;
+      var match = data.results[0];
       if (!match) return;
       if (match.backdrop_path) {
         backdrop.style.backgroundImage = 'url(/api/tmdb/image?size=w1280&path=' + encodeURIComponent(match.backdrop_path) + ')';
@@ -1003,6 +1036,21 @@
 
     var tmdbMeta = document.createElement('div');
     tmdbMeta.style.cssText = 'display:flex;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap;min-height:24px;';
+
+    var localPills = [];
+    if (opts.rating > 0) {
+      var sc = opts.rating >= 7 ? '#22c55e' : opts.rating >= 5 ? '#eab308' : '#ef4444';
+      localPills.push('<span style="background:' + sc + '20;color:' + sc + ';padding:3px 10px;border-radius:6px;font-weight:700;font-size:13px">\u2605 ' + opts.rating.toFixed(1) + '</span>');
+    }
+    if (opts.year) localPills.push('<span style="color:#9ca3af;font-size:13px">' + esc(opts.year) + '</span>');
+    if (opts.certification) localPills.push('<span style="background:rgba(255,255,255,0.1);color:#fff;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:600;border:1px solid rgba(255,255,255,0.2)">' + esc(opts.certification) + '</span>');
+    if (opts.genres && opts.genres.length) {
+      opts.genres.slice(0, 3).forEach(function(g) {
+        localPills.push('<span style="background:rgba(59,130,246,0.15);color:#60a5fa;padding:3px 10px;border-radius:6px;font-size:12px">' + esc(g) + '</span>');
+      });
+    }
+    if (localPills.length) tmdbMeta.innerHTML = localPills.join('');
+
     body.appendChild(tmdbMeta);
 
     var descArea = document.createElement('div');
@@ -5089,8 +5137,30 @@
           return;
         }
 
-        items.sort(function(a, b) { return a.name.localeCompare(b.name); });
+        var collections = {};
+        var standalone = [];
+        items.forEach(function(item) {
+          if (item.collection) {
+            if (!collections[item.collection]) collections[item.collection] = { name: item.collection, movies: [] };
+            collections[item.collection].movies.push(item);
+          } else {
+            standalone.push(item);
+          }
+        });
 
+        var displayItems = [];
+        standalone.forEach(function(item) { displayItems.push({ type: 'movie', item: item }); });
+        Object.values(collections).forEach(function(col) {
+          col.movies.sort(function(a, b) { return (a.year || '9999').localeCompare(b.year || '9999') || a.name.localeCompare(b.name); });
+          displayItems.push({ type: 'collection', collection: col });
+        });
+        displayItems.sort(function(a, b) {
+          var nameA = a.type === 'movie' ? a.item.name : a.collection.name;
+          var nameB = b.type === 'movie' ? b.item.name : b.collection.name;
+          return nameA.localeCompare(nameB);
+        });
+
+        var titleCount = standalone.length + Object.keys(collections).length;
         var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;position:sticky;top:0;z-index:10;background:var(--bg-main);padding:12px 0;' });
         header.appendChild(h('h2', { style: 'margin:0' }, 'Movies'));
         var headerRight = h('div', { style: 'display:flex;align-items:center;gap:16px' });
@@ -5114,10 +5184,141 @@
           }).catch(function() {});
         }, 2000);
 
+        var kidsCerts = { 'U': 1, 'PG': 1, 'G': 1, 'PG-13': 1, '12': 1, '12A': 1, 'TV-Y': 1, 'TV-Y7': 1, 'TV-G': 1, 'TV-PG': 1 };
+        var decades = {};
+        displayItems.forEach(function(di) {
+          var yr = di.type === 'movie' ? di.item.year : null;
+          if (yr && yr.length === 4) {
+            var dec = yr.substring(0, 3) + '0s';
+            decades[dec] = true;
+          }
+          if (di.type === 'collection') {
+            di.collection.movies.forEach(function(m) {
+              if (m.year && m.year.length === 4) decades[m.year.substring(0, 3) + '0s'] = true;
+            });
+          }
+        });
+        var decadeList = Object.keys(decades).sort();
+
+        var activeFilters = {};
+        var filterBar = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;position:sticky;top:52px;z-index:9;background:var(--bg-main);padding:8px 0;' });
+
+        var pillBase = 'padding:5px 14px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:500;transition:all 0.15s;';
+        var pillGroups = {
+          age:        { off: pillBase + 'border:1px solid rgba(168,85,247,0.3);background:rgba(168,85,247,0.08);color:#a855f7;', on: pillBase + 'border:1px solid #a855f7;background:#a855f7;color:#fff;' },
+          collection: { off: pillBase + 'border:1px solid rgba(234,179,8,0.3);background:rgba(234,179,8,0.08);color:#eab308;', on: pillBase + 'border:1px solid #eab308;background:#eab308;color:#000;' },
+          decade:     { off: pillBase + 'border:1px solid rgba(34,197,94,0.3);background:rgba(34,197,94,0.08);color:#22c55e;', on: pillBase + 'border:1px solid #22c55e;background:#22c55e;color:#fff;' },
+          genre:      { off: pillBase + 'border:1px solid rgba(59,130,246,0.3);background:rgba(59,130,246,0.08);color:#3b82f6;', on: pillBase + 'border:1px solid #3b82f6;background:#3b82f6;color:#fff;' },
+        };
+
+        function makePill(label, key, parent, group) {
+          var styles = pillGroups[group] || pillGroups.genre;
+          var btn = h('button', { style: styles.off }, label);
+          btn.onclick = function() {
+            if (activeFilters[key]) { delete activeFilters[key]; btn.style.cssText = styles.off; }
+            else { activeFilters[key] = true; btn.style.cssText = styles.on; }
+            renderGrid();
+          };
+          (parent || filterBar).appendChild(btn);
+          return btn;
+        }
+
+        makePill('Kids', 'kids', null, 'age');
+        makePill('15+', 'adult', null, 'age');
+        makePill('Collections', 'collections', null, 'collection');
+        filterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
+        decadeList.forEach(function(dec) { makePill(dec, 'decade_' + dec, null, 'decade'); });
+
+        container.appendChild(filterBar);
+
+        var genreCounts = {};
+        items.forEach(function(item) {
+          (item.genres || []).forEach(function(g) { genreCounts[g] = (genreCounts[g] || 0) + 1; });
+        });
+        var genreNames = Object.keys(genreCounts).sort(function(a, b) { return genreCounts[b] - genreCounts[a]; });
+
+        if (genreNames.length > 0) {
+          var genreBar = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;position:sticky;top:92px;z-index:8;background:var(--bg-main);padding:8px 0;' });
+          genreNames.forEach(function(g) { makePill(g, 'genre_' + g, genreBar, 'genre'); });
+          container.appendChild(genreBar);
+        }
+
+        var countSpan = headerRight.querySelector('span:last-child');
+
         var grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:20px;' });
 
-        items.forEach(function(item) {
+        function matchesFilters(di) {
+          var hasAge = activeFilters.kids || activeFilters.adult;
+          var hasDecade = Object.keys(activeFilters).some(function(k) { return k.startsWith('decade_'); });
+          var hasColl = activeFilters.collections;
+
+          if (hasColl && di.type !== 'collection') return false;
+
+          var itemYear = di.type === 'movie' ? di.item.year : null;
+          var itemCert = di.type === 'movie' ? di.item.certification : null;
+          var collMovies = di.type === 'collection' ? di.collection.movies : null;
+
+          if (hasAge) {
+            if (di.type === 'movie' && itemCert) {
+              var isKid = kidsCerts[itemCert];
+              if (activeFilters.kids && !activeFilters.adult && !isKid) return false;
+              if (activeFilters.adult && !activeFilters.kids && isKid) return false;
+            }
+            if (di.type === 'collection' && collMovies) {
+              var rated = collMovies.filter(function(m) { return m.certification; });
+              if (rated.length > 0) {
+                var anyMatch = rated.some(function(m) {
+                  var isK = kidsCerts[m.certification];
+                  if (activeFilters.kids && activeFilters.adult) return true;
+                  return activeFilters.kids ? isK : !isK;
+                });
+                if (!anyMatch) return false;
+              }
+            }
+          }
+
+          if (hasDecade) {
+            var activeDecades = {};
+            Object.keys(activeFilters).forEach(function(k) { if (k.startsWith('decade_')) activeDecades[k.replace('decade_', '')] = true; });
+            if (di.type === 'movie') {
+              if (!itemYear || !activeDecades[itemYear.substring(0, 3) + '0s']) return false;
+            }
+            if (di.type === 'collection' && collMovies) {
+              var anyDecade = collMovies.some(function(m) { return m.year && activeDecades[m.year.substring(0, 3) + '0s']; });
+              if (!anyDecade) return false;
+            }
+          }
+
+          var activeGenres = [];
+          Object.keys(activeFilters).forEach(function(k) { if (k.startsWith('genre_')) activeGenres.push(k.replace('genre_', '')); });
+          if (activeGenres.length > 0) {
+            var itemGenres = di.type === 'movie' ? (di.item.genres || []) : [];
+            if (di.type === 'collection' && collMovies) {
+              itemGenres = [];
+              collMovies.forEach(function(m) { (m.genres || []).forEach(function(g) { if (itemGenres.indexOf(g) === -1) itemGenres.push(g); }); });
+            }
+            var allMatch = activeGenres.every(function(g) { return itemGenres.indexOf(g) >= 0; });
+            if (!allMatch) return false;
+          }
+
+          return true;
+        }
+
+        function renderGrid() {
+          grid.innerHTML = '';
+          var filtered = displayItems.filter(matchesFilters);
+          var count = 0;
+          filtered.forEach(function(di) {
+            if (di.type === 'movie') { renderMovieCard(di.item, grid); count++; }
+            else { renderCollectionCard(di.collection, grid); count++; }
+          });
+          countSpan.textContent = count + ' / ' + displayItems.length + ' titles';
+          setupGridKeyJump(grid);
+        }
+
+        function renderMovieCard(item, parent) {
           var card = h('div', { style: 'cursor:pointer;border-radius:12px;overflow:hidden;background:var(--bg-card);border:1px solid var(--border);transition:transform 0.2s,box-shadow 0.2s;' });
+          card.dataset.sortName = item.name;
           card.onmouseenter = function() { card.style.transform = 'scale(1.03)'; card.style.boxShadow = '0 8px 30px rgba(0,0,0,0.3)'; };
           card.onmouseleave = function() { card.style.transform = ''; card.style.boxShadow = ''; };
 
@@ -5130,12 +5331,13 @@
           card.appendChild(posterWrap);
 
           var info = h('div', { style: 'padding:10px 12px;' });
-          var titleRow = h('div', { style: 'font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, item.name);
-          info.appendChild(titleRow);
+          info.appendChild(h('div', { style: 'font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, item.name));
 
           var badges = [];
+          if (item.year) badges.push(item.year);
+          if (item.certification) badges.push(item.certification);
+          if (item.rating > 0) badges.push('\u2605 ' + item.rating.toFixed(1));
           if (item.resolution) badges.push(item.resolution);
-          if (item.vcodec) badges.push(item.vcodec);
           if (item.audio) badges.push(item.audio);
           if (item.duration > 0) {
             var hrs = Math.floor(item.duration / 3600);
@@ -5144,34 +5346,143 @@
           }
           if (badges.length) {
             var badgeRow = h('div', { style: 'display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;' });
-            badges.forEach(function(b) {
-              badgeRow.appendChild(h('span', { style: 'font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.08);color:var(--text-muted);' }, b));
-            });
+            badges.forEach(function(b) { badgeRow.appendChild(h('span', { style: 'font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.08);color:var(--text-muted);' }, b)); });
             info.appendChild(badgeRow);
           }
-
+          if (item.genres && item.genres.length) {
+            var genreRow = h('div', { style: 'display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;' });
+            item.genres.slice(0, 2).forEach(function(g) { genreRow.appendChild(h('span', { style: 'font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(59,130,246,0.15);color:#60a5fa;' }, g)); });
+            info.appendChild(genreRow);
+          }
           card.appendChild(info);
 
           card.onclick = function() {
             showProgrammeModal({
-              title: item.name,
-              mediaType: 'movie',
+              title: item.name, mediaType: 'movie',
               time: badges.filter(function(b) { return b.includes('h') || b.includes('m'); }).join(''),
-              description: '',
-              channelName: '',
-              channelID: null,
-              tvgId: null,
-              isLive: false,
-              isFuture: false,
-              vodStreamURL: item.url,
-              vodStreamID: item.id,
+              description: item.overview || '',
+              year: item.year, certification: item.certification,
+              rating: item.rating, genres: item.genres,
+              channelName: '', channelID: null, tvgId: null,
+              isLive: false, isFuture: false, vodStreamURL: item.url, vodStreamID: item.id,
             });
           };
+          parent.appendChild(card);
+        }
 
-          grid.appendChild(card);
-        });
+        function showCollectionModal(col) {
+          var overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);';
+          overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+          document.addEventListener('keydown', function onKey(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); } });
+
+          var modal = document.createElement('div');
+          modal.style.cssText = 'width:90%;max-width:1080px;max-height:92vh;background:#1a1d23;border-radius:16px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.6);';
+
+          var backdrop = document.createElement('div');
+          backdrop.style.cssText = 'width:100%;height:280px;background:linear-gradient(135deg,#1a1a2e,#0f3460);position:relative;overflow:hidden;flex-shrink:0;';
+          backdrop.appendChild(Object.assign(document.createElement('div'), { style: 'position:absolute;bottom:0;left:0;right:0;height:150px;background:linear-gradient(transparent,#1a1d23);' }));
+
+          var closeBtn = document.createElement('button');
+          closeBtn.textContent = '\u2715';
+          closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.6);border:none;color:#fff;font-size:18px;width:40px;height:40px;border-radius:50%;cursor:pointer;z-index:3;';
+          closeBtn.onclick = function() { overlay.remove(); };
+          backdrop.appendChild(closeBtn);
+
+          var titleBlock = document.createElement('div');
+          titleBlock.style.cssText = 'position:absolute;bottom:24px;left:32px;z-index:1;';
+          titleBlock.innerHTML = '<div style="font-size:32px;font-weight:800;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,0.7)">' + esc(col.name) + '</div>';
+          titleBlock.innerHTML += '<div style="color:rgba(255,255,255,0.7);font-size:14px;margin-top:4px">' + col.movies.length + ' film' + (col.movies.length > 1 ? 's' : '') + '</div>';
+          backdrop.appendChild(titleBlock);
+          modal.appendChild(backdrop);
+
+          var body = document.createElement('div');
+          body.style.cssText = 'padding:24px 32px;overflow-y:auto;flex:1;';
+
+          col.movies.forEach(function(movie) {
+            var row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:flex-start;gap:16px;padding:12px 16px;border-radius:8px;cursor:pointer;transition:background 0.15s;';
+            row.onmouseenter = function() { row.style.background = 'rgba(255,255,255,0.05)'; };
+            row.onmouseleave = function() { row.style.background = ''; };
+
+            if (movie.poster_url) {
+              row.appendChild(h('img', { src: movie.poster_url, style: 'width:60px;height:90px;object-fit:cover;border-radius:6px;flex-shrink:0;' }));
+            }
+
+            var info = document.createElement('div');
+            info.style.cssText = 'flex:1;min-width:0;';
+            info.appendChild(Object.assign(document.createElement('div'), { style: 'font-size:14px;font-weight:600;color:var(--text-primary);', textContent: movie.name }));
+
+            var meta = [];
+            if (movie.year) meta.push(movie.year);
+            if (movie.certification) meta.push(movie.certification);
+            if (movie.rating > 0) meta.push('\u2605 ' + movie.rating.toFixed(1));
+            if (movie.resolution) meta.push(movie.resolution);
+            if (movie.audio) meta.push(movie.audio);
+            if (movie.duration > 0) { var m = Math.floor(movie.duration / 60); meta.push(Math.floor(m/60) + 'h ' + (m%60) + 'm'); }
+            if (meta.length) info.appendChild(Object.assign(document.createElement('div'), { style: 'font-size:12px;color:var(--text-muted);margin-top:2px;', textContent: meta.join(' \u2022 ') }));
+
+            if (movie.genres && movie.genres.length) {
+              var gRow = document.createElement('div');
+              gRow.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;';
+              movie.genres.slice(0, 3).forEach(function(g) { gRow.appendChild(h('span', { style: 'font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(59,130,246,0.15);color:#60a5fa;' }, g)); });
+              info.appendChild(gRow);
+            }
+
+            if (movie.overview) {
+              info.appendChild(Object.assign(document.createElement('div'), { style: 'font-size:11px;color:#9ca3af;margin-top:4px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;', textContent: movie.overview }));
+            }
+
+            row.appendChild(info);
+
+            var playBtn = document.createElement('button');
+            playBtn.style.cssText = 'background:#3b82f6;border:none;color:#fff;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;flex-shrink:0;margin-top:2px;';
+            playBtn.textContent = '\u25B6';
+            playBtn.onclick = function(e) { e.stopPropagation(); overlay.remove(); play({ streamID: movie.id, name: movie.name }); };
+            row.appendChild(playBtn);
+
+            row.onclick = function() { overlay.remove(); play({ streamID: movie.id, name: movie.name }); };
+            body.appendChild(row);
+          });
+
+          modal.appendChild(body);
+          overlay.appendChild(modal);
+          document.body.appendChild(overlay);
+
+          var colBackdrop = col.movies.find(function(m) { return m.collection_backdrop; });
+          if (colBackdrop) {
+            backdrop.style.backgroundImage = 'url(' + colBackdrop.collection_backdrop + ')';
+            backdrop.style.backgroundSize = 'cover';
+            backdrop.style.backgroundPosition = 'center 20%';
+          }
+        }
+
+        function renderCollectionCard(col, parent) {
+          var card = h('div', { style: 'cursor:pointer;border-radius:12px;overflow:hidden;background:var(--bg-card);border:1px solid var(--border);transition:transform 0.2s,box-shadow 0.2s;' });
+          card.dataset.sortName = col.name;
+          card.onmouseenter = function() { card.style.transform = 'scale(1.03)'; card.style.boxShadow = '0 8px 30px rgba(0,0,0,0.3)'; };
+          card.onmouseleave = function() { card.style.transform = ''; card.style.boxShadow = ''; };
+
+          var posterWrap = h('div', { style: 'width:100%;aspect-ratio:2/3;background:linear-gradient(135deg,#1a1a2e,#16213e);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;' });
+          var colPoster = col.movies.find(function(m) { return m.collection_poster; });
+          var posterSrc = colPoster ? colPoster.collection_poster : (col.movies.find(function(m) { return m.poster_url; }) || {}).poster_url;
+          if (posterSrc) {
+            posterWrap.appendChild(h('img', { src: posterSrc, style: 'width:100%;height:100%;object-fit:cover;' }));
+          } else {
+            posterWrap.appendChild(h('div', { style: 'padding:12px;text-align:center;color:#fff;font-size:14px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.5);' }, col.name));
+          }
+          posterWrap.appendChild(h('div', { style: 'position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,0.7);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;' }, col.movies.length + ' films'));
+          card.appendChild(posterWrap);
+
+          card.appendChild(h('div', { style: 'padding:10px 12px;' },
+            h('div', { style: 'font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, col.name)));
+
+          card.onclick = function() { showCollectionModal(col); };
+          parent.appendChild(card);
+        }
 
         container.appendChild(grid);
+        renderGrid();
       } catch(err) {
         container.innerHTML = '';
         container.appendChild(h('p', { style: 'color:var(--danger)' }, 'Failed to load: ' + err.message));
@@ -5235,6 +5546,7 @@
 
         seriesList.forEach(function(show) {
           var card = h('div', { style: 'cursor:pointer;border-radius:12px;overflow:hidden;background:var(--bg-card);border:1px solid var(--border);transition:transform 0.2s,box-shadow 0.2s;' });
+          card.dataset.sortName = show.name;
           card.onmouseenter = function() { card.style.transform = 'scale(1.03)'; card.style.boxShadow = '0 8px 30px rgba(0,0,0,0.3)'; };
           card.onmouseleave = function() { card.style.transform = ''; card.style.boxShadow = ''; };
 
@@ -5264,6 +5576,7 @@
         });
 
         container.appendChild(grid);
+        setupGridKeyJump(grid);
       } catch(err) {
         container.innerHTML = '';
         container.appendChild(h('p', { style: 'color:var(--danger)' }, 'Failed to load: ' + err.message));

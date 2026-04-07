@@ -13,9 +13,10 @@ type Entry struct {
 	Logo       string
 	TvgID      string
 	TvgName    string
-	TVPType    string
-	TVPSeries  string
-	TVPSeason  string
+	TVPType       string
+	TVPSeries     string
+	TVPCollection string
+	TVPSeason     string
 	TVPEpisode string
 	TVPVCodec  string
 	TVPACodec  string
@@ -54,6 +55,7 @@ func parseExtInf(line string, entry *Entry) {
 	entry.Group = extractAttr(line, "group-title")
 	entry.TVPType = extractAttr(line, "tvp-type")
 	entry.TVPSeries = extractAttr(line, "tvp-series")
+	entry.TVPCollection = extractAttr(line, "tvp-collection")
 	entry.TVPSeason = extractAttr(line, "tvp-season")
 	entry.TVPEpisode = extractAttr(line, "tvp-episode")
 	entry.TVPVCodec = extractAttr(line, "tvp-vcodec")

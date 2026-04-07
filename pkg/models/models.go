@@ -66,6 +66,7 @@ type Stream struct {
 	ContentHash   string        `json:"content_hash"`
 	VODType       string        `json:"vod_type,omitempty"`
 	VODSeries     string        `json:"vod_series,omitempty"`
+	VODCollection string        `json:"vod_collection,omitempty"`
 	VODSeason     int           `json:"vod_season,omitempty"`
 	VODEpisode    int           `json:"vod_episode,omitempty"`
 	VODVCodec     string        `json:"vod_vcodec,omitempty"`

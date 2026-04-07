@@ -238,6 +238,7 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 
 		r.Get("/api/tmdb/search", h.tmdb.Search)
 		r.Get("/api/tmdb/details", h.tmdb.Details)
+		r.Get("/api/tmdb/season", h.tmdb.Season)
 		r.Get("/api/tmdb/sync", h.tmdb.SyncStatus)
 		r.Delete("/api/tmdb/cache", h.tmdb.InvalidateCache)
 		r.Get("/api/vod/library", h.stream.VODLibrary)

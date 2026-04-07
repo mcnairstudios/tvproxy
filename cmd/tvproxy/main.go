@@ -302,6 +302,7 @@ func main() {
 			items = append(items, tmdb.VODItem{Name: name, MediaType: mediaType})
 		}
 		if len(items) > 0 {
+			tmdbClient.PopulateMetadataFromCache(items)
 			tmdbClient.Sync(items)
 		}
 	}

@@ -51,6 +51,23 @@ func (h *TMDBHandler) Details(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
+func (h *TMDBHandler) Season(w http.ResponseWriter, r *http.Request) {
+	tvID := r.URL.Query().Get("id")
+	season := r.URL.Query().Get("season")
+	if tvID == "" || season == "" {
+		respondError(w, http.StatusBadRequest, "id and season required")
+		return
+	}
+
+	result, err := h.client.Season(tvID, season)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "tmdb request failed")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, result)
+}
+
 func (h *TMDBHandler) InvalidateCache(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("query")
 	if query != "" {

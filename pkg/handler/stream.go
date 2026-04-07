@@ -95,20 +95,31 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 	series := r.URL.Query().Get("series")
 
 	type vodItem struct {
-		ID        string  `json:"id"`
-		Name      string  `json:"name"`
-		URL       string  `json:"url"`
-		Logo      string  `json:"logo,omitempty"`
-		PosterURL string  `json:"poster_url,omitempty"`
-		Type      string  `json:"type"`
-		Series    string  `json:"series,omitempty"`
-		Season    int     `json:"season,omitempty"`
-		Episode   int     `json:"episode,omitempty"`
-		VCodec    string  `json:"vcodec,omitempty"`
-		ACodec    string  `json:"acodec,omitempty"`
-		Res       string  `json:"resolution,omitempty"`
-		Audio     string  `json:"audio,omitempty"`
-		Duration  float64 `json:"duration,omitempty"`
+		ID              string   `json:"id"`
+		Name            string   `json:"name"`
+		URL             string   `json:"url"`
+		Logo            string   `json:"logo,omitempty"`
+		PosterURL       string   `json:"poster_url,omitempty"`
+		Type            string   `json:"type"`
+		Series          string   `json:"series,omitempty"`
+		Collection         string `json:"collection,omitempty"`
+		CollectionPoster   string `json:"collection_poster,omitempty"`
+		CollectionBackdrop string `json:"collection_backdrop,omitempty"`
+		Season          int      `json:"season,omitempty"`
+		Episode         int      `json:"episode,omitempty"`
+		EpisodeName     string   `json:"episode_name,omitempty"`
+		EpisodeOverview string   `json:"episode_overview,omitempty"`
+		EpisodeStill    string   `json:"episode_still,omitempty"`
+		Overview        string   `json:"overview,omitempty"`
+		Rating          float64  `json:"rating,omitempty"`
+		Year            string   `json:"year,omitempty"`
+		Genres          []string `json:"genres,omitempty"`
+		Certification   string   `json:"certification,omitempty"`
+		VCodec          string   `json:"vcodec,omitempty"`
+		ACodec          string   `json:"acodec,omitempty"`
+		Res             string   `json:"resolution,omitempty"`
+		Audio           string   `json:"audio,omitempty"`
+		Duration        float64  `json:"duration,omitempty"`
 	}
 
 	var items []vodItem
@@ -144,22 +155,65 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		items = append(items, vodItem{
-			ID:        s.ID,
-			Name:      s.Name,
-			URL:       s.URL,
-			Logo:      h.logoService.Resolve(s.Logo),
-			PosterURL: posterURL,
-			Type:      s.VODType,
-			Series:    s.VODSeries,
-			Season:    s.VODSeason,
-			Episode:   s.VODEpisode,
+		item := vodItem{
+			ID:         s.ID,
+			Name:       s.Name,
+			URL:        s.URL,
+			Logo:       h.logoService.Resolve(s.Logo),
+			PosterURL:  posterURL,
+			Type:       s.VODType,
+			Series:     s.VODSeries,
+			Collection: s.VODCollection,
+			Season:     s.VODSeason,
+			Episode:    s.VODEpisode,
 			VCodec:    s.VODVCodec,
 			ACodec:    s.VODACodec,
 			Res:       s.VODRes,
 			Audio:     s.VODAudio,
 			Duration:  s.VODDuration,
-		})
+		}
+
+		if h.tmdb != nil {
+			if s.VODType == "movie" {
+				if m := h.tmdb.LookupMovie(lookupName); m != nil {
+					item.Overview = m.Overview
+					item.Rating = m.Rating
+					item.Year = m.Year
+					item.Genres = m.Genres
+					item.Certification = m.Certification
+				}
+			} else if s.VODType == "series" {
+				if sr := h.tmdb.LookupSeries(lookupName); sr != nil {
+					item.Overview = sr.Overview
+					item.Rating = sr.Rating
+					item.Year = sr.Year
+					item.Genres = sr.Genres
+					item.Certification = sr.Certification
+				}
+				if s.VODSeason > 0 && s.VODEpisode > 0 {
+					if ep := h.tmdb.LookupEpisode(lookupName, s.VODSeason, s.VODEpisode); ep != nil {
+						item.EpisodeName = ep.Name
+						item.EpisodeOverview = ep.Overview
+						if ep.StillPath != "" {
+							item.EpisodeStill = tmdb.PosterURL(ep.StillPath) + "&size=w300"
+						}
+					}
+				}
+			}
+
+			if s.VODCollection != "" {
+				if col := h.tmdb.LookupCollection(s.VODCollection); col != nil {
+					if col.PosterPath != "" {
+						item.CollectionPoster = tmdb.PosterURL(col.PosterPath)
+					}
+					if col.BackdropPath != "" {
+						item.CollectionBackdrop = tmdb.PosterURL(col.BackdropPath) + "&size=w1280"
+					}
+				}
+			}
+		}
+
+		items = append(items, item)
 	}
 
 	if h.tmdb != nil && len(uncached) > 0 {
