@@ -3822,7 +3822,10 @@
       }
     }).catch(function() {}) : Promise.resolve();
 
-    Promise.all([waitForStream(), epgReady]).then(function() {
+    var isHLS = streamSrc.indexOf('.m3u8') >= 0;
+    var streamReady = isHLS ? Promise.resolve() : waitForStream();
+
+    Promise.all([streamReady, epgReady]).then(function() {
       statusEl.style.color = '#ffa726';
       statusEl.textContent = 'Buffering...';
 
