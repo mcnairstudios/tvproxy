@@ -3464,9 +3464,9 @@
       if (ctrlUpdateTimer) { clearInterval(ctrlUpdateTimer); ctrlUpdateTimer = null; }
       if (signalInterval) { clearInterval(signalInterval); signalInterval = null; }
       if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
-      if (dashPlayer) {
-        dashPlayer.destroy();
-        dashPlayer = null;
+      if (hlsInstance) {
+        if (hlsInstance && hlsInstance.destroy) hlsInstance.destroy();
+        hlsInstance = null;
       } else if (videoEl) {
         videoEl.pause();
         videoEl.removeAttribute('src');
@@ -3595,7 +3595,7 @@
           if (resp.session_id) {
             dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
             if (dvrTracker) dvrTracker.reset();
-            streamSrc = '/vod/' + dvr.id + '/dash/manifest.mpd';
+            streamSrc = '/vod/' + dvr.id + '/hls/master.m3u8';
           }
         } catch(e) {
           toast.error('Audio switch failed');
@@ -3667,33 +3667,9 @@
     seekRow.addEventListener('click', function(e) {
       var rect = seekTrack.getBoundingClientRect();
       var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      if (dashPlayer) {
-        var win = dashPlayer.getDvrWindow();
-        var knownDur = dvr.duration || epgDuration || 0;
-        var seekOff = (dvr && dvr._seekOffset) || 0;
-        var effectiveDur = knownDur > 0 ? knownDur : (seekOff + win.end);
-        var absTarget = pct * effectiveDur;
-        var relTarget = absTarget - seekOff;
-        if (relTarget > win.end && dvr && dvr.duration > 0 && !seekRow._seeking) {
-          seekRow._seeking = true;
-          statusEl.style.color = '#ffa726';
-          statusEl.textContent = 'Seeking...';
-          dvr._seekOffset = absTarget;
-          fetch('/vod/' + dvr.id + '/seek?position=' + absTarget.toFixed(1), { method: 'POST' }).then(function() {
-            restartPlayback();
-          }).catch(function() {
-            statusEl.textContent = 'Seek failed';
-          }).finally(function() {
-            seekRow._seeking = false;
-          });
-          return;
-        }
-        var dashTarget = Math.max(win.start, Math.min(win.end - 1, relTarget));
-        console.log('SEEK: pct=' + pct.toFixed(3), 'absTarget=' + absTarget.toFixed(1), 'relTarget=' + relTarget.toFixed(1), 'dashTarget=' + dashTarget.toFixed(1), 'seekOff=' + seekOff.toFixed(1));
-        dashPlayer.seek(dashTarget);
-      } else {
-        var dur = videoEl.duration;
-        if (dur && isFinite(dur)) videoEl.currentTime = pct * dur;
+      var dur = videoEl.duration;
+      if (dur && isFinite(dur)) {
+        videoEl.currentTime = pct * dur;
       }
     });
 
@@ -3758,18 +3734,14 @@
       var dur = videoEl.duration;
       var knownDur = dvr.duration || epgDuration || (isFinite(dur) ? dur : 0);
 
-      if (dashPlayer) {
-        var win = dashPlayer.getDvrWindow();
-        var seekOff = (dvr && dvr._seekOffset) || 0;
-        var effectiveDur = knownDur > 0 ? knownDur : (seekOff + win.end);
-        if (win.size > 0 && effectiveDur > 0) {
-          var absCur = seekOff + cur;
-          var absTranscoded = seekOff + win.end;
-          seekPlayed.style.width = ((absCur / effectiveDur) * 100) + '%';
-          seekThumb.style.left = ((absCur / effectiveDur) * 100) + '%';
-          seekTranscoded.style.width = ((absTranscoded / effectiveDur) * 100) + '%';
+      if (hlsInstance && knownDur > 0) {
+        var effectiveDur = knownDur;
+        if (effectiveDur > 0) {
+          seekPlayed.style.width = ((cur / effectiveDur) * 100) + '%';
+          seekThumb.style.left = ((cur / effectiveDur) * 100) + '%';
+          seekTranscoded.style.width = '100%';
           var bufEnd = 0;
-          if (videoEl.buffered.length > 0) bufEnd = seekOff + videoEl.buffered.end(videoEl.buffered.length - 1);
+          if (videoEl.buffered.length > 0) bufEnd = videoEl.buffered.end(videoEl.buffered.length - 1);
           seekBuffered.style.width = ((bufEnd / effectiveDur) * 100) + '%';
           timeDisplay.textContent = fmtCtrlTime(absCur) + ' / ' + fmtCtrlTime(effectiveDur);
         } else {
@@ -3800,7 +3772,7 @@
     };
     document.body.appendChild(overlay);
 
-    var streamSrc = dvr ? '/vod/' + dvr.id + '/dash/manifest.mpd' : url;
+    var streamSrc = dvr ? '/vod/' + dvr.id + '/hls/master.m3u8' : url;
     var epgDuration = 0;
 
     var savedVol = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
@@ -3819,7 +3791,7 @@
       buildAudioMenu(probeData.audio_tracks);
     }
 
-    var dashPlayer = null;
+    var hlsInstance = null;
 
     function waitForStream() {
       if (!dvr) return Promise.resolve();
@@ -3842,106 +3814,58 @@
       });
     }
 
-    if (typeof dashjs !== 'undefined') {
-      var epgReady = tvgId ? api.get('/api/epg/now?channel_id=' + encodeURIComponent(tvgId)).then(function(program) {
-        if (program && program.start && program.stop) {
-          nowProgram = program;
-          var remaining = (new Date(program.stop).getTime() - Date.now()) / 1000;
-          epgDuration = remaining > 0 ? remaining : 0;
-        }
-      }).catch(function() {}) : Promise.resolve();
+    var epgReady = tvgId ? api.get('/api/epg/now?channel_id=' + encodeURIComponent(tvgId)).then(function(program) {
+      if (program && program.start && program.stop) {
+        nowProgram = program;
+        var remaining = (new Date(program.stop).getTime() - Date.now()) / 1000;
+        epgDuration = remaining > 0 ? remaining : 0;
+      }
+    }).catch(function() {}) : Promise.resolve();
 
-      Promise.all([waitForStream(), epgReady]).then(function() {
-        statusEl.style.color = '#ffa726';
-        statusEl.textContent = 'Buffering...';
-        if (epgDuration > 0) {
-          streamSrc += (streamSrc.indexOf('?') >= 0 ? '&' : '?') + 'epg_duration=' + epgDuration;
-        }
-        return fetch(streamSrc).then(function(r) { return r.text(); }).then(function(mpd) {
-          console.log('DASH manifest preflight (' + mpd.length + ' bytes):', mpd.substring(0, 500));
-        }).catch(function(e) { console.warn('Manifest preflight failed:', e); });
-      }).then(function() {
-        var isVOD = (dvr && dvr.duration > 0) || epgDuration > 0;
-        dashPlayer = dashjs.MediaPlayer().create();
-        window._dashDebug = dashPlayer;
-        dashPlayer.updateSettings({
-          streaming: {
-            timeShiftBuffer: {
-              calcFromSegmentTimeline: true,
-              fallbackToSegmentTimeline: true
-            },
-            delay: {
-              liveDelay: 4,
-              useSuggestedPresentationDelay: false
-            },
-            liveCatchup: {
-              enabled: !isVOD
-            },
-            buffer: {
-              stallThreshold: 0.5,
-              bufferTimeDefault: 12
-            },
-            retryAttempts: {
-              MPD: 10,
-              MediaSegment: 10,
-              InitializationSegment: 10
-            },
-            retryIntervals: {
-              MPD: 2000,
-              MediaSegment: 1000,
-              InitializationSegment: 1000
-            },
-            manifestRequestTimeout: 60000,
-            fragmentRequestTimeout: 30000
-          }
+    Promise.all([waitForStream(), epgReady]).then(function() {
+      statusEl.style.color = '#ffa726';
+      statusEl.textContent = 'Buffering...';
+
+      if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+        var hlsPlayer = new Hls({
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          startLevel: -1,
+          debug: false
         });
-        dashPlayer.on(dashjs.MediaPlayer.events.ERROR, function(e) {
-          console.error('DASH ERROR:', e);
-          if (e.error && e.error.code === 32) {
-            fetch(streamSrc).then(function(r) { return r.text(); }).then(function(mpd) { console.error('MANIFEST AT ERROR:', mpd); });
-          }
-          statusEl.style.color = '#ff6b6b';
-          statusEl.textContent = 'Errored';
-          statusEl.style.cursor = 'pointer';
-          statusEl.style.pointerEvents = 'auto';
-          statusEl.title = e.error ? e.error.message : String(e);
-          statusEl.onclick = function() { navigator.clipboard.writeText(JSON.stringify(e.error || e, null, 2)).then(function() { statusEl.textContent = 'Copied!'; setTimeout(function() { statusEl.textContent = 'Errored'; }, 1500); }); };
-        });
-        dashPlayer.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function() {
-          var dvrWin = dashPlayer.getDvrWindow();
-          var knownDuration = dvr.duration || epgDuration || 0;
-          console.log('DASH INIT. dvrWindow:', dvrWin, 'duration:', dashPlayer.duration(), 'known:', knownDuration);
-          if (isVOD) {
-            dashPlayer.seek(0);
-          }
+        hlsInstance = hlsPlayer;
+        hlsPlayer.loadSource(streamSrc);
+        hlsPlayer.attachMedia(videoEl);
+        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, function() {
           videoEl.play().catch(function() {});
         });
-        dashPlayer.extend('RequestModifier', function() {
-          return {
-            modifyRequestURL: function(url) {
-              if (url.indexOf('manifest.mpd') >= 0 && epgDuration > 0) {
-                var remaining = nowProgram && nowProgram.stop ? Math.max(0, (new Date(nowProgram.stop).getTime() - Date.now()) / 1000) : epgDuration;
-                url = url.replace(/epg_duration=[^&]*/, 'epg_duration=' + remaining);
-                if (url.indexOf('epg_duration') < 0) {
-                  url += (url.indexOf('?') >= 0 ? '&' : '?') + 'epg_duration=' + remaining;
-                }
-              }
-              return url;
-            },
-            modifyRequestHeader: function(xhr) { return xhr; }
-          };
-        }, true);
-        dashPlayer.initialize(videoEl, streamSrc, true);
-      }).catch(function(e) {
-        statusEl.style.color = '#ff6b6b';
-        statusEl.textContent = 'Errored';
-        statusEl.title = e.message || String(e);
-        statusEl.onclick = function() { navigator.clipboard.writeText(e.message || String(e)).then(function() { statusEl.textContent = 'Copied!'; setTimeout(function() { statusEl.textContent = 'Errored'; }, 1500); }); };
-      });
-    } else {
-      videoEl.src = streamSrc;
-      videoEl.play().catch(function() {});
-    }
+        hlsPlayer.on(Hls.Events.ERROR, function(event, data) {
+          console.error('HLS ERROR:', data);
+          if (data.fatal) {
+            statusEl.style.color = '#ff6b6b';
+            statusEl.textContent = 'Errored';
+            statusEl.title = data.details || 'HLS error';
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              hlsPlayer.startLoad();
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hlsPlayer.recoverMediaError();
+            }
+          }
+        });
+      } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+        videoEl.src = streamSrc;
+        videoEl.addEventListener('loadedmetadata', function() {
+          videoEl.play().catch(function() {});
+        });
+      } else {
+        videoEl.src = streamSrc;
+        videoEl.play().catch(function() {});
+      }
+    }).catch(function(e) {
+      statusEl.style.color = '#ff6b6b';
+      statusEl.textContent = 'Errored';
+      statusEl.title = e.message || String(e);
+    });
 
 
     videoEl.addEventListener('playing', function() {
@@ -3984,7 +3908,7 @@
             if (resp.session_id) {
               dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
               if (dvrTracker) dvrTracker.reset();
-              streamSrc = '/vod/' + dvr.id + '/dash/manifest.mpd';
+              streamSrc = '/vod/' + dvr.id + '/hls/master.m3u8';
             }
           } catch(e) {}
           restartPlayback();
@@ -3996,20 +3920,20 @@
 
     function restartPlayback() {
       if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
-      if (dashPlayer && dvr) {
+      if (hlsInstance && dvr) {
         statusEl.style.color = '#ffa726';
         statusEl.textContent = 'Reconnecting...';
         waitForStream().then(function() {
           return fetch(streamSrc).then(function() {}).catch(function() {});
         }).then(function() {
-          dashPlayer.attachSource(streamSrc);
+          if (hlsInstance && hlsInstance.loadSource) { hlsInstance.loadSource(streamSrc); hlsInstance.attachMedia(videoEl); }
           videoEl.play().catch(function() {});
         }).catch(function() {
           statusEl.style.color = '#ff6b6b';
           statusEl.textContent = 'Reconnect failed';
         });
-      } else if (dashPlayer) {
-        dashPlayer.attachSource(streamSrc);
+      } else if (hlsInstance) {
+        if (hlsInstance && hlsInstance.loadSource) { hlsInstance.loadSource(streamSrc); hlsInstance.attachMedia(videoEl); }
         videoEl.play().catch(function() {});
       } else if (videoEl) {
         videoEl.src = streamSrc;
@@ -4058,13 +3982,6 @@
             var progDur = (new Date(program.stop).getTime() - Date.now()) / 1000;
             if (progDur > 0) {
               epgDuration = progDur;
-              if (dashPlayer) {
-                dashPlayer.updateSettings({
-                  streaming: {
-                    timeShiftBuffer: { calcFromSegmentTimeline: true }
-                  }
-                });
-              }
             }
           }
         }

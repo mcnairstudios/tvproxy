@@ -221,6 +221,8 @@ func main() {
 	authMW := middleware.NewAuthMiddleware(authService, activityService, cfg.APIKey, adminUserID)
 
 	dashManager := dash.NewManager(log)
+	hlsManager := hls.NewManager(hls.TempDir(), log)
+	go hlsManager.StartCleanupWorker(ctx)
 	sessionMgr.SetOnCleanup(func(channelID string) {
 		dashManager.Stop(channelID)
 	})
@@ -256,7 +258,7 @@ func main() {
 		hdhr:         handler.NewHDHRHandler(hdhrService, proxyService, cfg),
 		output:       handler.NewOutputHandler(outputService),
 		proxy:        handler.NewProxyHandler(proxyService, settingsService, log),
-		vod:          handler.NewVODHandler(vodService, clientService, dashManager, log),
+		vod:          handler.NewVODHandler(vodService, clientService, dashManager, hlsManager, log),
 		activity:     handler.NewActivityHandler(activityService),
 		favorite:     handler.NewFavoriteHandler(favoriteStore),
 		settings:     handler.NewSettingsHandler(settingsService, exportService, dataResetter, authService, streamStore, epgStore),
@@ -278,8 +280,6 @@ func main() {
 	staticRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "static")
 	registerStaticRoutes(r, staticRoot, distFS, versionedIndexBytes)
 
-	hlsManager := hls.NewManager(hls.TempDir(), log)
-	go hlsManager.StartCleanupWorker(ctx)
 	jellyfinServer := jellyfin.NewServer("TVProxy", cfg.BaseURL, authService, activityService, favoriteStore, channelStore, channelGroupStore, streamStore, epgStore, logoService, tmdbClient, hlsManager, log)
 	go func() {
 		jfRouter := chi.NewRouter()

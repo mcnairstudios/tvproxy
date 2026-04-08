@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/dash"
+	"github.com/gavinmcnair/tvproxy/pkg/hls"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
@@ -25,14 +26,16 @@ type VODHandler struct {
 	vodService    *service.VODService
 	clientService *service.ClientService
 	dashManager   *dash.Manager
+	hlsManager    *hls.Manager
 	log           zerolog.Logger
 }
 
-func NewVODHandler(vodService *service.VODService, clientService *service.ClientService, dashManager *dash.Manager, log zerolog.Logger) *VODHandler {
+func NewVODHandler(vodService *service.VODService, clientService *service.ClientService, dashManager *dash.Manager, hlsManager *hls.Manager, log zerolog.Logger) *VODHandler {
 	return &VODHandler{
 		vodService:    vodService,
 		clientService: clientService,
 		dashManager:   dashManager,
+		hlsManager:    hlsManager,
 		log:           log.With().Str("handler", "vod").Logger(),
 	}
 }
@@ -746,4 +749,72 @@ func formatISODuration(seconds float64) string {
 		return fmt.Sprintf("PT%dM%.1fS", m, s)
 	}
 	return fmt.Sprintf("PT%.1fS", s)
+}
+
+func (h *VODHandler) HLSMaster(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "sessionID")
+	sess := h.vodService.GetSession(channelID)
+	if sess == nil {
+		respondError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	var durationTicks int64
+	if sess.Duration > 0 {
+		durationTicks = int64(sess.Duration * 10000000)
+	}
+
+	streamURL := sess.StreamURL
+	if streamURL == "" {
+		respondError(w, http.StatusInternalServerError, "no stream URL")
+		return
+	}
+
+	profile := hls.ProfileSettings{VideoCodec: "copy", AudioCodec: "aac"}
+	hlsSess := h.hlsManager.GetOrCreateSession(channelID, streamURL, 6, durationTicks, sess.Duration == 0, profile)
+	hls.ServeMasterPlaylist(w, hlsSess, "")
+}
+
+func (h *VODHandler) HLSPlaylist(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "sessionID")
+	hlsSess := h.hlsManager.GetSession(channelID)
+	if hlsSess == nil {
+		respondError(w, http.StatusNotFound, "hls session not found")
+		return
+	}
+
+	if hlsSess.IsDone() && hlsSess.CurrentTranscodeIndex() == -1 {
+		if err := hlsSess.StartTranscode(context.Background(), 0, 0); err != nil {
+			h.log.Error().Err(err).Str("session", channelID).Msg("failed to start hls transcode")
+		}
+	}
+
+	hls.ServeMediaPlaylist(w, hlsSess)
+}
+
+func (h *VODHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "sessionID")
+	segmentFile := chi.URLParam(r, "segment")
+
+	hlsSess := h.hlsManager.GetSession(channelID)
+	if hlsSess == nil {
+		respondError(w, http.StatusNotFound, "hls session not found")
+		return
+	}
+
+	var segmentIndex int
+	fmt.Sscanf(strings.TrimSuffix(segmentFile, ".ts"), "seg%d", &segmentIndex)
+
+	var runtimeTicks int64
+	if rt := r.URL.Query().Get("runtimeTicks"); rt != "" {
+		fmt.Sscanf(rt, "%d", &runtimeTicks)
+	}
+
+	if err := h.hlsManager.RequestSegment(context.Background(), hlsSess, segmentIndex, runtimeTicks); err != nil {
+		h.log.Error().Err(err).Int("segment", segmentIndex).Msg("hls segment not available")
+		respondError(w, http.StatusNotFound, "segment not available")
+		return
+	}
+
+	hls.ServeSegment(w, r, hlsSess.SegmentPath(segmentIndex))
 }

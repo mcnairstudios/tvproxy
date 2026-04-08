@@ -82,6 +82,9 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 	r.Get("/vod/{sessionID}/stream", h.vod.Stream)
 	r.Get("/vod/{sessionID}/dash/manifest.mpd", h.vod.DASHManifest)
 	r.Get("/vod/{sessionID}/dash/{segment}", h.vod.DASHSegment)
+	r.Get("/vod/{sessionID}/hls/master.m3u8", h.vod.HLSMaster)
+	r.Get("/vod/{sessionID}/hls/playlist.m3u8", h.vod.HLSPlaylist)
+	r.Get("/vod/{sessionID}/hls/{segment}", h.vod.HLSSegment)
 
 	r.Group(func(r chi.Router) {
 		r.Use(authMW.Authenticate)
