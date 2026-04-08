@@ -87,6 +87,10 @@ func (s *Server) Router() chi.Router {
 		}
 	})
 
+	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+
 	r.Get("/System/Info/Public", s.systemInfoPublic)
 	r.Get("/System/Info", s.systemInfo)
 	r.Get("/System/Ping", s.ping)
