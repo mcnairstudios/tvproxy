@@ -416,11 +416,13 @@ func (s *Server) getLatest(w http.ResponseWriter, r *http.Request) {
 	switch parentID {
 	case viewMoviesID:
 		items = s.buildMovieItems(ctx, "", "")
-		sortItems(items, "DateCreated", "Descending")
 	case viewTVID:
 		items = s.buildSeriesItems(ctx, "", "")
-		sortItems(items, "DateCreated", "Descending")
+	default:
+		items = s.buildMovieItems(ctx, "", "")
 	}
+
+	sortItems(items, "PremiereDate", "Descending")
 
 	limit := 20
 	if l := firstOf(q, "limit", "Limit"); l != "" {
