@@ -1078,10 +1078,12 @@ func sortItems(items []BaseItemDto, sortBy, sortOrder string) {
 	sort.Slice(items, func(i, j int) bool {
 		var less bool
 		switch sortBy {
-		case "DateCreated", "PremiereDate":
+		case "DateCreated", "PremiereDate", "ProductionYear":
 			less = items[i].PremiereDate < items[j].PremiereDate
 		case "CommunityRating":
 			less = items[i].CommunityRating < items[j].CommunityRating
+		case "Runtime":
+			less = items[i].RunTimeTicks < items[j].RunTimeTicks
 		case "Random":
 			less = hashString(items[i].ID)%1000 < hashString(items[j].ID)%1000
 		default:
