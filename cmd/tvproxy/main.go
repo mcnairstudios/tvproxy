@@ -280,6 +280,12 @@ func main() {
 		jfRouter := chi.NewRouter()
 		jfRouter.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer func() {
+					if err := recover(); err != nil {
+						log.Error().Interface("panic", err).Str("path", r.URL.Path).Msg("jellyfin panic recovered")
+						w.WriteHeader(http.StatusInternalServerError)
+					}
+				}()
 				auth := r.Header.Get("Authorization")
 				if len(auth) > 120 {
 					auth = auth[:120]
