@@ -46,26 +46,36 @@ func (s *Server) getItems(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	switch {
-	case parentID == viewMoviesID || strings.Contains(itemTypes, "Movie"):
-		items := s.buildMovieItems(ctx, searchTerm, genres)
-		sortItems(items, sortBy, sortOrder)
-		s.paginateAndRespond(w, r, items)
-	case parentID == viewTVID || strings.Contains(itemTypes, "Series"):
-		items := s.buildSeriesItems(ctx, searchTerm, genres)
-		sortItems(items, sortBy, sortOrder)
-		s.paginateAndRespond(w, r, items)
-	case parentID == viewLiveTVID:
-		s.liveTvChannels(w, r)
-	case searchTerm != "":
-		movies := s.buildMovieItems(ctx, searchTerm, "")
-		series := s.buildSeriesItems(ctx, searchTerm, "")
-		items := append(movies, series...)
-		sortItems(items, sortBy, sortOrder)
-		s.paginateAndRespond(w, r, items)
-	default:
+	filters := firstOf(q, "filters", "Filters")
+	if strings.Contains(filters, "IsFavorite") {
 		s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0})
+		return
 	}
+
+	hasMovies := parentID == viewMoviesID || strings.Contains(itemTypes, "Movie") || strings.Contains(itemTypes, "BoxSet") || strings.Contains(itemTypes, "MusicVideo") || strings.Contains(itemTypes, "Video")
+	hasSeries := parentID == viewTVID || strings.Contains(itemTypes, "Series")
+	hasLiveTV := parentID == viewLiveTVID
+
+	if hasLiveTV {
+		s.liveTvChannels(w, r)
+		return
+	}
+
+	var items []BaseItemDto
+	if hasMovies || (!hasSeries && searchTerm != "") {
+		items = append(items, s.buildMovieItems(ctx, searchTerm, genres)...)
+	}
+	if hasSeries || (!hasMovies && searchTerm != "") {
+		items = append(items, s.buildSeriesItems(ctx, searchTerm, genres)...)
+	}
+
+	if !hasMovies && !hasSeries && searchTerm == "" {
+		s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0})
+		return
+	}
+
+	sortItems(items, sortBy, sortOrder)
+	s.paginateAndRespond(w, r, items)
 }
 
 func (s *Server) buildMovieItems(ctx context.Context, searchTerm, genres string) []BaseItemDto {

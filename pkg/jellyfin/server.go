@@ -122,6 +122,7 @@ func (s *Server) Router() chi.Router {
 		r.Get("/Users/{userId}/Items", s.getItems)
 		r.Get("/Users/{userId}/Items/Latest", s.getLatest)
 		r.Get("/Users/{userId}/Items/Resume", s.getResume)
+		r.Get("/Users/{userId}/Items/{itemId}", s.getItem)
 		r.Get("/Shows/NextUp", s.getResume)
 
 		r.Get("/Shows/{seriesId}/Seasons", s.getSeasons)
