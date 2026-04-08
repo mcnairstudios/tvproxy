@@ -188,6 +188,20 @@ func (c *Client) LookupCollection(name string) *CollectionMeta {
 	return c.meta.GetCollection(name + " Collection")
 }
 
+func (c *Client) LookupBackdrop(name, mediaType string) string {
+	clean, _ := CleanVODName(name)
+	if mediaType == "movie" {
+		if m := c.meta.GetMovie(clean); m != nil && m.BackdropPath != "" {
+			return m.BackdropPath
+		}
+	} else {
+		if s := c.meta.GetSeries(clean); s != nil && s.BackdropPath != "" {
+			return s.BackdropPath
+		}
+	}
+	return ""
+}
+
 func (c *Client) LookupMovie(name string) *MovieMeta {
 	clean, _ := CleanVODName(name)
 	return c.meta.GetMovie(clean)
@@ -264,6 +278,7 @@ func (c *Client) resolveSeriesFromCache(cleanName string, searchResult map[strin
 	}
 	s.TMDBID = intVal(first, "id")
 	s.PosterPath, _ = first["poster_path"].(string)
+	s.BackdropPath, _ = first["backdrop_path"].(string)
 	s.Overview, _ = first["overview"].(string)
 	s.Rating, _ = first["vote_average"].(float64)
 	if date, _ := first["first_air_date"].(string); len(date) >= 4 {
@@ -507,6 +522,7 @@ func (c *Client) resolveMovieFromCache(cleanName string, searchResult map[string
 	m := &MovieMeta{}
 	m.TMDBID = intVal(first, "id")
 	m.PosterPath, _ = first["poster_path"].(string)
+	m.BackdropPath, _ = first["backdrop_path"].(string)
 	m.Overview, _ = first["overview"].(string)
 	m.Rating, _ = first["vote_average"].(float64)
 	if date, _ := first["release_date"].(string); len(date) >= 4 {
@@ -547,6 +563,7 @@ func (c *Client) resolveMovie(cleanName string, searchResult map[string]any) {
 	m := &MovieMeta{}
 	m.TMDBID = intVal(first, "id")
 	m.PosterPath, _ = first["poster_path"].(string)
+	m.BackdropPath, _ = first["backdrop_path"].(string)
 	m.Overview, _ = first["overview"].(string)
 	m.Rating, _ = first["vote_average"].(float64)
 	if date, _ := first["release_date"].(string); len(date) >= 4 {
@@ -588,6 +605,7 @@ func (c *Client) resolveSeries(cleanName string, searchResult map[string]any) {
 	}
 	s.TMDBID = intVal(first, "id")
 	s.PosterPath, _ = first["poster_path"].(string)
+	s.BackdropPath, _ = first["backdrop_path"].(string)
 	s.Overview, _ = first["overview"].(string)
 	s.Rating, _ = first["vote_average"].(float64)
 	if date, _ := first["first_air_date"].(string); len(date) >= 4 {

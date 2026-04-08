@@ -477,6 +477,7 @@ func canonicalJellyfinPath(path string) string {
 		"/userimage":                 "/UserImage",
 		"/branding/splashscreen":     "/Branding/Splashscreen",
 		"/shows/nextup":              "/Shows/NextUp",
+		"/playback/bitratetest":      "/Playback/BitrateTest",
 	}
 	if mapped, ok := routes[lower]; ok {
 		return mapped

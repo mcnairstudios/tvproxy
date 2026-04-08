@@ -8,23 +8,25 @@ import (
 )
 
 type MovieMeta struct {
-	TMDBID      int      `json:"tmdb_id"`
-	PosterPath  string   `json:"poster_path,omitempty"`
-	Overview    string   `json:"overview,omitempty"`
-	Year        string   `json:"year,omitempty"`
-	Rating      float64  `json:"rating,omitempty"`
-	Genres      []string `json:"genres,omitempty"`
-	Certification string `json:"certification,omitempty"`
+	TMDBID        int      `json:"tmdb_id"`
+	PosterPath    string   `json:"poster_path,omitempty"`
+	BackdropPath  string   `json:"backdrop_path,omitempty"`
+	Overview      string   `json:"overview,omitempty"`
+	Year          string   `json:"year,omitempty"`
+	Rating        float64  `json:"rating,omitempty"`
+	Genres        []string `json:"genres,omitempty"`
+	Certification string   `json:"certification,omitempty"`
 }
 
 type SeriesMeta struct {
-	TMDBID      int                    `json:"tmdb_id"`
-	PosterPath  string                 `json:"poster_path,omitempty"`
-	Overview    string                 `json:"overview,omitempty"`
-	Year        string                 `json:"year,omitempty"`
-	Rating      float64                `json:"rating,omitempty"`
-	Genres      []string               `json:"genres,omitempty"`
-	Certification string               `json:"certification,omitempty"`
+	TMDBID        int                    `json:"tmdb_id"`
+	PosterPath    string                 `json:"poster_path,omitempty"`
+	BackdropPath  string                 `json:"backdrop_path,omitempty"`
+	Overview      string                 `json:"overview,omitempty"`
+	Year          string                 `json:"year,omitempty"`
+	Rating        float64                `json:"rating,omitempty"`
+	Genres        []string               `json:"genres,omitempty"`
+	Certification string                 `json:"certification,omitempty"`
 	Seasons     map[int]*SeasonMeta    `json:"seasons,omitempty"`
 }
 
