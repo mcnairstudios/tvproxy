@@ -194,12 +194,7 @@ func (s *Server) enrichMovieItem(st *models.Stream) BaseItemDto {
 		item.MediaSources[0].RunTimeTicks = item.RunTimeTicks
 	}
 
-	lookupName := st.Name
-	if st.VODCollection != "" {
-		lookupName = st.Name
-	}
-
-	if m := s.tmdbClient.LookupMovie(lookupName); m != nil {
+	if m := s.tmdbClient.LookupMovie(st.Name); m != nil {
 		item.Overview = m.Overview
 		item.CommunityRating = m.Rating
 		item.OfficialRating = m.Certification
@@ -208,6 +203,7 @@ func (s *Server) enrichMovieItem(st *models.Stream) BaseItemDto {
 			if yr, _ := strconv.Atoi(m.Year); yr > 0 {
 				item.ProductionYear = yr
 				item.PremiereDate = m.Year + "-01-01T00:00:00.0000000Z"
+				item.DateCreated = m.Year + "-01-01T00:00:00.0000000Z"
 			}
 		}
 		if m.PosterPath != "" {
