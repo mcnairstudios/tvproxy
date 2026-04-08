@@ -102,7 +102,11 @@ func (s *Server) hlsMasterPlaylist(w http.ResponseWriter, r *http.Request) {
 		AudioCodec: "aac",
 	}
 	sess := s.hlsManager.GetOrCreateSession(itemID, streamURL, 6, durationTicks, isLive, profile)
-	hls.ServeMasterPlaylist(w, sess, "")
+	playlistURL := fmt.Sprintf("/Videos/%s/main.m3u8", itemID)
+	if isLive {
+		playlistURL = fmt.Sprintf("/Videos/%s/live.m3u8", itemID)
+	}
+	hls.ServeMasterPlaylist(w, sess, playlistURL)
 }
 
 func (s *Server) hlsMediaPlaylist(w http.ResponseWriter, r *http.Request) {
@@ -119,21 +123,30 @@ func (s *Server) hlsMediaPlaylist(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	hls.ServeMediaPlaylist(w, sess)
+	hls.ServeMediaPlaylist(w, sess, fmt.Sprintf("hls1/main/"))
 }
 
 func (s *Server) hlsSegment(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
 	segmentFile := chi.URLParam(r, "segment")
 
-	var segmentIndex int
-	fmt.Sscanf(strings.TrimSuffix(segmentFile, ".ts"), "seg%d", &segmentIndex)
-
 	sess := s.hlsManager.GetSession(itemID)
 	if sess == nil {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
+
+	if segmentFile == "init.mp4" {
+		if err := s.hlsManager.RequestSegment(context.Background(), sess, 0, 0); err != nil {
+			http.Error(w, "init segment not available", http.StatusNotFound)
+			return
+		}
+		hls.ServeSegment(w, r, sess.InitSegmentPath())
+		return
+	}
+
+	var segmentIndex int
+	fmt.Sscanf(strings.TrimSuffix(segmentFile, ".mp4"), "seg%d", &segmentIndex)
 
 	var runtimeTicks int64
 	if rt := r.URL.Query().Get("runtimeTicks"); rt != "" {

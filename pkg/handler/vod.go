@@ -772,7 +772,8 @@ func (h *VODHandler) HLSMaster(w http.ResponseWriter, r *http.Request) {
 
 	profile := hls.ProfileSettings{VideoCodec: "copy", AudioCodec: "aac"}
 	hlsSess := h.hlsManager.GetOrCreateSession(channelID, streamURL, 6, durationTicks, sess.Duration == 0, profile)
-	hls.ServeMasterPlaylist(w, hlsSess, "")
+	playlistURL := fmt.Sprintf("/vod/%s/hls/playlist.m3u8", channelID)
+	hls.ServeMasterPlaylist(w, hlsSess, playlistURL)
 }
 
 func (h *VODHandler) HLSPlaylist(w http.ResponseWriter, r *http.Request) {
@@ -789,7 +790,7 @@ func (h *VODHandler) HLSPlaylist(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	hls.ServeMediaPlaylist(w, hlsSess)
+	hls.ServeMediaPlaylist(w, hlsSess, "")
 }
 
 func (h *VODHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
@@ -802,8 +803,17 @@ func (h *VODHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if segmentFile == "init.mp4" {
+		if err := h.hlsManager.RequestSegment(context.Background(), hlsSess, 0, 0); err != nil {
+			respondError(w, http.StatusNotFound, "init segment not available")
+			return
+		}
+		hls.ServeSegment(w, r, hlsSess.InitSegmentPath())
+		return
+	}
+
 	var segmentIndex int
-	fmt.Sscanf(strings.TrimSuffix(segmentFile, ".ts"), "seg%d", &segmentIndex)
+	fmt.Sscanf(strings.TrimSuffix(segmentFile, ".mp4"), "seg%d", &segmentIndex)
 
 	var runtimeTicks int64
 	if rt := r.URL.Query().Get("runtimeTicks"); rt != "" {

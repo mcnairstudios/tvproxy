@@ -148,13 +148,15 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64) []strin
 		"-f", "hls",
 		"-max_delay", "5000000",
 		"-hls_time", fmt.Sprintf("%d", s.SegmentLength),
-		"-hls_segment_type", "mpegts",
+		"-hls_segment_type", "fmp4",
+		"-hls_fmp4_init_filename", "init.mp4",
+		"-hls_segment_options", "movflags=+frag_discont",
 		"-start_number", fmt.Sprintf("%d", startNumber),
 		"-hls_playlist_type", "event",
 		"-hls_list_size", "0",
 	)
 
-	segPattern := filepath.Join(s.OutputDir, "seg%d.ts")
+	segPattern := filepath.Join(s.OutputDir, "seg%d.mp4")
 	playlistPath := filepath.Join(s.OutputDir, "playlist.m3u8")
 
 	args = append(args,
@@ -166,7 +168,11 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64) []strin
 }
 
 func (s *Session) SegmentPath(index int) string {
-	return filepath.Join(s.OutputDir, fmt.Sprintf("seg%d.ts", index))
+	return filepath.Join(s.OutputDir, fmt.Sprintf("seg%d.mp4", index))
+}
+
+func (s *Session) InitSegmentPath() string {
+	return filepath.Join(s.OutputDir, "init.mp4")
 }
 
 func (s *Session) WaitForSegment(index int, timeout time.Duration) error {
@@ -207,7 +213,7 @@ func (s *Session) CurrentTranscodeIndex() int {
 			continue
 		}
 		var idx int
-		if _, err := fmt.Sscanf(e.Name(), "seg%d.ts", &idx); err == nil {
+		if _, err := fmt.Sscanf(e.Name(), "seg%d.mp4", &idx); err == nil {
 			if idx > highest {
 				highest = idx
 			}

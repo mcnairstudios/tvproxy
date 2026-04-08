@@ -21,10 +21,11 @@ func GenerateVODPlaylist(sess *Session, endpointPrefix string) string {
 	targetDuration := int(math.Ceil(segLen))
 
 	result := "#EXTM3U\n"
-	result += "#EXT-X-VERSION:3\n"
+	result += "#EXT-X-VERSION:7\n"
 	result += fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", targetDuration)
 	result += "#EXT-X-MEDIA-SEQUENCE:0\n"
 	result += "#EXT-X-PLAYLIST-TYPE:VOD\n"
+	result += fmt.Sprintf("#EXT-X-MAP:URI=\"%sinit.mp4\"\n", endpointPrefix)
 
 	var currentTicks int64
 	for i := 0; i < totalSegments; i++ {
@@ -35,7 +36,7 @@ func GenerateVODPlaylist(sess *Session, endpointPrefix string) string {
 		lengthTicks := int64(dur * 10000000)
 
 		result += fmt.Sprintf("#EXTINF:%.6f,\n", dur)
-		result += fmt.Sprintf("%sseg%d.ts?runtimeTicks=%d&actualSegmentLengthTicks=%d\n",
+		result += fmt.Sprintf("%sseg%d.mp4?runtimeTicks=%d&actualSegmentLengthTicks=%d\n",
 			endpointPrefix, i, currentTicks, lengthTicks)
 
 		currentTicks += lengthTicks
@@ -58,35 +59,29 @@ func GenerateLivePlaylist(sess *Session) string {
 
 	for i := 0; i <= current; i++ {
 		result += fmt.Sprintf("#EXTINF:%d.000000,\n", sess.SegmentLength)
-		result += fmt.Sprintf("seg%d.ts\n", i)
+		result += fmt.Sprintf("seg%d.mp4\n", i)
 	}
 
 	return result
 }
 
-func ServeMasterPlaylist(w http.ResponseWriter, sess *Session, baseURL string) {
+func ServeMasterPlaylist(w http.ResponseWriter, sess *Session, playlistURL string) {
 	w.Header().Set("Content-Type", "application/x-mpegURL")
 	w.Header().Set("Cache-Control", "no-cache, no-store")
 
 	bandwidth := 10000000
 	fmt.Fprintln(w, "#EXTM3U")
 	fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=%d\n", bandwidth)
-
-	if sess.IsLive {
-		fmt.Fprintf(w, "%s/Videos/%s/live.m3u8\n", baseURL, sess.ID)
-	} else {
-		fmt.Fprintf(w, "%s/Videos/%s/main.m3u8\n", baseURL, sess.ID)
-	}
+	fmt.Fprintln(w, playlistURL)
 }
 
-func ServeMediaPlaylist(w http.ResponseWriter, sess *Session) {
+func ServeMediaPlaylist(w http.ResponseWriter, sess *Session, segmentPrefix string) {
 	w.Header().Set("Content-Type", "application/x-mpegURL")
 	w.Header().Set("Cache-Control", "no-cache, no-store")
 
 	var playlist string
 	if sess.DurationTicks > 0 && !sess.IsLive {
-		endpointPrefix := "hls1/main/"
-		playlist = GenerateVODPlaylist(sess, endpointPrefix)
+		playlist = GenerateVODPlaylist(sess, segmentPrefix)
 	} else {
 		playlist = GenerateLivePlaylist(sess)
 	}
@@ -95,6 +90,6 @@ func ServeMediaPlaylist(w http.ResponseWriter, sess *Session) {
 }
 
 func ServeSegment(w http.ResponseWriter, r *http.Request, segPath string) {
-	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Content-Type", "video/mp4")
 	http.ServeFile(w, r, segPath)
 }
