@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -838,6 +839,14 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
 	streamID := addDashes(itemID)
+
+	var reqBody map[string]any
+	json.NewDecoder(r.Body).Decode(&reqBody)
+	if dp, ok := reqBody["DeviceProfile"].(map[string]any); ok {
+		if profiles, ok := dp["DirectPlayProfiles"].([]any); ok {
+			s.log.Debug().Int("directPlayProfiles", len(profiles)).Msg("client device profile")
+		}
+	}
 
 	ctx := r.Context()
 	stream, _ := s.streams.GetByID(ctx, streamID)
