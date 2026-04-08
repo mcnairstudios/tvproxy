@@ -173,10 +173,7 @@ func (s *Server) enrichMovieItem(st *models.Stream) BaseItemDto {
 				SupportsDirectStream: true, SupportsDirectPlay: false,
 				TranscodingURL: fmt.Sprintf("/Videos/%s/stream.mp4?static=true", itemID),
 				TranscodingSubProtocol: "http", TranscodingContainer: "mp4",
-				MediaStreams: []MediaStream{
-					{Type: "Video", Codec: "h264", Index: 0, IsDefault: true},
-					{Type: "Audio", Codec: "aac", Index: 1, IsDefault: true, Channels: 2},
-				},
+				MediaStreams: s.buildMediaStreams(st),
 			},
 		},
 	}
@@ -808,6 +805,71 @@ func firstOf(q url.Values, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func (s *Server) buildMediaStreams(st *models.Stream) []MediaStream {
+	videoCodec := "h264"
+	audioCodec := "aac"
+	width, height := 1920, 1080
+	channels := 2
+
+	if st.VODVCodec != "" {
+		vc := strings.ToLower(st.VODVCodec)
+		switch {
+		case vc == "hevc" || vc == "h265":
+			videoCodec = "hevc"
+		case vc == "h264" || vc == "avc":
+			videoCodec = "h264"
+		case vc == "av1":
+			videoCodec = "av1"
+		default:
+			videoCodec = vc
+		}
+	}
+	if st.VODACodec != "" {
+		ac := strings.ToLower(st.VODACodec)
+		switch {
+		case strings.Contains(ac, "aac"):
+			audioCodec = "aac"
+		case strings.Contains(ac, "ac3") || strings.Contains(ac, "ac-3"):
+			audioCodec = "ac3"
+		case strings.Contains(ac, "eac3") || strings.Contains(ac, "e-ac-3"):
+			audioCodec = "eac3"
+		case strings.Contains(ac, "dts"):
+			audioCodec = "dca"
+		case strings.Contains(ac, "truehd"):
+			audioCodec = "truehd"
+		case strings.Contains(ac, "flac"):
+			audioCodec = "flac"
+		default:
+			audioCodec = ac
+		}
+	}
+	if st.VODRes != "" {
+		switch strings.ToLower(st.VODRes) {
+		case "4k", "2160p":
+			width, height = 3840, 2160
+		case "1080p":
+			width, height = 1920, 1080
+		case "720p":
+			width, height = 1280, 720
+		case "480p":
+			width, height = 854, 480
+		}
+	}
+	if st.VODAudio != "" {
+		au := strings.ToLower(st.VODAudio)
+		if strings.Contains(au, "7.1") {
+			channels = 8
+		} else if strings.Contains(au, "5.1") || strings.Contains(au, "atmos") {
+			channels = 6
+		}
+	}
+
+	return []MediaStream{
+		{Type: "Video", Codec: videoCodec, Index: 0, IsDefault: true, Width: width, Height: height},
+		{Type: "Audio", Codec: audioCodec, Index: 1, IsDefault: true, Channels: channels, SampleRate: 48000},
+	}
 }
 
 func hashString(s string) uint32 {
