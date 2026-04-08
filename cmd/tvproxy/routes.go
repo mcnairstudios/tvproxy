@@ -74,11 +74,7 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 	r.Get("/stream/{streamID}", h.proxy.RawStream)
 	r.Get("/recording/{streamID}/{filename}", h.vod.StreamRecordingDLNA)
 
-	r.Get("/stream/{streamID}/probe", h.vod.ProbeStream)
-	r.Post("/stream/{streamID}/vod", h.vod.CreateSession)
-	r.Post("/channel/{channelID}/vod", h.vod.CreateChannelSession)
 	r.Get("/vod/{sessionID}/status", h.vod.Status)
-	r.Post("/vod/{sessionID}/seek", h.vod.Seek)
 	r.Get("/vod/{sessionID}/stream", h.vod.Stream)
 	r.Get("/vod/{sessionID}/hls/master.m3u8", h.vod.HLSMaster)
 	r.Get("/vod/{sessionID}/hls/playlist.m3u8", h.vod.HLSPlaylist)
@@ -87,6 +83,10 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 	r.Group(func(r chi.Router) {
 		r.Use(authMW.Authenticate)
 
+		r.Get("/stream/{streamID}/probe", h.vod.ProbeStream)
+		r.Post("/stream/{streamID}/vod", h.vod.CreateSession)
+		r.Post("/channel/{channelID}/vod", h.vod.CreateChannelSession)
+		r.Post("/vod/{sessionID}/seek", h.vod.Seek)
 		r.Delete("/vod/{sessionID}", h.vod.DeleteSession)
 		r.Post("/api/vod/record/{channelID}", h.vod.StartRecording)
 		r.Delete("/api/vod/record/{channelID}", h.vod.StopRecording)

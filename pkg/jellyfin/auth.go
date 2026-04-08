@@ -20,20 +20,6 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			uid := s.firstUserID(r.Context())
-			s.tokens.Store(token, uid)
-			s.touchJellyfinSession(r, uid)
-			next.ServeHTTP(w, r)
-			return
-		}
-		auth := s.authHeader(r)
-		if strings.Contains(auth, "DeviceId=") {
-			uid := s.firstUserID(r.Context())
-			if uid != "" {
-				s.touchJellyfinSession(r, uid)
-			}
-			next.ServeHTTP(w, r)
-			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
