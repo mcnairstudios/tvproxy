@@ -34,9 +34,10 @@ func (h *ChannelGroupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 
 	var req struct {
-		Name      string `json:"name"`
-		IsEnabled bool   `json:"is_enabled"`
-		SortOrder int    `json:"sort_order"`
+		Name            string `json:"name"`
+		IsEnabled       bool   `json:"is_enabled"`
+		JellyfinEnabled bool   `json:"jellyfin_enabled"`
+		SortOrder       int    `json:"sort_order"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -49,10 +50,11 @@ func (h *ChannelGroupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	group := &models.ChannelGroup{
-		UserID:    user.UserID,
-		Name:      req.Name,
-		IsEnabled: req.IsEnabled,
-		SortOrder: req.SortOrder,
+		UserID:          user.UserID,
+		Name:            req.Name,
+		IsEnabled:       req.IsEnabled,
+		JellyfinEnabled: req.JellyfinEnabled,
+		SortOrder:       req.SortOrder,
 	}
 
 	if err := h.channelService.CreateChannelGroup(r.Context(), group); err != nil {
@@ -87,9 +89,10 @@ func (h *ChannelGroupHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name      string `json:"name"`
-		IsEnabled bool   `json:"is_enabled"`
-		SortOrder int    `json:"sort_order"`
+		Name            string `json:"name"`
+		IsEnabled       bool   `json:"is_enabled"`
+		JellyfinEnabled bool   `json:"jellyfin_enabled"`
+		SortOrder       int    `json:"sort_order"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -100,6 +103,7 @@ func (h *ChannelGroupHandler) Update(w http.ResponseWriter, r *http.Request) {
 		group.Name = req.Name
 	}
 	group.IsEnabled = req.IsEnabled
+	group.JellyfinEnabled = req.JellyfinEnabled
 	group.SortOrder = req.SortOrder
 
 	if err := h.channelService.UpdateChannelGroupForUser(r.Context(), group, user.UserID); err != nil {

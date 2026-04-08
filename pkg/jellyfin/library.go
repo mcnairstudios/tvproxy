@@ -41,7 +41,7 @@ func (s *Server) userViews(w http.ResponseWriter, r *http.Request) {
 		groupID := "group_" + strings.ReplaceAll(g.ID, "-", "")
 		views = append(views, BaseItemDto{
 			Name: g.Name, ServerID: s.serverID, ID: groupID,
-			Type: "CollectionFolder", CollectionType: "livetv",
+			Type: "CollectionFolder", CollectionType: "folders",
 			IsFolder: true, ImageTags: map[string]string{},
 		})
 	}

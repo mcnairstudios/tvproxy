@@ -2362,15 +2362,24 @@
         const formEl = h('div');
         const inputs = {};
         (gb.fields || []).forEach(f => {
-          const inp = h('input', { type: f.type || 'text', placeholder: f.placeholder || '' });
-          inp.value = group[f.key] != null ? String(group[f.key]) : (f.default != null ? String(f.default) : '');
-          inputs[f.key] = inp;
-          formEl.appendChild(h('div', { className: 'form-group' }, h('label', null, f.label), inp));
+          if (f.type === 'checkbox') {
+            const cb = h('input', { type: 'checkbox', id: 'gf-' + f.key });
+            cb.checked = !!group[f.key];
+            inputs[f.key] = cb;
+            formEl.appendChild(h('div', { className: 'form-check', style: 'display:flex;align-items:center;gap:6px;margin:8px 0' }, cb, h('label', { for: 'gf-' + f.key, style: 'cursor:pointer;margin:0' }, f.label)));
+          } else {
+            const inp = h('input', { type: f.type || 'text', placeholder: f.placeholder || '' });
+            inp.value = group[f.key] != null ? String(group[f.key]) : (f.default != null ? String(f.default) : '');
+            inputs[f.key] = inp;
+            formEl.appendChild(h('div', { className: 'form-group' }, h('label', null, f.label), inp));
+          }
         });
         showModal('Edit ' + (gb.singular || 'Group'), formEl, async () => {
           const body = {};
           (gb.fields || []).forEach(f => {
-            body[f.key] = f.type === 'number' ? Number(inputs[f.key].value) : inputs[f.key].value;
+            if (f.type === 'checkbox') body[f.key] = inputs[f.key].checked;
+            else if (f.type === 'number') body[f.key] = Number(inputs[f.key].value);
+            else body[f.key] = inputs[f.key].value;
           });
           await api.put(gb.apiPath + '/' + group.id, body);
           toast.success((gb.singular || 'Group') + ' updated');
