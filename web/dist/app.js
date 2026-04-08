@@ -2202,7 +2202,7 @@
         h('div', { style: 'padding: 12px 16px; display: flex; flex-direction: column; gap: 10px' }, ...cacheRows),
       );
 
-      function updateDashCache() {
+      function updateDashboardCache() {
         cachesInfo.forEach(function(ci, i) {
           var c = ci.cache;
           var row = cacheRows[i];
@@ -2214,8 +2214,8 @@
         });
       }
       if (renderDashboard._prevListener) DataCache.offChange(renderDashboard._prevListener);
-      renderDashboard._prevListener = updateDashCache;
-      DataCache.onChange(updateDashCache);
+      renderDashboard._prevListener = updateDashboardCache;
+      DataCache.onChange(updateDashboardCache);
 
       container.appendChild(grid);
       container.appendChild(cacheSection);
@@ -5053,7 +5053,7 @@
         { key: 'hwaccel', label: 'HW Accel', render: item => ({'default':'Global Default',none:'None (Software)',qsv:'Intel QSV',nvenc:'NVIDIA NVENC',vaapi:'VAAPI (AMD/Intel)',videotoolbox:'VideoToolbox (macOS)'})[item.hwaccel] || item.hwaccel },
         { key: 'video_codec', label: 'Codec', render: item => ({'default':'Global Default',copy:'Copy',h264:'H.264',h265:'H.265',av1:'AV1'})[item.video_codec] || item.video_codec },
         { key: 'container', label: 'Container', render: item => ({mpegts:'MPEG-TS',matroska:'Matroska',mp4:'MP4',webm:'WebM'})[item.container] || item.container },
-        { key: 'delivery', label: 'Delivery', render: item => ({stream:'Stream (FFmpeg)',dash:'DASH (Shaka)'})[item.delivery] || item.delivery || 'stream' },
+        { key: 'delivery', label: 'Delivery', render: item => ({stream:'Stream (FFmpeg)',hls:'HLS'})[item.delivery] || item.delivery || 'stream' },
         { key: 'audio_codec', label: 'Audio', render: item => ({'default':'Auto',copy:'Copy',aac:'AAC',opus:'Opus'})[item.audio_codec] || item.audio_codec || 'Auto' },
         { key: 'is_default', label: 'Default', render: item => {
           const badges = [];
@@ -5096,14 +5096,14 @@
         ], showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
         { key: 'delivery', label: 'Delivery', type: 'select', options: [
           { value: 'stream', label: 'Stream (FFmpeg)' },
-          { value: 'dash', label: 'DASH (Shaka)' },
+          { value: 'hls', label: 'HLS' },
         ], default: 'stream', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
         { key: 'audio_codec', label: 'Audio Codec', type: 'select', options: [
           { value: 'default', label: 'Default (auto)' },
           { value: 'copy', label: 'Copy (passthrough)' },
           { value: 'aac', label: 'AAC' },
           { value: 'opus', label: 'Opus' },
-        ], default: 'default', help: 'Default: Opus for DASH/WebM, Copy for passthrough, AAC otherwise.', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
+        ], default: 'default', help: 'Default: Opus for WebM, Copy for passthrough, AAC otherwise.', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' },
         { key: 'deinterlace', label: 'Deinterlace', type: 'checkbox', default: false, help: 'Apply yadif deinterlace filter (only when transcoding, not copy).', showWhen: form => (form.stream_mode || 'ffmpeg') === 'ffmpeg' && (form.video_codec || 'default') !== 'copy' },
         { key: 'fps_mode', label: 'FPS Mode', type: 'select', options: [
           { value: 'auto', label: 'Auto (variable)' },

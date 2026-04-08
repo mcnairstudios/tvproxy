@@ -17,7 +17,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
-	"github.com/gavinmcnair/tvproxy/pkg/dash"
 	"github.com/gavinmcnair/tvproxy/pkg/hls"
 	"github.com/gavinmcnair/tvproxy/pkg/database"
 	"github.com/gavinmcnair/tvproxy/pkg/defaults"
@@ -152,9 +151,6 @@ func main() {
 		streamStore.Save()
 	}
 
-	os.RemoveAll(dash.TempDir())
-	log.Debug().Str("path", dash.TempDir()).Msg("cleaned stale dash segments")
-
 	authService := service.NewAuthService(userStore, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
 	authService.SetInviteExpiry(cfg.Settings.Auth.InviteTokenExpiry)
 
@@ -220,12 +216,8 @@ func main() {
 
 	authMW := middleware.NewAuthMiddleware(authService, activityService, cfg.APIKey, adminUserID)
 
-	dashManager := dash.NewManager(log)
 	hlsManager := hls.NewManager(hls.TempDir(), log)
 	go hlsManager.StartCleanupWorker(ctx)
-	sessionMgr.SetOnCleanup(func(channelID string) {
-		dashManager.Stop(channelID)
-	})
 
 	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
 	dataResetter := service.NewDataResetter(
@@ -258,7 +250,7 @@ func main() {
 		hdhr:         handler.NewHDHRHandler(hdhrService, proxyService, cfg),
 		output:       handler.NewOutputHandler(outputService),
 		proxy:        handler.NewProxyHandler(proxyService, settingsService, log),
-		vod:          handler.NewVODHandler(vodService, clientService, dashManager, hlsManager, log),
+		vod:          handler.NewVODHandler(vodService, clientService, hlsManager, log),
 		activity:     handler.NewActivityHandler(activityService),
 		favorite:     handler.NewFavoriteHandler(favoriteStore),
 		settings:     handler.NewSettingsHandler(settingsService, exportService, dataResetter, authService, streamStore, epgStore),
@@ -401,7 +393,6 @@ func main() {
 	log.Info().Msg("shutting down")
 
 	wgService.Stop()
-	dashManager.Shutdown()
 	vodService.Shutdown()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)

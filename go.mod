@@ -3,7 +3,6 @@ module github.com/gavinmcnair/tvproxy
 go 1.24.0
 
 require (
-	github.com/Eyevinn/mp4ff v0.51.0
 	github.com/asticode/go-astits v1.15.0
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/go-chi/cors v1.2.1

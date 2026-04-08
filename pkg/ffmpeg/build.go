@@ -162,7 +162,7 @@ func buildAudioFlags(probe *ProbeResult, container, delivery, audioCodec, stream
 	default:
 		if container == "webm" {
 			flags = []string{"-c:a", "libopus", "-b:a", s.AudioBitrate}
-		} else if delivery == "dash" {
+		} else if delivery == "hls" {
 			flags = []string{"-c:a", "aac", "-ac", "2", "-b:a", s.AudioBitrate}
 		} else {
 			flags = audioEncoder(probe)

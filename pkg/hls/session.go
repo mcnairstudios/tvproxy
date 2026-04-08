@@ -97,10 +97,37 @@ func (s *Session) StartTranscode(ctx context.Context, startNumber int, startTime
 	return nil
 }
 
+func (s *Session) segmentExt() string {
+	if s.Profile.Container == "mpegts" {
+		return ".ts"
+	}
+	return ".mp4"
+}
+
 func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64) []string {
 	var args []string
 
 	args = append(args, "-hide_banner", "-loglevel", "warning")
+
+	hwaccel := s.Profile.HWAccel
+	if hwaccel != "" && hwaccel != "none" && hwaccel != "default" {
+		switch hwaccel {
+		case "vaapi":
+			args = append(args,
+				"-init_hw_device", "vaapi=va:/dev/dri/renderD128",
+				"-filter_hw_device", "va",
+			)
+		case "qsv":
+			args = append(args,
+				"-init_hw_device", "qsv=qsv:hw",
+				"-filter_hw_device", "qsv",
+			)
+		case "cuda", "nvenc":
+			args = append(args, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+		case "videotoolbox":
+			args = append(args, "-hwaccel", "videotoolbox")
+		}
+	}
 
 	if startTimeTicks > 0 {
 		secs := float64(startTimeTicks) / 10000000.0
@@ -114,12 +141,16 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64) []strin
 	)
 
 	videoCodec := s.Profile.VideoCodec
-	if videoCodec == "" {
+	if videoCodec == "" || videoCodec == "copy" {
 		videoCodec = "copy"
 	}
 	audioCodec := s.Profile.AudioCodec
-	if audioCodec == "" {
-		audioCodec = "aac"
+	if audioCodec == "" || audioCodec == "copy" {
+		audioCodec = "copy"
+	}
+
+	if s.Profile.Deinterlace && videoCodec == "copy" {
+		videoCodec = "libx264"
 	}
 
 	args = append(args,
@@ -129,11 +160,18 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64) []strin
 		"-map", "0:v:0?",
 		"-map", "0:a:0?",
 		"-c:v", videoCodec,
-		"-tag:v:0", "hvc1",
 	)
+
+	if videoCodec != "copy" && videoCodec != "libx264" {
+		args = append(args, "-tag:v:0", "hvc1")
+	}
 
 	if videoCodec == "copy" {
 		args = append(args, "-start_at_zero")
+	}
+
+	if s.Profile.Deinterlace && videoCodec != "copy" {
+		args = append(args, "-vf", "yadif")
 	}
 
 	args = append(args, "-c:a", audioCodec)
@@ -148,15 +186,26 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64) []strin
 		"-f", "hls",
 		"-max_delay", "5000000",
 		"-hls_time", fmt.Sprintf("%d", s.SegmentLength),
-		"-hls_segment_type", "fmp4",
-		"-hls_fmp4_init_filename", "init.mp4",
-		"-hls_segment_options", "movflags=+frag_discont",
+	)
+
+	ext := s.segmentExt()
+	if s.Profile.Container == "mpegts" {
+		args = append(args, "-hls_segment_type", "mpegts")
+	} else {
+		args = append(args,
+			"-hls_segment_type", "fmp4",
+			"-hls_fmp4_init_filename", "init.mp4",
+			"-hls_segment_options", "movflags=+frag_discont",
+		)
+	}
+
+	args = append(args,
 		"-start_number", fmt.Sprintf("%d", startNumber),
 		"-hls_playlist_type", "event",
 		"-hls_list_size", "0",
 	)
 
-	segPattern := filepath.Join(s.OutputDir, "seg%d.mp4")
+	segPattern := filepath.Join(s.OutputDir, "seg%d"+ext)
 	playlistPath := filepath.Join(s.OutputDir, "playlist.m3u8")
 
 	args = append(args,
@@ -168,7 +217,7 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64) []strin
 }
 
 func (s *Session) SegmentPath(index int) string {
-	return filepath.Join(s.OutputDir, fmt.Sprintf("seg%d.mp4", index))
+	return filepath.Join(s.OutputDir, fmt.Sprintf("seg%d%s", index, s.segmentExt()))
 }
 
 func (s *Session) InitSegmentPath() string {
@@ -208,12 +257,14 @@ func (s *Session) CurrentTranscodeIndex() int {
 	if err != nil {
 		return -1
 	}
+	ext := s.segmentExt()
+	pattern := "seg%d" + ext
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
 		var idx int
-		if _, err := fmt.Sscanf(e.Name(), "seg%d.mp4", &idx); err == nil {
+		if _, err := fmt.Sscanf(e.Name(), pattern, &idx); err == nil {
 			if idx > highest {
 				highest = idx
 			}

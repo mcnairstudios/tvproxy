@@ -24,7 +24,7 @@ var (
 	validHWAccels    = map[string]bool{"default": true, "none": true, "qsv": true, "nvenc": true, "vaapi": true, "videotoolbox": true}
 	validVideoCodecs = map[string]bool{"default": true, "copy": true, "h264": true, "h265": true, "av1": true}
 	validContainers  = map[string]bool{"mpegts": true, "matroska": true, "mp4": true, "webm": true}
-	validDeliveries  = map[string]bool{"stream": true, "dash": true}
+	validDeliveries  = map[string]bool{"stream": true, "hls": true}
 	validAudioCodecs = map[string]bool{"default": true, "copy": true, "aac": true, "opus": true}
 	validFPSModes    = map[string]bool{"auto": true, "cfr": true}
 )
