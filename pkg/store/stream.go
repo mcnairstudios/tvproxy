@@ -270,6 +270,18 @@ func (s *StreamStoreImpl) Delete(_ context.Context, id string) error {
 	return nil
 }
 
+func (s *StreamStoreImpl) UpdateWireGuardByAccountID(_ context.Context, accountID string, useWireGuard bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, st := range s.items {
+		if st.M3UAccountID == accountID {
+			st.UseWireGuard = useWireGuard
+			s.items[id] = st
+		}
+	}
+	return nil
+}
+
 func (s *StreamStoreImpl) UpdateTMDBID(_ context.Context, id string, tmdbID int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

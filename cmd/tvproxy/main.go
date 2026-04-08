@@ -187,7 +187,10 @@ func main() {
 		log.Error().Err(err).Msg("failed to start multi wireguard (continuing)")
 	}
 
-	wgHTTPClient := wgService.HTTPClient()
+	wgHTTPClient := wgMultiService.HTTPClient()
+	if wgHTTPClient == nil {
+		wgHTTPClient = wgService.HTTPClient()
+	}
 
 	logoTimeout := 10 * time.Second
 	if cfg.Settings != nil {

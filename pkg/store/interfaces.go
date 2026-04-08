@@ -30,6 +30,7 @@ type StreamWriter interface {
 	DeleteOrphanedSatIPStreams(ctx context.Context, knownSourceIDs []string) ([]string, error)
 	Delete(ctx context.Context, id string) error
 	UpdateTMDBID(ctx context.Context, id string, tmdbID int) error
+	UpdateWireGuardByAccountID(ctx context.Context, accountID string, useWireGuard bool) error
 	Clear() error
 }
 

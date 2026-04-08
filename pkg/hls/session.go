@@ -184,15 +184,15 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64, pipeHTT
 	} else if isRTSP(s.StreamURL) {
 		args = append(args,
 			"-rtsp_transport", "tcp",
-			"-analyzeduration", "3000000",
-			"-probesize", "2000000",
+			"-analyzeduration", "1000000",
+			"-probesize", "1000000",
 			"-max_delay", "500000",
 			"-i", s.StreamURL,
 		)
 	} else {
 		args = append(args,
-			"-analyzeduration", "3000000",
-			"-probesize", "3000000",
+			"-analyzeduration", "1000000",
+			"-probesize", "1000000",
 			"-i", s.StreamURL,
 		)
 	}

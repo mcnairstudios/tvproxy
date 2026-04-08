@@ -661,7 +661,7 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 
 	var httpResp *http.Response
 	if ffmpeg.IsHTTPURL(inputURL) && s.UseWireGuard {
-		m.log.Debug().Str("session_id", s.ID).Str("user_agent", m.config.UserAgent).Str("url", inputURL).Msg("connecting to upstream")
+		m.log.Info().Str("session_id", s.ID).Str("url", inputURL).Msg("routing upstream via wireguard")
 		resp, err := httputil.Fetch(ctx, m.httpClient, m.config, inputURL)
 		if err != nil {
 			m.log.Error().Err(err).Str("session_id", s.ID).Str("url", inputURL).Msg("upstream connection failed")

@@ -82,6 +82,8 @@ func (s *M3UService) UpdateAccount(ctx context.Context, account *models.M3UAccou
 	if err := s.m3uAccountStore.Update(ctx, account); err != nil {
 		return fmt.Errorf("updating m3u account: %w", err)
 	}
+	s.streamStore.UpdateWireGuardByAccountID(ctx, account.ID, account.UseWireGuard)
+	s.streamStore.Save()
 	return nil
 }
 

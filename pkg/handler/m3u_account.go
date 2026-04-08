@@ -37,6 +37,7 @@ func (h *M3UAccountHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Password        string `json:"password"`
 		MaxStreams      int    `json:"max_streams"`
 		IsEnabled       bool   `json:"is_enabled"`
+		UseWireGuard    bool   `json:"use_wireguard"`
 		RefreshInterval int    `json:"refresh_interval"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -57,6 +58,7 @@ func (h *M3UAccountHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Password:        req.Password,
 		MaxStreams:       req.MaxStreams,
 		IsEnabled:       req.IsEnabled,
+		UseWireGuard:    req.UseWireGuard,
 		RefreshInterval: req.RefreshInterval,
 	}
 
@@ -97,6 +99,7 @@ func (h *M3UAccountHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Password        string `json:"password"`
 		MaxStreams      int    `json:"max_streams"`
 		IsEnabled       bool   `json:"is_enabled"`
+		UseWireGuard    bool   `json:"use_wireguard"`
 		RefreshInterval int    `json:"refresh_interval"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -117,6 +120,7 @@ func (h *M3UAccountHandler) Update(w http.ResponseWriter, r *http.Request) {
 	account.Password = req.Password
 	account.MaxStreams = req.MaxStreams
 	account.IsEnabled = req.IsEnabled
+	account.UseWireGuard = req.UseWireGuard
 	account.RefreshInterval = req.RefreshInterval
 
 	if err := h.m3uService.UpdateAccount(r.Context(), account); err != nil {
