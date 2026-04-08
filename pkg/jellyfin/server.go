@@ -138,6 +138,8 @@ func (s *Server) Router() chi.Router {
 		r.Get("/Items/Resume", s.getResume)
 		r.Get("/UserItems/Resume", s.getResume)
 		r.Get("/Users/{userId}/Items", s.getItems)
+		r.Post("/Users/Configuration", s.sessionsCapabilities)
+		r.Post("/Users/Password", s.sessionsCapabilities)
 		r.Get("/Users/{userId}/Items/Latest", s.getLatest)
 		r.Get("/Users/{userId}/Items/Resume", s.getResume)
 		r.Get("/Users/{userId}/Items/{itemId}", s.getItem)
@@ -197,6 +199,8 @@ func (s *Server) Router() chi.Router {
 		r.Delete("/UserPlayedItems/{itemId}", s.markPlayed)
 		r.Post("/UserFavoriteItems/{itemId}", s.markFavorite)
 		r.Delete("/UserFavoriteItems/{itemId}", s.markFavorite)
+		r.Get("/UserItems/{itemId}/UserData", s.getUserData)
+		r.Post("/UserItems/{itemId}/UserData", s.sessionsCapabilities)
 	})
 
 	return r
@@ -593,6 +597,12 @@ func (s *Server) itemCounts(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) sessionsGet(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, []SessionInfo{})
+}
+
+func (s *Server) getUserData(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, UserItemData{
+		Key: chi.URLParam(r, "itemId"),
+	})
 }
 
 func (s *Server) displayPreferences(w http.ResponseWriter, r *http.Request) {
