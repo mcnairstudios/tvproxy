@@ -70,6 +70,16 @@ func (s *Server) Router() chi.Router {
 		w.Write([]byte("<!DOCTYPE html><html><body><h1>TVProxy Jellyfin API</h1><p>Use a Jellyfin client app to connect.</p></body></html>"))
 	})
 	r.Get("/web/{file}", func(w http.ResponseWriter, r *http.Request) {
+		file := chi.URLParam(r, "file")
+		if file == "config.json" {
+			s.respondJSON(w, http.StatusOK, map[string]any{
+				"menuLinks":    []any{},
+				"multiserver":  false,
+				"themes":       []any{},
+				"plugins":      []any{},
+			})
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	})
 

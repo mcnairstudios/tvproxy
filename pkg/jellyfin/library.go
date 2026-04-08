@@ -661,8 +661,15 @@ func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request) {
 func (s *Server) videoStream(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
 	streamID := addDashes(itemID)
-
 	ctx := r.Context()
+
+	channel, chErr := s.channels.GetByID(ctx, streamID)
+	if chErr == nil && channel != nil {
+		channelURL := fmt.Sprintf("%s:8080/channel/%s?profile=Browser", s.baseURL, streamID)
+		http.Redirect(w, r, channelURL, http.StatusTemporaryRedirect)
+		return
+	}
+
 	stream, err := s.streams.GetByID(ctx, streamID)
 	if err != nil || stream == nil || stream.URL == "" {
 		http.Error(w, "stream not found", http.StatusNotFound)
