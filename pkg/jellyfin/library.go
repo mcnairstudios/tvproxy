@@ -356,6 +356,25 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 	stream, err := s.streams.GetByID(ctx, addDashes(itemID))
 	if err == nil && stream != nil {
 		item := s.enrichMovieItem(stream)
+		if stream.VODType == "series" {
+			item.Type = "Episode"
+			key := stream.VODSeries
+			if key == "" {
+				key = stream.Name
+			}
+			item.SeriesName = key
+			item.SeriesID = fmt.Sprintf("series_%x", hashString(key))
+			item.IndexNumber = stream.VODEpisode
+			item.ParentIndexNumber = stream.VODSeason
+			if ep := s.tmdbClient.LookupEpisode(key, stream.VODSeason, stream.VODEpisode); ep != nil {
+				if ep.Name != "" {
+					item.Name = ep.Name
+				}
+				if ep.Overview != "" {
+					item.Overview = ep.Overview
+				}
+			}
+		}
 		item.People = s.lookupCast(stream.Name, stream.VODType)
 		s.respondJSON(w, http.StatusOK, item)
 		return
