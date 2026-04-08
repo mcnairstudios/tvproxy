@@ -177,7 +177,7 @@ func (s *M3UService) refreshXtreamAccount(ctx context.Context, account *models.M
 }
 
 func (s *M3UService) httpClientForAccount(account *models.M3UAccount) *http.Client {
-	if s.configDir != "" {
+	if account.TLSEnrolled && s.configDir != "" {
 		if tlsClient, err := mtls.TLSClient(s.configDir, account.ID); err == nil {
 			return tlsClient
 		}

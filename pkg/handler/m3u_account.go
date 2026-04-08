@@ -28,9 +28,7 @@ func (h *M3UAccountHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i := range accounts {
-		if mtls.HasCerts(h.configDir, accounts[i].ID) {
-			accounts[i].TLSEnrolled = true
-		}
+		accounts[i].TLSEnrolled = mtls.HasCerts(h.configDir, accounts[i].ID)
 	}
 
 	respondJSON(w, http.StatusOK, accounts)
