@@ -205,6 +205,8 @@ func (s *Server) Router() chi.Router {
 		r.Delete("/UserFavoriteItems/{itemId}", s.markFavorite)
 		r.Get("/UserItems/{itemId}/UserData", s.getUserData)
 		r.Post("/UserItems/{itemId}/UserData", s.sessionsCapabilities)
+		r.Post("/UserItems/{itemId}/Rating", s.getUserData)
+		r.Delete("/UserItems/{itemId}/Rating", s.getUserData)
 	})
 
 	return r
