@@ -92,8 +92,12 @@ func (s *Server) buildMovieItems(ctx context.Context, searchTerm, genres string)
 			continue
 		}
 
-		if searchTerm != "" && !strings.Contains(strings.ToLower(st.Name), searchTerm) {
-			continue
+		if searchTerm != "" {
+			nameMatch := strings.Contains(strings.ToLower(st.Name), searchTerm)
+			collMatch := st.VODCollection != "" && strings.Contains(strings.ToLower(st.VODCollection), searchTerm)
+			if !nameMatch && !collMatch {
+				continue
+			}
 		}
 
 		item := s.enrichMovieItem(&st)
@@ -258,6 +262,37 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 		item := s.enrichMovieItem(stream)
 		s.respondJSON(w, http.StatusOK, item)
 		return
+	}
+
+	if strings.HasPrefix(itemID, "series_") {
+		streams, _ := s.streams.List(ctx)
+		for _, st := range streams {
+			if st.VODType != "series" {
+				continue
+			}
+			key := st.VODSeries
+			if key == "" {
+				key = st.Name
+			}
+			if fmt.Sprintf("series_%x", hashString(key)) == itemID {
+				item := s.enrichSeriesItem(key)
+				var childCount int
+				for _, s2 := range streams {
+					if s2.VODType == "series" {
+						k2 := s2.VODSeries
+						if k2 == "" {
+							k2 = s2.Name
+						}
+						if k2 == key {
+							childCount++
+						}
+					}
+				}
+				item.ChildCount = childCount
+				s.respondJSON(w, http.StatusOK, item)
+				return
+			}
+		}
 	}
 
 	channel, err := s.channels.GetByID(ctx, addDashes(itemID))
@@ -496,6 +531,36 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	isBackdrop := strings.EqualFold(imageType, "Backdrop")
+
+	if strings.HasPrefix(itemID, "series_") {
+		streams, _ := s.streams.List(ctx)
+		for _, st := range streams {
+			if st.VODType != "series" {
+				continue
+			}
+			key := st.VODSeries
+			if key == "" {
+				key = st.Name
+			}
+			if fmt.Sprintf("series_%x", hashString(key)) == itemID {
+				if isBackdrop {
+					if bd := s.tmdbClient.LookupBackdrop(key, "series"); bd != "" {
+						r.URL, _ = url.Parse(fmt.Sprintf("/api/tmdb/image?size=w1280&path=%s", url.QueryEscape(bd)))
+						s.tmdbClient.ServeImage(w, r)
+						return
+					}
+				}
+				if poster := s.tmdbClient.LookupPoster(key, "tv"); poster != "" {
+					r.URL, _ = url.Parse(poster)
+					s.tmdbClient.ServeImage(w, r)
+					return
+				}
+				break
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 
 	stream, err := s.streams.GetByID(ctx, addDashes(itemID))
 	if err == nil && stream != nil {
