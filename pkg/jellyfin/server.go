@@ -97,13 +97,13 @@ func (s *Server) Router() chi.Router {
 	r.Post("/Users/AuthenticateByName", s.authenticateByName)
 
 	r.Get("/Branding/Splashscreen", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "not found", http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
 	})
 	r.Get("/UserImage", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "not found", http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
 	})
 	r.Head("/UserImage", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "not found", http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
 	})
 	r.Get("/Items/{itemId}/Images/{imageType}", s.getImage)
 	r.Get("/Items/{itemId}/Images/{imageType}/{imageIndex}", s.getImage)
@@ -151,6 +151,12 @@ func (s *Server) Router() chi.Router {
 		r.Get("/Items/Suggestions", s.getLatest)
 
 		r.Get("/Persons", s.emptyQueryResult)
+		r.Get("/Persons/{personId}", func(w http.ResponseWriter, r *http.Request) {
+			s.respondJSON(w, http.StatusOK, BaseItemDto{
+				Name: chi.URLParam(r, "personId"), ServerID: s.serverID,
+				ID: chi.URLParam(r, "personId"), Type: "Person",
+			})
+		})
 		r.Get("/Studios", s.emptyQueryResult)
 		r.Get("/Artists", s.emptyQueryResult)
 		r.Get("/Genres", s.emptyQueryResult)
