@@ -97,6 +97,7 @@ type sessionArgs struct {
 	Command          string
 	Args             string
 	Container        string
+	Delivery         string
 	OutputVideoCodec string
 	OutputAudioCodec string
 	OutputHWAccel    string
@@ -146,6 +147,7 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 		Command:          command,
 		Args:             args,
 		Container:        sp.Container,
+		Delivery:         sp.Delivery,
 		OutputVideoCodec: videoCodec,
 		OutputAudioCodec: audioCodec,
 		OutputHWAccel:    hwaccel,
@@ -175,6 +177,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		Command:          sa.Command,
 		Args:             sa.Args,
 		OutputDir:        s.config.VODOutputDir,
+		MetadataOnly:     sa.Delivery == "hls",
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", false, err
@@ -228,6 +231,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		Args:             sa.Args,
 		OutputDir:        s.config.VODOutputDir,
 		KnownDuration:    stream.VODDuration,
+		MetadataOnly:     sa.Delivery == "hls",
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", err

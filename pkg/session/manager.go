@@ -43,6 +43,7 @@ type StartOpts struct {
 	Command          string
 	Args             string
 	OutputDir        string
+	MetadataOnly     bool
 }
 
 type Manager struct {
@@ -460,16 +461,18 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 	m.sessions[opts.ChannelID] = s
 	m.mu.Unlock()
 
-	args := m.buildArgs(opts.Args, opts.StreamURL, filePath)
-	command := opts.Command
-	if command == "" {
-		command = "ffmpeg"
-	}
+	if !opts.MetadataOnly {
+		args := m.buildArgs(opts.Args, opts.StreamURL, filePath)
+		command := opts.Command
+		if command == "" {
+			command = "ffmpeg"
+		}
 
-	go m.run(sessionCtx, s, command, args, opts.StreamURL)
-	go m.probeAsync(s, opts.StreamURL)
-	if strings.HasPrefix(opts.StreamURL, "rtsp://") || strings.HasPrefix(opts.StreamURL, "rtsps://") {
-		go m.logSignalAsync(s.ID, opts.ChannelID, opts.StreamURL)
+		go m.run(sessionCtx, s, command, args, opts.StreamURL)
+		go m.probeAsync(s, opts.StreamURL)
+		if strings.HasPrefix(opts.StreamURL, "rtsp://") || strings.HasPrefix(opts.StreamURL, "rtsps://") {
+			go m.logSignalAsync(s.ID, opts.ChannelID, opts.StreamURL)
+		}
 	}
 
 	m.log.Info().
