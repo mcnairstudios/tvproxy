@@ -384,6 +384,20 @@ func (s *Server) getSeasons(w http.ResponseWriter, r *http.Request) {
 		seasonSet[1] = true
 	}
 
+	seasonEpCount := make(map[int]int)
+	for _, st := range streams {
+		if st.VODType != "series" {
+			continue
+		}
+		key := st.VODSeries
+		if key == "" {
+			key = st.Name
+		}
+		if fmt.Sprintf("series_%x", hashString(key)) == seriesID {
+			seasonEpCount[st.VODSeason]++
+		}
+	}
+
 	var items []BaseItemDto
 	for num := range seasonSet {
 		items = append(items, BaseItemDto{
@@ -395,6 +409,7 @@ func (s *Server) getSeasons(w http.ResponseWriter, r *http.Request) {
 			SeriesID:          seriesID,
 			IndexNumber:       num,
 			IsFolder:          true,
+			ChildCount:        seasonEpCount[num],
 			ImageTags:         map[string]string{},
 			UserData:          &UserItemData{Key: fmt.Sprintf("%s_s%d", seriesID, num)},
 		})
