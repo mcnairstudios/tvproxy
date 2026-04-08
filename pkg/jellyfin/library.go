@@ -506,6 +506,7 @@ func (s *Server) getEpisodes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	streams, _ := s.streams.List(ctx)
+	seen := make(map[string]bool)
 	var items []BaseItemDto
 
 	for _, st := range streams {
@@ -522,6 +523,12 @@ func (s *Server) getEpisodes(w http.ResponseWriter, r *http.Request) {
 		if seasonNum > 0 && st.VODSeason != seasonNum {
 			continue
 		}
+
+		dedup := fmt.Sprintf("s%de%d", st.VODSeason, st.VODEpisode)
+		if seen[dedup] {
+			continue
+		}
+		seen[dedup] = true
 
 		item := s.enrichMovieItem(&st)
 		item.Type = "Episode"
