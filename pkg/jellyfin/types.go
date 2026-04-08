@@ -146,6 +146,9 @@ type BaseItemDto struct {
 	ParentIndexNumber       int             `json:"ParentIndexNumber,omitempty"`
 	UserData                *UserItemData   `json:"UserData,omitempty"`
 	MediaSources            []MediaSource   `json:"MediaSources,omitempty"`
+	Taglines                []string        `json:"Taglines,omitempty"`
+	People                  []PersonDto     `json:"People,omitempty"`
+	Studios                 []NameIDPair    `json:"Studios,omitempty"`
 	ChannelNumber           string          `json:"ChannelNumber,omitempty"`
 	ChannelPrimaryImageTag  string          `json:"ChannelPrimaryImageTag,omitempty"`
 	CurrentProgram          *BaseItemDto    `json:"CurrentProgram,omitempty"`
@@ -209,6 +212,19 @@ type BaseItemDtoQueryResult struct {
 	Items            []BaseItemDto `json:"Items"`
 	TotalRecordCount int           `json:"TotalRecordCount"`
 	StartIndex       int           `json:"StartIndex"`
+}
+
+type PersonDto struct {
+	Name     string `json:"Name"`
+	ID       string `json:"Id"`
+	Role     string `json:"Role,omitempty"`
+	Type     string `json:"Type"`
+	ImageTag string `json:"PrimaryImageTag,omitempty"`
+}
+
+type NameIDPair struct {
+	Name string `json:"Name"`
+	ID   string `json:"Id,omitempty"`
 }
 
 type BrandingConfiguration struct {

@@ -278,11 +278,114 @@ func (s *Server) getResume(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getSeasons(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0})
+	seriesID := chi.URLParam(r, "seriesId")
+	ctx := r.Context()
+
+	streams, _ := s.streams.List(ctx)
+	seasonSet := make(map[int]bool)
+	var seriesName string
+
+	for _, st := range streams {
+		if st.VODType != "series" {
+			continue
+		}
+		key := st.VODSeries
+		if key == "" {
+			key = st.Name
+		}
+		if fmt.Sprintf("series_%x", hashString(key)) == seriesID {
+			seriesName = key
+			if st.VODSeason > 0 {
+				seasonSet[st.VODSeason] = true
+			}
+		}
+	}
+
+	if len(seasonSet) == 0 {
+		seasonSet[1] = true
+	}
+
+	var items []BaseItemDto
+	for num := range seasonSet {
+		items = append(items, BaseItemDto{
+			Name:              fmt.Sprintf("Season %d", num),
+			ServerID:          s.serverID,
+			ID:                fmt.Sprintf("%s_s%d", seriesID, num),
+			Type:              "Season",
+			SeriesName:        seriesName,
+			SeriesID:          seriesID,
+			IndexNumber:       num,
+			IsFolder:          true,
+			ImageTags:         map[string]string{},
+			UserData:          &UserItemData{Key: fmt.Sprintf("%s_s%d", seriesID, num)},
+		})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].IndexNumber < items[j].IndexNumber
+	})
+
+	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: items, TotalRecordCount: len(items)})
 }
 
 func (s *Server) getEpisodes(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0})
+	seriesID := chi.URLParam(r, "seriesId")
+	seasonNum, _ := strconv.Atoi(r.URL.Query().Get("seasonId"))
+	if seasonNum == 0 {
+		if sn := r.URL.Query().Get("season"); sn != "" {
+			seasonNum, _ = strconv.Atoi(sn)
+		}
+	}
+	ctx := r.Context()
+
+	streams, _ := s.streams.List(ctx)
+	var items []BaseItemDto
+
+	for _, st := range streams {
+		if st.VODType != "series" {
+			continue
+		}
+		key := st.VODSeries
+		if key == "" {
+			key = st.Name
+		}
+		if fmt.Sprintf("series_%x", hashString(key)) != seriesID {
+			continue
+		}
+		if seasonNum > 0 && st.VODSeason != seasonNum {
+			continue
+		}
+
+		item := s.enrichMovieItem(&st)
+		item.Type = "Episode"
+		item.SeriesName = key
+		item.SeriesID = seriesID
+		item.IndexNumber = st.VODEpisode
+		item.ParentIndexNumber = st.VODSeason
+
+		if ep := s.tmdbClient.LookupEpisode(key, st.VODSeason, st.VODEpisode); ep != nil {
+			if ep.Name != "" {
+				item.Name = ep.Name
+			}
+			if ep.Overview != "" {
+				item.Overview = ep.Overview
+			}
+		}
+
+		items = append(items, item)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].ParentIndexNumber != items[j].ParentIndexNumber {
+			return items[i].ParentIndexNumber < items[j].ParentIndexNumber
+		}
+		return items[i].IndexNumber < items[j].IndexNumber
+	})
+
+	if items == nil {
+		items = []BaseItemDto{}
+	}
+	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: items, TotalRecordCount: len(items)})
 }
 
 func (s *Server) getFilters(w http.ResponseWriter, r *http.Request) {

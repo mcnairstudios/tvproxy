@@ -450,52 +450,42 @@ func setupRouter(cfg *config.Config, log zerolog.Logger, settingsService *servic
 
 func canonicalJellyfinPath(path string) string {
 	lower := strings.ToLower(path)
-	routes := map[string]string{
-		"/system/info/public":        "/System/Info/Public",
-		"/system/info":               "/System/Info",
-		"/system/ping":               "/System/Ping",
-		"/branding/configuration":    "/Branding/Configuration",
-		"/branding/css":              "/Branding/Css",
-		"/quickconnect/enabled":      "/QuickConnect/Enabled",
-		"/users/public":              "/Users/Public",
-		"/users/authenticatebyname":  "/Users/AuthenticateByName",
-		"/users/me":                  "/Users/Me",
-		"/users":                     "/Users",
-		"/userviews":                 "/UserViews",
-		"/items/latest":              "/Items/Latest",
-		"/items/resume":              "/Items/Resume",
-		"/useritems/resume":          "/UserItems/Resume",
-		"/items":                     "/Items",
-		"/livetv/info":               "/LiveTv/Info",
-		"/livetv/channels":           "/LiveTv/Channels",
-		"/livetv/programs":           "/LiveTv/Programs",
-		"/livetv/guideinfo":          "/LiveTv/GuideInfo",
-		"/sessions/capabilities/full": "/Sessions/Capabilities/Full",
-		"/sessions/playing":          "/Sessions/Playing",
-		"/sessions/playing/progress": "/Sessions/Playing/Progress",
-		"/sessions/playing/stopped":  "/Sessions/Playing/Stopped",
-		"/userimage":                 "/UserImage",
-		"/branding/splashscreen":     "/Branding/Splashscreen",
-		"/shows/nextup":              "/Shows/NextUp",
-		"/playback/bitratetest":      "/Playback/BitrateTest",
+
+	segments := map[string]string{
+		"system": "System", "info": "Info", "public": "Public",
+		"branding": "Branding", "configuration": "Configuration", "css": "Css",
+		"splashscreen": "Splashscreen", "quickconnect": "QuickConnect",
+		"enabled": "Enabled", "users": "Users", "authenticatebyname": "AuthenticateByName",
+		"me": "Me", "userviews": "UserViews", "userimage": "UserImage",
+		"items": "Items", "latest": "Latest", "resume": "Resume",
+		"filters": "Filters", "counts": "Counts", "useritems": "UserItems",
+		"shows": "Shows", "nextup": "NextUp", "seasons": "Seasons",
+		"episodes": "Episodes", "videos": "Videos", "stream": "stream",
+		"livetv": "LiveTv", "channels": "Channels", "programs": "Programs",
+		"guideinfo": "GuideInfo", "sessions": "Sessions", "capabilities": "Capabilities",
+		"full": "Full", "playing": "Playing", "progress": "Progress",
+		"stopped": "Stopped", "playback": "Playback", "bitratetest": "BitrateTest",
+		"displaypreferences": "DisplayPreferences", "userplayeditems": "UserPlayedItems",
+		"userfavoriteitems": "UserFavoriteItems", "images": "Images",
+		"similar": "Similar", "localtrailers": "LocalTrailers",
+		"specialfeatures": "SpecialFeatures", "thememedia": "ThemeMedia",
+		"themesongs": "ThemeSongs", "themevideos": "ThemeVideos",
+		"instantmix": "InstantMix", "playbackinfo": "PlaybackInfo",
+		"persons": "Persons", "studios": "Studios", "artists": "Artists",
+		"genres": "Genres", "ping": "Ping",
 	}
-	if mapped, ok := routes[lower]; ok {
-		return mapped
-	}
-	for prefix, mapped := range map[string]string{
-		"/items/":           "/Items/",
-		"/users/":           "/Users/",
-		"/videos/":          "/Videos/",
-		"/shows/":           "/Shows/",
-		"/displaypreferences/": "/DisplayPreferences/",
-		"/userplayeditems/": "/UserPlayedItems/",
-		"/userfavoriteitems/": "/UserFavoriteItems/",
-	} {
-		if strings.HasPrefix(lower, prefix) {
-			return mapped + path[len(prefix):]
+
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		lp := strings.ToLower(part)
+		if mapped, ok := segments[lp]; ok {
+			parts[i] = mapped
 		}
 	}
-	return path
+
+	result := strings.Join(parts, "/")
+	_ = lower
+	return result
 }
 
 func buildVersionedIndex(distFS fs.FS) []byte {

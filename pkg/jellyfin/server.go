@@ -131,8 +131,19 @@ func (s *Server) Router() chi.Router {
 		r.Get("/Items/{itemId}/LocalTrailers", s.getSpecialFeatures)
 		r.Get("/Items/{itemId}/SpecialFeatures", s.getSpecialFeatures)
 		r.Get("/Items/{itemId}/ThemeMedia", s.getSpecialFeatures)
+		r.Get("/Items/{itemId}/ThemeSongs", s.getSpecialFeatures)
+		r.Get("/Items/{itemId}/ThemeVideos", s.getSpecialFeatures)
+		r.Get("/Items/{itemId}/InstantMix", s.getSpecialFeatures)
 
 		r.Post("/Items/{itemId}/PlaybackInfo", s.playbackInfo)
+		r.Get("/Items/Counts", s.itemCounts)
+
+		r.Get("/Persons", s.emptyQueryResult)
+		r.Get("/Studios", s.emptyQueryResult)
+		r.Get("/Artists", s.emptyQueryResult)
+		r.Get("/Genres", s.emptyQueryResult)
+
+		r.Get("/Sessions", s.sessionsGet)
 		r.Get("/LiveTv/Info", s.liveTvInfo)
 		r.Get("/LiveTv/Channels", s.liveTvChannels)
 		r.Get("/LiveTv/Programs", s.liveTvPrograms)
@@ -147,6 +158,7 @@ func (s *Server) Router() chi.Router {
 		r.Post("/Sessions/Playing/Stopped", s.sessionsPlaying)
 
 		r.Get("/DisplayPreferences/{id}", s.displayPreferences)
+		r.Post("/DisplayPreferences/{id}", s.sessionsCapabilities)
 
 		r.Post("/UserPlayedItems/{itemId}", s.markPlayed)
 		r.Delete("/UserPlayedItems/{itemId}", s.markPlayed)
@@ -523,6 +535,31 @@ func (s *Server) bitrateTest(w http.ResponseWriter, r *http.Request) {
 		w.Write(buf[:chunk])
 		written += chunk
 	}
+}
+
+func (s *Server) emptyQueryResult(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0})
+}
+
+func (s *Server) itemCounts(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, map[string]int{
+		"MovieCount":     0,
+		"SeriesCount":    0,
+		"EpisodeCount":   0,
+		"ArtistCount":    0,
+		"ProgramCount":   0,
+		"TrailerCount":   0,
+		"SongCount":      0,
+		"AlbumCount":     0,
+		"MusicVideoCount": 0,
+		"BoxSetCount":    0,
+		"BookCount":      0,
+		"ItemCount":      0,
+	})
+}
+
+func (s *Server) sessionsGet(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, []SessionInfo{})
 }
 
 func (s *Server) displayPreferences(w http.ResponseWriter, r *http.Request) {
