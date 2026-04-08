@@ -495,6 +495,8 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 	imageType := chi.URLParam(r, "imageType")
 	ctx := r.Context()
 
+	isBackdrop := strings.EqualFold(imageType, "Backdrop")
+
 	stream, err := s.streams.GetByID(ctx, addDashes(itemID))
 	if err == nil && stream != nil {
 		lookupName := stream.Name
@@ -503,18 +505,19 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 			lookupName = stream.VODSeries
 		}
 
-		if strings.EqualFold(imageType, "Backdrop") || strings.EqualFold(imageType, "backdrop") {
+		if isBackdrop {
 			backdrop := s.tmdbClient.LookupBackdrop(lookupName, mediaType)
 			if backdrop != "" {
-				imgURL := fmt.Sprintf("%s:8080/api/tmdb/image?size=w1280&path=%s", s.baseURL, url.QueryEscape(backdrop))
-				http.Redirect(w, r, imgURL, http.StatusTemporaryRedirect)
+				r.URL, _ = url.Parse(fmt.Sprintf("/api/tmdb/image?size=w1280&path=%s", url.QueryEscape(backdrop)))
+				s.tmdbClient.ServeImage(w, r)
 				return
 			}
 		}
 
 		posterURL := s.tmdbClient.LookupPoster(lookupName, mediaType)
 		if posterURL != "" {
-			http.Redirect(w, r, s.baseURL+":8080"+posterURL, http.StatusTemporaryRedirect)
+			r.URL, _ = url.Parse(posterURL)
+			s.tmdbClient.ServeImage(w, r)
 			return
 		}
 
@@ -530,7 +533,7 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Error(w, "not found", http.StatusNotFound)
+	w.WriteHeader(http.StatusNotFound)
 }
 
 func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request) {
