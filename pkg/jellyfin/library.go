@@ -154,10 +154,21 @@ func (s *Server) buildSeriesItems(ctx context.Context, searchTerm, genres string
 	return items
 }
 
+func sortName(name string) string {
+	lower := strings.ToLower(name)
+	for _, prefix := range []string{"the ", "a ", "an "} {
+		if strings.HasPrefix(lower, prefix) {
+			return name[len(prefix):]
+		}
+	}
+	return name
+}
+
 func (s *Server) enrichMovieItem(st *models.Stream) BaseItemDto {
 	itemID := strings.ReplaceAll(st.ID, "-", "")
 	item := BaseItemDto{
 		Name:         st.Name,
+		SortName:     sortName(st.Name),
 		ServerID:     s.serverID,
 		ID:           itemID,
 		Type:         "Movie",
@@ -213,6 +224,7 @@ func (s *Server) enrichMovieItem(st *models.Stream) BaseItemDto {
 func (s *Server) enrichSeriesItem(name string) BaseItemDto {
 	item := BaseItemDto{
 		Name:         name,
+		SortName:     sortName(name),
 		ServerID:     s.serverID,
 		ID:           fmt.Sprintf("series_%x", hashString(name)),
 		Type:         "Series",
@@ -693,13 +705,22 @@ func (s *Server) liveTvChannels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var items []BaseItemDto
-	for _, ch := range channels {
+	for i, ch := range channels {
+		chID := strings.ReplaceAll(ch.ID, "-", "")
 		item := BaseItemDto{
 			Name: ch.Name, ServerID: s.serverID,
-			ID: strings.ReplaceAll(ch.ID, "-", ""), Type: "LiveTvChannel",
+			ID: chID, Type: "LiveTvChannel",
 			MediaType: "Video", IsFolder: false,
-			ChannelNumber: ch.ID[:8],
+			ChannelNumber: fmt.Sprintf("%d", i+1),
 			ImageTags: map[string]string{}, UserData: &UserItemData{Key: ch.ID},
+			MediaSources: []MediaSource{
+				{
+					Protocol: "Http", ID: chID, Type: "Default",
+					Name: ch.Name, IsRemote: true, IsInfiniteStream: true,
+					SupportsTranscoding: true, SupportsDirectStream: true,
+					TranscodingURL: fmt.Sprintf("/Videos/%s/stream.mp4?static=true", chID),
+				},
+			},
 		}
 		if ch.Logo != "" {
 			item.ImageTags["Primary"] = "logo"
@@ -766,7 +787,11 @@ func sortItems(items []BaseItemDto, sortBy, sortOrder string) {
 		case "Random":
 			less = hashString(items[i].ID)%1000 < hashString(items[j].ID)%1000
 		default:
-			less = strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+			si := items[i].SortName
+			if si == "" { si = items[i].Name }
+			sj := items[j].SortName
+			if sj == "" { sj = items[j].Name }
+			less = strings.ToLower(si) < strings.ToLower(sj)
 		}
 		if desc {
 			return !less
