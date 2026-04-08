@@ -264,6 +264,17 @@ func (s *Server) enrichMovieItem(st *models.Stream) BaseItemDto {
 		item.MediaSources[0].RunTimeTicks = item.RunTimeTicks
 	}
 
+	if st.VODRes != "" {
+		switch strings.ToLower(st.VODRes) {
+		case "4k", "2160p":
+			item.Width, item.Height = 3840, 2160
+		case "1080p":
+			item.Width, item.Height = 1920, 1080
+		case "720p":
+			item.Width, item.Height = 1280, 720
+		}
+	}
+
 	if m := s.tmdbClient.LookupMovie(st.Name); m != nil {
 		item.Overview = m.Overview
 		item.CommunityRating = m.Rating
