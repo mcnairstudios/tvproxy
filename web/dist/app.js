@@ -3743,10 +3743,9 @@
           var bufEnd = 0;
           if (videoEl.buffered.length > 0) bufEnd = videoEl.buffered.end(videoEl.buffered.length - 1);
           seekBuffered.style.width = ((bufEnd / effectiveDur) * 100) + '%';
-          timeDisplay.textContent = fmtCtrlTime(absCur) + ' / ' + fmtCtrlTime(effectiveDur);
+          timeDisplay.textContent = fmtCtrlTime(cur) + ' / ' + fmtCtrlTime(effectiveDur);
         } else {
-          var absCur = seekOff + cur;
-          timeDisplay.textContent = fmtCtrlTime(absCur);
+          timeDisplay.textContent = fmtCtrlTime(cur);
         }
       } else {
         if (isFinite(dur) && dur > 0) {
