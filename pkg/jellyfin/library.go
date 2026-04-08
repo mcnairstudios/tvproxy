@@ -622,7 +622,56 @@ func (s *Server) getFilters(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getSimilar(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0})
+	itemID := chi.URLParam(r, "itemId")
+	ctx := r.Context()
+
+	stream, err := s.streams.GetByID(ctx, addDashes(itemID))
+	if err != nil || stream == nil {
+		s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0})
+		return
+	}
+
+	var sourceGenres []string
+	if m := s.tmdbClient.LookupMovie(stream.Name); m != nil {
+		sourceGenres = m.Genres
+	}
+
+	if len(sourceGenres) == 0 {
+		s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0})
+		return
+	}
+
+	allMovies := s.buildMovieItems(ctx, "", "")
+	var similar []BaseItemDto
+	for _, item := range allMovies {
+		if item.ID == itemID {
+			continue
+		}
+		overlap := 0
+		for _, g := range item.Genres {
+			for _, sg := range sourceGenres {
+				if g == sg {
+					overlap++
+				}
+			}
+		}
+		if overlap >= 2 {
+			similar = append(similar, item)
+		}
+	}
+
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		limit, _ = strconv.Atoi(l)
+	}
+	if len(similar) > limit {
+		similar = similar[:limit]
+	}
+	if similar == nil {
+		similar = []BaseItemDto{}
+	}
+
+	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: similar, TotalRecordCount: len(similar)})
 }
 
 func (s *Server) getSpecialFeatures(w http.ResponseWriter, r *http.Request) {
