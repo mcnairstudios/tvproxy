@@ -106,6 +106,7 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 		CollectionPoster   string `json:"collection_poster,omitempty"`
 		CollectionBackdrop string `json:"collection_backdrop,omitempty"`
 		Season          int      `json:"season,omitempty"`
+		SeasonName      string   `json:"vod_season_name,omitempty"`
 		Episode         int      `json:"episode,omitempty"`
 		EpisodeName     string   `json:"episode_name,omitempty"`
 		EpisodeOverview string   `json:"episode_overview,omitempty"`
@@ -165,6 +166,7 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 			Series:     s.VODSeries,
 			Collection: s.VODCollection,
 			Season:     s.VODSeason,
+			SeasonName: s.VODSeasonName,
 			Episode:    s.VODEpisode,
 			VCodec:    s.VODVCodec,
 			ACodec:    s.VODACodec,

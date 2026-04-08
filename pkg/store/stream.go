@@ -72,6 +72,7 @@ func (s *StreamStoreImpl) ListSummaries(_ context.Context) ([]models.StreamSumma
 			VODType:       st.VODType,
 			VODSeries:     st.VODSeries,
 			VODSeason:     st.VODSeason,
+			VODSeasonName: st.VODSeasonName,
 			VODEpisode:    st.VODEpisode,
 			VODYear:       st.VODYear,
 		}

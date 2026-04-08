@@ -227,6 +227,7 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 		if entry.TVPDur != "" {
 			fmt.Sscanf(entry.TVPDur, "%f", &s.VODDuration)
 		}
+		s.VODSeasonName = entry.TVPSeasonName
 		s.VODYear = extractYearFromName(entry.Name)
 		streams = append(streams, s)
 	}

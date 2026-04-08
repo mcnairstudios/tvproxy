@@ -820,6 +820,25 @@
     closeBtn.onclick = function() { overlay.remove(); };
     backdrop.appendChild(closeBtn);
 
+    var refreshBtn = document.createElement('button');
+    refreshBtn.textContent = '\u21BB';
+    refreshBtn.title = 'Refresh metadata';
+    refreshBtn.style.cssText = 'position:absolute;top:16px;right:64px;background:rgba(0,0,0,0.6);border:none;color:#fff;font-size:16px;width:40px;height:40px;border-radius:50%;cursor:pointer;z-index:3;transition:background 0.2s;';
+    refreshBtn.onmouseenter = function() { refreshBtn.style.background = 'rgba(255,255,255,0.2)'; };
+    refreshBtn.onmouseleave = function() { refreshBtn.style.background = 'rgba(0,0,0,0.6)'; };
+    refreshBtn.onclick = function() {
+      refreshBtn.style.opacity = '0.5';
+      refreshBtn.disabled = true;
+      api.del('/api/tmdb/cache?query=' + encodeURIComponent(show.name)).then(function() {
+        overlay.remove();
+        toast.success('Metadata refreshed for ' + show.name);
+      }).catch(function() {
+        refreshBtn.style.opacity = '1';
+        refreshBtn.disabled = false;
+      });
+    };
+    backdrop.appendChild(refreshBtn);
+
     backdrop.appendChild(Object.assign(document.createElement('div'), {
       style: 'position:absolute;bottom:0;left:0;right:0;height:150px;background:linear-gradient(transparent,#1a1d23);'
     }));
@@ -839,23 +858,33 @@
     tmdbMeta.style.cssText = 'margin-bottom:20px;min-height:24px;';
     body.appendChild(tmdbMeta);
 
-    var seasonNums = Object.keys(show.seasons).map(Number).sort(function(a, b) { return a - b; });
-    if (seasonNums.length === 0 && show.episodes.length > 0) {
-      show.seasons[0] = show.episodes;
-      seasonNums = [0];
+    var seasonKeys = Object.keys(show.seasons);
+    if (seasonKeys.length === 0 && show.episodes.length > 0) {
+      show.seasons[1] = show.episodes;
+      seasonKeys = ['1'];
     }
+    seasonKeys.sort(function(a, b) {
+      var aNum = parseInt(a, 10);
+      var bNum = parseInt(b, 10);
+      var aIsNum = !isNaN(aNum);
+      var bIsNum = !isNaN(bNum);
+      if (aIsNum && bIsNum) return aNum - bNum;
+      if (aIsNum) return -1;
+      if (bIsNum) return 1;
+      return a.localeCompare(b);
+    });
 
     var tabBar = document.createElement('div');
     tabBar.style.cssText = 'display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;';
 
     var epList = document.createElement('div');
 
-    function renderSeason(num) {
+    function renderSeason(key) {
       epList.innerHTML = '';
       tabBar.querySelectorAll('button').forEach(function(btn) {
-        btn.style.background = btn.dataset.season == num ? '#3b82f6' : 'rgba(255,255,255,0.1)';
+        btn.style.background = btn.dataset.season == key ? '#3b82f6' : 'rgba(255,255,255,0.1)';
       });
-      var eps = show.seasons[num] || [];
+      var eps = show.seasons[key] || [];
       eps.sort(function(a, b) { return a.episode - b.episode; });
       eps.forEach(function(ep) {
         var row = document.createElement('div');
@@ -909,12 +938,13 @@
       });
     }
 
-    seasonNums.forEach(function(num) {
+    seasonKeys.forEach(function(key) {
       var btn = document.createElement('button');
       btn.style.cssText = 'background:rgba(255,255,255,0.1);border:none;color:#fff;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;';
-      btn.textContent = num === 0 ? 'All Episodes' : 'Season ' + num;
-      btn.dataset.season = num;
-      btn.onclick = function() { renderSeason(num); };
+      var num = parseInt(key, 10);
+      btn.textContent = isNaN(num) ? key : 'Season ' + num;
+      btn.dataset.season = key;
+      btn.onclick = function() { renderSeason(key); };
       tabBar.appendChild(btn);
     });
 
@@ -924,7 +954,7 @@
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    if (seasonNums.length > 0) renderSeason(seasonNums[0]);
+    if (seasonKeys.length > 0) renderSeason(seasonKeys[0]);
 
     api.get('/api/tmdb/search?query=' + encodeURIComponent(show.name) + '&type=tv').then(function(data) {
       if (!data || !data.results || !data.results.length) return;
@@ -5884,9 +5914,10 @@
           var key = item.series || item.name;
           if (!seriesMap[key]) seriesMap[key] = { name: key, seasons: {}, episodes: [] };
           seriesMap[key].episodes.push(item);
-          if (item.season > 0) {
-            if (!seriesMap[key].seasons[item.season]) seriesMap[key].seasons[item.season] = [];
-            seriesMap[key].seasons[item.season].push(item);
+          var seasonKey = item.vod_season_name || (item.season > 0 ? item.season : null);
+          if (seasonKey !== null) {
+            if (!seriesMap[key].seasons[seasonKey]) seriesMap[key].seasons[seasonKey] = [];
+            seriesMap[key].seasons[seasonKey].push(item);
           }
         });
 

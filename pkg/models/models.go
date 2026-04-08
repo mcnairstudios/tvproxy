@@ -68,6 +68,7 @@ type Stream struct {
 	VODSeries     string        `json:"vod_series,omitempty"`
 	VODCollection string        `json:"vod_collection,omitempty"`
 	VODSeason     int           `json:"vod_season,omitempty"`
+	VODSeasonName string        `json:"vod_season_name,omitempty"`
 	VODEpisode    int           `json:"vod_episode,omitempty"`
 	VODYear       int           `json:"vod_year,omitempty"`
 	VODVCodec     string        `json:"vod_vcodec,omitempty"`
@@ -258,6 +259,7 @@ type StreamSummary struct {
 	VODType       string `json:"vod_type,omitempty"`
 	VODSeries     string `json:"vod_series,omitempty"`
 	VODSeason     int    `json:"vod_season,omitempty"`
+	VODSeasonName string `json:"vod_season_name,omitempty"`
 	VODEpisode    int    `json:"vod_episode,omitempty"`
 	VODYear       int    `json:"vod_year,omitempty"`
 }

@@ -208,19 +208,24 @@ func (c *Client) LookupBackdrop(name, mediaType string) string {
 	return ""
 }
 
+func metaKey(name string) string {
+	clean, year := CleanVODName(name)
+	if year != "" {
+		return clean + " (" + year + ")"
+	}
+	return clean
+}
+
 func (c *Client) LookupMovie(name string) *MovieMeta {
-	clean, _ := CleanVODName(name)
-	return c.meta.GetMovie(clean)
+	return c.meta.GetMovie(metaKey(name))
 }
 
 func (c *Client) LookupSeries(name string) *SeriesMeta {
-	clean, _ := CleanVODName(name)
-	return c.meta.GetSeries(clean)
+	return c.meta.GetSeries(metaKey(name))
 }
 
 func (c *Client) LookupEpisode(seriesName string, season, episode int) *EpisodeMeta {
-	clean, _ := CleanVODName(seriesName)
-	return c.meta.GetEpisode(clean, season, episode)
+	return c.meta.GetEpisode(metaKey(seriesName), season, episode)
 }
 
 func (c *Client) ServeImage(w http.ResponseWriter, r *http.Request) {
