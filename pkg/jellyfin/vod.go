@@ -42,6 +42,15 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.HasPrefix(parentID, "series_") {
+		if strings.Contains(itemTypes, "Episode") {
+			s.listEpisodes(w, r)
+			return
+		}
+		s.listSeasons(w, r)
+		return
+	}
+
 	hasMovies := parentID == viewMoviesID || strings.Contains(itemTypes, "Movie") || strings.Contains(itemTypes, "BoxSet") || strings.Contains(itemTypes, "MusicVideo") || strings.Contains(itemTypes, "Video")
 	hasSeries := parentID == viewTVID || strings.Contains(itemTypes, "Series")
 
@@ -186,8 +195,15 @@ func (s *Server) listResumeItems(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, emptyResult())
 }
 
+func (s *Server) resolveSeriesID(r *http.Request) string {
+	if id := chi.URLParam(r, "seriesId"); id != "" {
+		return id
+	}
+	return firstOf(r.URL.Query(), "parentId", "ParentId")
+}
+
 func (s *Server) listSeasons(w http.ResponseWriter, r *http.Request) {
-	targetID := chi.URLParam(r, "seriesId")
+	targetID := s.resolveSeriesID(r)
 	streams, _ := s.streams.List(r.Context())
 
 	seasonSet := make(map[int]bool)
@@ -238,7 +254,7 @@ func (s *Server) listSeasons(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listEpisodes(w http.ResponseWriter, r *http.Request) {
-	targetID := chi.URLParam(r, "seriesId")
+	targetID := s.resolveSeriesID(r)
 	seasonNum, _ := strconv.Atoi(r.URL.Query().Get("seasonId"))
 	if seasonNum == 0 {
 		if sn := r.URL.Query().Get("season"); sn != "" {
