@@ -47,7 +47,7 @@ func (s *Server) getItems(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	filters := firstOf(q, "filters", "Filters")
+	filters := strings.Join(append(q["filters"], q["Filters"]...), ",")
 	if strings.Contains(filters, "IsFavorite") {
 		s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0})
 		return
