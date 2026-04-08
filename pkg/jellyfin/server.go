@@ -72,16 +72,19 @@ func (s *Server) Router() chi.Router {
 	})
 	r.Get("/web/{file}", func(w http.ResponseWriter, r *http.Request) {
 		file := chi.URLParam(r, "file")
-		if file == "config.json" {
+		switch file {
+		case "config.json":
 			s.respondJSON(w, http.StatusOK, map[string]any{
-				"menuLinks":    []any{},
-				"multiserver":  false,
-				"themes":       []any{},
-				"plugins":      []any{},
+				"menuLinks": []any{}, "multiserver": false, "themes": []any{}, "plugins": []any{},
 			})
-			return
+		case "manifest.json":
+			s.respondJSON(w, http.StatusOK, map[string]any{
+				"name": "TVProxy", "short_name": "TVProxy", "start_url": "/web/index.html",
+				"display": "standalone", "background_color": "#1a1d23", "theme_color": "#3b82f6",
+			})
+		default:
+			w.WriteHeader(http.StatusOK)
 		}
-		w.WriteHeader(http.StatusOK)
 	})
 
 	r.Get("/System/Info/Public", s.systemInfoPublic)
