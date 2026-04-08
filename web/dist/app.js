@@ -215,6 +215,71 @@
     info(msg) { this.show(msg, 'info'); },
   };
 
+  var _favoriteIds = null;
+
+  function loadFavorites() {
+    return api.get('/api/favorites').then(function(ids) {
+      _favoriteIds = new Set(ids || []);
+      return _favoriteIds;
+    }).catch(function() {
+      _favoriteIds = new Set();
+      return _favoriteIds;
+    });
+  }
+
+  function favoriteButton(itemId) {
+    var span = document.createElement('span');
+    span.style.cssText = 'cursor:pointer;font-size:18px;user-select:none;';
+    var updating = false;
+
+    function render() {
+      if (_favoriteIds && _favoriteIds.has(itemId)) {
+        span.textContent = '\u2B50';
+      } else {
+        span.textContent = '\u2606';
+        span.style.color = '#888';
+      }
+    }
+
+    function init() {
+      if (_favoriteIds) {
+        render();
+      } else {
+        span.textContent = '\u2606';
+        span.style.color = '#888';
+        loadFavorites().then(render);
+      }
+    }
+
+    span.onclick = function(e) {
+      e.stopPropagation();
+      if (updating) return;
+      updating = true;
+      var isFav = _favoriteIds && _favoriteIds.has(itemId);
+      if (isFav) {
+        api.del('/api/favorites/' + itemId).then(function() {
+          _favoriteIds.delete(itemId);
+          render();
+          toast.success('Removed from favorites');
+        }).catch(function() {
+          toast.error('Failed to update favorite');
+        }).finally(function() { updating = false; });
+      } else {
+        api.post('/api/favorites/' + itemId).then(function() {
+          if (!_favoriteIds) _favoriteIds = new Set();
+          _favoriteIds.add(itemId);
+          render();
+          toast.success('Added to favorites');
+        }).catch(function() {
+          toast.error('Failed to update favorite');
+        }).finally(function() { updating = false; });
+      }
+    };
+
+    init();
+    return span;
+  }
+
   class DataCache {
     constructor({ loader, searchKeys, label, storageKey, etagEndpoint }) {
       this._loader = loader;
@@ -691,28 +756,29 @@
   }
 
   let navItems = [
-    { section: 'Overview', adminOnly: true },
     { id: 'dashboard', label: 'Dashboard', icon: '\u2302', tip: 'Overview of your TVProxy system status', adminOnly: true },
+    { id: 'now-playing', label: 'Activity', icon: '\u25B6', tip: 'Active users and streams', adminOnly: true },
+    { section: 'Content' },
+    { id: 'channels', label: 'Channels', icon: '\ud83d\udcfa', tip: 'Define your custom channels and assign streams and EPG data' },
+    { id: 'movies', label: 'Movies', icon: '\uD83C\uDFAC', tip: 'Browse movie library' },
+    { id: 'tv-series', label: 'TV Series', icon: '\uD83D\uDCFA', tip: 'Browse TV series library' },
+    { id: 'epg-guide', label: 'EPG Guide', icon: '\ud83d\udcf0', tip: 'TV programme guide grid for your channels' },
+    { id: 'recordings', label: 'Recordings', icon: '\ud83d\udd34', tip: 'View active and completed recordings', iconStyle: 'font-size:0.75em' },
+    { id: 'favorites', label: 'Favorites', icon: '\u2B50', tip: 'Your favorite channels and streams' },
+    { section: 'Streams' },
     { section: 'Sources', adminOnly: true },
     { id: 'm3u-accounts', label: 'M3U Accounts', icon: '\u2630', tip: 'Add your SAT>IP or IPTV source M3U files', adminOnly: true },
     { id: 'satip-sources', label: 'SAT>IP Sources', icon: '\ud83d\udce1', tip: 'Scan MiniSAT>IP devices for channels', adminOnly: true },
     { id: 'epg-sources', label: 'EPG Sources', icon: '\ud83d\udcc5', tip: 'Manage XMLTV EPG data sources for programme guides', adminOnly: true },
-    { section: 'Channels' },
-    { id: 'channels', label: 'Channels', icon: '\ud83d\udcfa', tip: 'Define your custom channels and assign streams and EPG data' },
-    { id: 'epg-guide', label: 'EPG Guide', icon: '\ud83d\udcf0', tip: 'TV programme guide grid for your channels' },
-    { section: 'Configuration', adminOnly: true },
+    { section: 'Stream Management', adminOnly: true },
+    { id: 'channel-groups', label: 'Channel Groups', icon: '\ud83d\udcc2', tip: 'Organise channels into groups for Jellyfin and output', adminOnly: true },
+    { id: 'clients', label: 'Client Detection', icon: '\ud83d\udd0d', tip: 'Auto-detect players by HTTP headers and assign stream profiles', adminOnly: true },
     { id: 'stream-profiles', label: 'Stream Profiles', icon: '\ud83d\udd27', tip: 'Configure transcoding profiles for stream processing', adminOnly: true },
     { id: 'hdhr-devices', label: 'HDHR Devices', icon: '\ud83d\udce1', tip: 'Virtual HDHomeRun devices for Plex, Jellyfin, and Emby', adminOnly: true },
-    { id: 'clients', label: 'Client Detection', icon: '\ud83d\udd0d', tip: 'Auto-detect players by HTTP headers and assign stream profiles', adminOnly: true },
-    { id: 'logos', label: 'Logos', icon: '\ud83d\uddbc', tip: 'Saved channel logos for quick reuse', adminOnly: true },
-    { section: 'Streams' },
-    { id: 'movies', label: 'Movies', icon: '\uD83C\uDFAC', tip: 'Browse movie library' },
-    { id: 'tv-series', label: 'TV Series', icon: '\uD83D\uDCFA', tip: 'Browse TV series library' },
-    { id: 'recordings', label: 'Recordings', icon: '\u23FA', tip: 'View active and completed recordings' },
     { section: 'System', adminOnly: true },
-    { id: 'now-playing', label: 'Now Playing', icon: '\u25B6', tip: 'Active streams and viewers', adminOnly: true },
-    { id: 'users', label: 'Users', icon: '\ud83d\udc65', tip: 'Manage admin and user accounts', adminOnly: true },
     { id: 'settings', label: 'Settings', icon: '\u2699', tip: 'Core application settings', adminOnly: true },
+    { id: 'users', label: 'Users', icon: '\ud83d\udc65', tip: 'Manage admin and user accounts', adminOnly: true },
+    { id: 'logos', label: 'Logos', icon: '\ud83d\uddbc', tip: 'Saved channel logos for quick reuse', adminOnly: true },
     { id: 'wireguard', label: 'WireGuard', icon: '\ud83d\udd12', tip: 'WireGuard VPN tunnel for geo-unblocking', adminOnly: true },
   ];
 
@@ -1557,6 +1623,8 @@
       container.innerHTML = '';
       container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...'));
 
+      if (!_favoriteIds) await loadFavorites();
+
       let groups, sortedGroups, groupDisplay, groupSearch;
 
       if (streamGroupsCache[pageId]) {
@@ -1593,7 +1661,7 @@
         groupSearch = new Array(sortedGroups.length);
         for (let i = 0; i < sortedGroups.length; i++) {
           const g = sortedGroups[i];
-          groupDisplay[i] = g || '(No Group)';
+          groupDisplay[i] = (g || '(No Group)').replace(/^(TV|Movie)\|/, '');
           groupSearch[i] = groupDisplay[i].toLowerCase();
         }
 
@@ -1626,10 +1694,18 @@
         const gIdx = details.dataset.gidx;
         if (rendered[gIdx]) return;
         rendered[gIdx] = true;
-        let streams = groups[sortedGroups[gIdx]];
+        let streams = groups[sortedGroups[gIdx]].slice();
         if (searchTerm) {
           streams = streams.filter(function(s) { return matchesSearch(s.name.toLowerCase(), searchTerm); });
         }
+        streams.sort(function(a, b) {
+          if (a.vod_type === 'series' && b.vod_type === 'series') {
+            if ((a.vod_season || 0) !== (b.vod_season || 0)) return (a.vod_season || 0) - (b.vod_season || 0);
+            return (a.vod_episode || 0) - (b.vod_episode || 0);
+          }
+          if ((a.vod_year || 0) !== (b.vod_year || 0)) return (a.vod_year || 0) - (b.vod_year || 0);
+          return a.name.localeCompare(b.name);
+        });
         const tableEl = document.createElement('table');
         tableEl.className = 'stream-group-table';
         tableEl.innerHTML = '<tbody>' + buildStreamRows(streams).join('') + '</tbody>';
@@ -1639,6 +1715,17 @@
       groupsContainer.addEventListener('click', (e) => {
         const btn = e.target.closest('button[data-sid]');
         if (!btn) return;
+        if (btn.dataset.fav) {
+          var sid = btn.dataset.sid;
+          var isFav = _favoriteIds && _favoriteIds.has(sid);
+          (isFav ? api.del('/api/favorites/' + sid) : api.post('/api/favorites/' + sid)).then(function() {
+            if (isFav) { _favoriteIds.delete(sid); } else { _favoriteIds.add(sid); }
+            btn.textContent = isFav ? '\u2606' : '\u2B50';
+            btn.style.color = isFav ? 'var(--text-muted)' : '#eab308';
+            toast.success(isFav ? 'Removed from favorites' : 'Added to favorites');
+          }).catch(function() {});
+          return;
+        }
         if (btn.dataset.qadd) {
           quickAddChannel(btn.dataset.sid, btn.dataset.sname, btn.dataset.tvgid || '', btn.dataset.slogo || '');
           return;
@@ -1753,6 +1840,7 @@
           }
           var isRadio = s.group && s.group.toLowerCase() === 'radio';
           var actionHtml = '<div class="actions-cell" style="justify-content:flex-end;gap:4px;">';
+          actionHtml += '<button class="btn btn-sm btn-icon" title="Favorite" data-fav="1" data-sid="' + s.id + '" style="font-size:14px;color:' + (_favoriteIds && _favoriteIds.has(s.id) ? '#eab308' : 'var(--text-muted)') + '">' + (_favoriteIds && _favoriteIds.has(s.id) ? '\u2B50' : '\u2606') + '</button>';
           actionHtml += '<button class="btn btn-primary btn-sm btn-icon" title="Add as Channel" style="font-size:16px" data-qadd="1" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '" data-slogo="' + esc(s.logo || '') + '">+</button>';
           if (isRadio) {
             actionHtml += '<button class="btn btn-sm btn-icon" title="Record" data-radio-rec="1" data-sid="' + s.id + '" style="font-size:12px">\u23FA</button>';
@@ -1834,7 +1922,7 @@
         groupDisplay = new Array(sortedGroups.length);
         groupSearch = new Array(sortedGroups.length);
         for (var i = 0; i < sortedGroups.length; i++) {
-          groupDisplay[i] = sortedGroups[i] || '(No Group)';
+          groupDisplay[i] = (sortedGroups[i] || '(No Group)').replace(/^(TV|Movie)\|/, '');
           groupSearch[i] = groupDisplay[i].toLowerCase();
         }
         streamGroupsCache[pageId] = { groups: groups, sortedGroups: sortedGroups, groupDisplay: groupDisplay, groupSearch: groupSearch };
@@ -1849,16 +1937,25 @@
       api.get('/api/satip/sources').catch(() => []),
     ]);
     navItems = navItems.filter(n => !n.id || (!n.id.startsWith('streams-') && !n.id.startsWith('satip-streams-')));
-    Object.keys(pages).forEach(k => { if (k.startsWith('streams-') || k.startsWith('satip-streams-')) delete pages[k]; });
+    Object.keys(pages).forEach(k => { if ((k.startsWith('streams-') || k.startsWith('satip-streams-')) && k !== 'stream-profiles') delete pages[k]; });
     const idx = navItems.findIndex(n => n.section === 'Streams');
     if (idx === -1) return;
-    const accountNavItems = accounts.map(a => ({
+    var allStreams = streamsCache._data || [];
+    var vodAccountIds = new Set();
+    accounts.forEach(function(a) {
+      var accountStreams = allStreams.filter(function(s) { return s.m3u_account_id === a.id; });
+      if (accountStreams.length > 0 && accountStreams.every(function(s) { return s.vod_type; })) {
+        vodAccountIds.add(a.id);
+      }
+    });
+    var liveAccounts = accounts.filter(function(a) { return !vodAccountIds.has(a.id); });
+    const accountNavItems = liveAccounts.map(a => ({
       id: 'streams-' + a.id,
       label: a.name,
       icon: '\u25b6',
       tip: 'Streams from ' + a.name,
     }));
-    accounts.forEach(a => {
+    liveAccounts.forEach(a => {
       pages['streams-' + a.id] = buildStreamGroupsPage('streams-' + a.id, function(s) { return s.m3u_account_id === a.id; });
     });
     const satipNavItems = satipSources.map(function(s) {
@@ -1866,7 +1963,15 @@
       pages[pageId] = buildStreamGroupsPage(pageId, function(ss) { return ss.satip_source_id === s.id; });
       return { id: pageId, label: s.name, icon: '\ud83d\udce1', tip: 'Streams from ' + s.name };
     });
-    navItems.splice(idx + 1, 0, ...accountNavItems, ...satipNavItems);
+
+    pages['streams-movies'] = buildStreamGroupsPage('streams-movies', function(s) { return s.vod_type === 'movie'; });
+    pages['streams-tvseries'] = buildStreamGroupsPage('streams-tvseries', function(s) { return s.vod_type === 'series'; });
+    var vodNavItems = [
+      { id: 'streams-movies', label: 'Movies', icon: '\uD83C\uDFAC', tip: 'Movie streams from all sources (deduplicated)' },
+      { id: 'streams-tvseries', label: 'TV Series', icon: '\uD83D\uDCFA', tip: 'TV series streams grouped by show' },
+    ];
+
+    navItems.splice(idx + 1, 0, ...accountNavItems, ...satipNavItems, ...vodNavItems);
     if (auth.isLoggedIn()) {
       const oldSidebar = document.querySelector('.sidebar');
       if (oldSidebar) {
@@ -1893,7 +1998,7 @@
         className: 'nav-item' + (state.currentPage === item.id ? ' active' : ''),
         onClick: () => { mobileNav.close(); navigate(item.id); },
       },
-        h('span', { className: 'icon' }, item.icon),
+        h('span', { className: 'icon', style: item.iconStyle || '' }, item.icon),
         item.label,
       );
       if (item.tip) {
@@ -1998,7 +2103,7 @@
           h('th', null, 'Discover URL'),
         );
         const rows = enabledDevices.map(d => {
-          const base = 'http://' + hostname + ':' + d.port;
+          const base = window.location.protocol + '//' + hostname + ':' + d.port;
           return h('tr', null,
             h('td', null, d.name),
             h('td', null, String(d.port)),
@@ -3459,7 +3564,8 @@
 
     var floatBar = document.createElement('div');
     floatBar.style.cssText = 'position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:8px 12px;background:linear-gradient(rgba(0,0,0,0.7),transparent);opacity:0;transition:opacity 0.2s;z-index:20;pointer-events:none;';
-    var barBtns = [titleEl, recordBtn, audioBtn, statsBtn, closeBtn];
+    var favBtn = channelID ? favoriteButton(channelID) : null;
+    var barBtns = favBtn ? [titleEl, favBtn, recordBtn, audioBtn, statsBtn, closeBtn] : [titleEl, recordBtn, audioBtn, statsBtn, closeBtn];
     titleEl.style.cssText = 'flex:1;color:#fff;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,0.5);';
     var btnStyle = 'background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);border:none;color:#fff;width:32px;height:32px;border-radius:50%;font-size:14px;cursor:pointer;pointer-events:auto;transition:background 0.15s;';
     recordBtn.style.cssText = btnStyle;
@@ -4116,7 +4222,6 @@
 
     const epgData = await epgCache.getAll().catch(() => []);
 
-    // Match in priority order: exact tvg_id → exact name → stripped name (prefer same HD/SD suffix)
     let matchedEpg = null;
     if (tvgId) {
       matchedEpg = epgData.find(e => e.channel_id === tvgId) || null;
@@ -4140,7 +4245,6 @@
       if (!matchedEpg) matchedEpg = fallback;
     }
 
-    // Build EPG autocomplete widget
     let selectedEpg = matchedEpg;
     const acWrapper = h('div', { className: 'autocomplete-wrapper' });
     const tvgInp = h('input', {
@@ -4486,6 +4590,7 @@
         ],
       },
       columns: [
+        { key: '_fav', label: '\u2B50', thStyle: 'width:36px;text-align:center', tdStyle: 'text-align:center', render: item => favoriteButton(item.id) },
         { key: 'logo', label: '', thStyle: 'width:110px;padding-right:0;text-align:center', tdStyle: 'padding-right:0;text-align:center', render: item => {
           var openModal = function() {
             var p = item._now_program;
@@ -4551,7 +4656,7 @@
           }
           return wrap;
         }},
-        { key: '_now_playing', label: 'Now Playing', tdStyle: 'font-weight:normal;color:var(--text-secondary);font-size:13px;display:none', thStyle: 'display:none', render: item => {
+        { key: '_now_playing', label: 'Activity', tdStyle: 'font-weight:normal;color:var(--text-secondary);font-size:13px;display:none', thStyle: 'display:none', render: item => {
           if (!item._now_playing) return h('span', { style: 'color:var(--text-muted)' }, '-');
           var span = h('span', { style: 'cursor:pointer;', onClick: function(e) {
             e.stopPropagation();
@@ -4711,34 +4816,214 @@
 
     'epg-guide': buildEpgGuidePage(),
 
-    'channel-groups': buildCrudPage({
-      title: 'Channel Groups',
-      singular: 'Channel Group',
-      apiPath: '/api/channel-groups',
-      create: true,
-      update: true,
-      onChange: () => channelGroupsCache.invalidate(),
-      columns: [
-        { key: 'name', label: 'Name' },
-        { key: 'sort_order', label: 'Sort Order' },
-        { key: 'jellyfin_enabled', label: 'Jellyfin', render: function(item) { return item.jellyfin_enabled ? '\u2705' : ''; } },
-      ],
-      fields: [
-        { key: 'name', label: 'Group Name', placeholder: 'Entertainment' },
-        { key: 'sort_order', label: 'Sort Order', type: 'number', default: 0 },
-        { key: 'jellyfin_enabled', label: 'Show in Jellyfin', type: 'checkbox', default: false },
-        { key: 'jellyfin_type', label: 'Jellyfin Style', type: 'select', default: 'folders', options: [
-          { value: 'folders', label: 'Channels (Grid)' },
-          { value: 'livetv', label: 'Live TV (Guide)' },
-          { value: 'movies', label: 'Movies' },
-          { value: 'tvshows', label: 'TV Shows' },
-          { value: 'music', label: 'Music' },
-          { value: 'musicvideos', label: 'Music Videos' },
-          { value: 'playlists', label: 'Playlists' },
-          { value: 'homevideos', label: 'Home Videos' },
-        ]},
-      ],
-    }),
+    'favorites': async function(container) {
+      container.innerHTML = '';
+      container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading favorites...'));
+
+      try {
+        var favs = await api.get('/api/favorites');
+        var channels = await api.get('/api/channels');
+        container.innerHTML = '';
+
+        var channelMap = {};
+        channels.forEach(function(ch) { channelMap[ch.id] = ch; });
+
+        var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:24px' });
+        header.appendChild(h('h2', { style: 'margin:0' }, 'Favorites'));
+        container.appendChild(header);
+
+        var grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;' });
+
+        var favIds = (favs || []).map(function(f) { return typeof f === 'string' ? f : (f.channel_id || f.id || f); });
+
+        favIds.forEach(function(fid) {
+          var ch = channelMap[fid];
+          var card = h('div', { style: 'background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px;transition:transform 0.15s;' });
+          card.onmouseenter = function() { card.style.transform = 'scale(1.01)'; };
+          card.onmouseleave = function() { card.style.transform = ''; };
+
+          var top = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:12px' });
+          var left = h('div', { style: 'display:flex;align-items:center;gap:12px' });
+
+          if (ch && ch.logo) {
+            left.appendChild(h('img', { src: ch.logo, style: 'width:40px;height:40px;object-fit:contain;border-radius:6px;background:var(--bg-elevated)', onerror: function() { this.style.display = 'none'; } }));
+          }
+
+          left.appendChild(h('div', { style: 'font-size:18px;font-weight:700;color:var(--text-primary)' }, ch ? ch.name : ('Unknown (' + fid + ')')));
+          top.appendChild(left);
+
+          var delBtn = h('button', { className: 'btn btn-danger btn-sm', title: 'Remove from favorites' }, '\u2715');
+          delBtn.onclick = async function() {
+            await api.del('/api/favorites/' + fid);
+            toast.success('Removed from favorites');
+            pages['favorites'](container);
+          };
+          top.appendChild(delBtn);
+          card.appendChild(top);
+
+          if (ch) {
+            var info = h('div', { style: 'display:flex;gap:12px' });
+            if (ch.channel_group_name) info.appendChild(h('span', { style: 'font-size:13px;color:var(--text-muted)' }, ch.channel_group_name));
+            card.appendChild(info);
+          }
+
+          grid.appendChild(card);
+        });
+
+        if (favIds.length === 0) {
+          grid.appendChild(h('div', { style: 'grid-column:1/-1;text-align:center;padding:48px;color:var(--text-muted)' },
+            h('div', { style: 'font-size:3em;margin-bottom:12px;opacity:0.4' }, '\u2B50'),
+            h('p', { style: 'font-size:1.1em' }, 'No favorites yet')
+          ));
+        }
+
+        container.appendChild(grid);
+      } catch(err) {
+        container.innerHTML = '';
+        container.appendChild(h('p', { style: 'color:var(--danger)' }, 'Failed to load: ' + err.message));
+      }
+    },
+
+    'channel-groups': async function(container) {
+      container.innerHTML = '';
+      container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading channel groups...'));
+
+      try {
+        var groups = await api.get('/api/channel-groups');
+        var channels = await api.get('/api/channels');
+        container.innerHTML = '';
+
+        var chCountMap = {};
+        channels.forEach(function(ch) {
+          var gid = ch.channel_group_id || 'none';
+          chCountMap[gid] = (chCountMap[gid] || 0) + 1;
+        });
+
+        var jellyfinStyles = {
+          folders: 'Channels (Grid)', movies: 'Movies', tvshows: 'TV Shows'
+        };
+
+        var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:24px' });
+        header.appendChild(h('h2', { style: 'margin:0' }, 'Channel Groups'));
+        var addBtn = h('button', { className: 'btn btn-primary btn-sm', style: 'display:flex;align-items:center;gap:6px' }, '+ New Group');
+        addBtn.onclick = function() { editGroup(null); };
+        header.appendChild(addBtn);
+        container.appendChild(header);
+
+        var grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;' });
+
+        function editGroup(group) {
+          var isEdit = group !== null;
+          var formEl = h('div');
+
+          var nameLabel = h('label', null, 'Group Name');
+          var nameInput = h('input', { type: 'text', placeholder: 'Entertainment', value: isEdit ? group.name : '' });
+          formEl.appendChild(h('div', { className: 'form-group' }, nameLabel, nameInput));
+
+          var imageUrlLabel = h('label', null, 'Image URL');
+          var imageUrlInput = h('input', { type: 'text', placeholder: 'https://example.com/poster.jpg', value: isEdit ? (group.image_url || '') : '' });
+          formEl.appendChild(h('div', { className: 'form-group' }, imageUrlLabel, imageUrlInput));
+
+          var enabledCheck = h('input', { type: 'checkbox', id: 'grp-enabled' });
+          enabledCheck.checked = isEdit ? !!group.is_enabled : true;
+          formEl.appendChild(h('div', { className: 'form-check', style: 'display:flex;align-items:center;gap:6px;margin:8px 0' }, enabledCheck, h('label', { for: 'grp-enabled', style: 'cursor:pointer;margin:0' }, 'Enabled')));
+
+          var orderLabel = h('label', null, 'Sort Order');
+          var orderInput = h('input', { type: 'number', value: isEdit ? String(group.sort_order || 0) : '0' });
+          formEl.appendChild(h('div', { className: 'form-group' }, orderLabel, orderInput));
+
+          formEl.appendChild(h('div', { style: 'margin:16px 0 8px;padding:8px 0;border-top:1px solid var(--border);font-weight:600;font-size:14px;color:var(--accent)' }, 'Jellyfin Integration'));
+
+          var jfCheck = h('input', { type: 'checkbox', id: 'jf-enabled' });
+          jfCheck.checked = isEdit ? !!group.jellyfin_enabled : false;
+          formEl.appendChild(h('div', { className: 'form-check', style: 'display:flex;align-items:center;gap:6px;margin:8px 0' }, jfCheck, h('label', { for: 'jf-enabled', style: 'cursor:pointer;margin:0' }, 'Show in Jellyfin')));
+
+          var styleLabel = h('label', null, 'Presentation Style');
+          var styleSelect = h('select', null, ...Object.entries(jellyfinStyles).map(function(entry) {
+            var opt = h('option', { value: entry[0] }, entry[1]);
+            if (isEdit && group.jellyfin_type === entry[0]) opt.selected = true;
+            if (!isEdit && entry[0] === 'folders') opt.selected = true;
+            return opt;
+          }));
+          formEl.appendChild(h('div', { className: 'form-group' }, styleLabel, styleSelect));
+
+          showModal((isEdit ? 'Edit' : 'New') + ' Channel Group', formEl, async function() {
+            var body = {
+              name: nameInput.value,
+              image_url: imageUrlInput.value,
+              is_enabled: enabledCheck.checked,
+              sort_order: Number(orderInput.value),
+              jellyfin_enabled: jfCheck.checked,
+              jellyfin_type: styleSelect.value,
+            };
+            if (isEdit) {
+              await api.put('/api/channel-groups/' + group.id, body);
+              toast.success('Group updated');
+            } else {
+              await api.post('/api/channel-groups', body);
+              toast.success('Group created');
+            }
+            channelGroupsCache.invalidate();
+            pages['channel-groups'](container);
+          });
+        }
+
+        function renderGroup(group) {
+          var count = chCountMap[group.id] || 0;
+          var card = h('div', { style: 'background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px;transition:transform 0.15s;' + (group.is_enabled ? '' : 'opacity:0.5;') });
+          card.onmouseenter = function() { card.style.transform = 'scale(1.01)'; };
+          card.onmouseleave = function() { card.style.transform = ''; };
+
+          var top = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:12px' });
+          top.appendChild(h('div', { style: 'font-size:18px;font-weight:700;color:var(--text-primary)' }, group.name));
+          var actions = h('div', { style: 'display:flex;gap:6px' });
+          var editBtn = h('button', { className: 'btn btn-secondary btn-sm', title: 'Edit' }, '\u270E');
+          editBtn.onclick = function() { editGroup(group); };
+          actions.appendChild(editBtn);
+          var delBtn = h('button', { className: 'btn btn-danger btn-sm', title: 'Delete' }, '\u2715');
+          delBtn.onclick = async function() {
+            if (await confirmDialog('Delete group "' + group.name + '"?')) {
+              await api.del('/api/channel-groups/' + group.id);
+              toast.success('Group deleted');
+              channelGroupsCache.invalidate();
+              pages['channel-groups'](container);
+            }
+          };
+          actions.appendChild(delBtn);
+          top.appendChild(actions);
+          card.appendChild(top);
+
+          var stats = h('div', { style: 'display:flex;gap:12px;margin-bottom:12px' });
+          stats.appendChild(h('span', { style: 'font-size:13px;color:var(--text-muted)' }, count + ' channel' + (count !== 1 ? 's' : '')));
+          if (group.sort_order > 0) stats.appendChild(h('span', { style: 'font-size:13px;color:var(--text-muted)' }, 'Order: ' + group.sort_order));
+          card.appendChild(stats);
+
+          if (group.jellyfin_enabled) {
+            var jfBadge = h('div', { style: 'display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:8px;' });
+            jfBadge.appendChild(h('span', { style: 'font-size:12px;font-weight:600;color:#3b82f6' }, 'Jellyfin'));
+            jfBadge.appendChild(h('span', { style: 'font-size:12px;color:var(--text-muted)' }, jellyfinStyles[group.jellyfin_type] || 'Channels'));
+            card.appendChild(jfBadge);
+          }
+
+          grid.appendChild(card);
+        }
+
+        groups.sort(function(a, b) { return (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name); });
+        groups.forEach(renderGroup);
+
+        if (groups.length === 0) {
+          grid.appendChild(h('div', { style: 'grid-column:1/-1;text-align:center;padding:48px;color:var(--text-muted)' },
+            h('div', { style: 'font-size:3em;margin-bottom:12px;opacity:0.4' }, '\ud83d\udcc2'),
+            h('p', { style: 'font-size:1.1em' }, 'No channel groups yet. Create one to organise your channels.')
+          ));
+        }
+
+        container.appendChild(grid);
+      } catch(err) {
+        container.innerHTML = '';
+        container.appendChild(h('p', { style: 'color:var(--danger)' }, 'Failed to load: ' + err.message));
+      }
+    },
 
     'epg-sources': function(container) {
       const isAdmin = state.user && state.user.is_admin;
@@ -4959,6 +5244,7 @@
           return h('tr', null,
             h('td', null, c.name),
             h('td', null, String(c.priority)),
+            h('td', null, String(c.listen_port || 8080)),
             h('td', null, rulesLabel(c.match_rules)),
             h('td', null, profileMap[c.stream_profile_id] || '(unknown)'),
             h('td', null,
@@ -4982,7 +5268,7 @@
 
         const table = h('table', { className: 'data-table' },
           h('thead', null, h('tr', null,
-            h('th', null, 'Name'), h('th', null, 'Priority'), h('th', null, 'Match Rules'),
+            h('th', null, 'Name'), h('th', null, 'Priority'), h('th', null, 'Port'), h('th', null, 'Match Rules'),
             h('th', null, 'Stream Profile'), h('th', null, 'Status'), h('th', null, 'Actions'),
           )),
           h('tbody', null, ...rows),
@@ -5004,6 +5290,11 @@
 
         const nameInp = h('input', { type: 'text', placeholder: 'Plex', value: existing ? existing.name : '' });
         const priorityInp = h('input', { type: 'number', value: existing ? String(existing.priority) : '50' });
+        const portSelect = h('select', null,
+          h('option', { value: '8080' }, '8080 (Main)'),
+          h('option', { value: '8096' }, '8096 (Jellyfin)'),
+        );
+        portSelect.value = existing && existing.listen_port ? String(existing.listen_port) : '8080';
         const enabledChk = h('input', { type: 'checkbox' });
         enabledChk.checked = existing ? existing.is_enabled : true;
 
@@ -5062,6 +5353,7 @@
               const updated = await api.put('/api/clients/' + existing.id, {
                 name: nameInp.value,
                 priority: parseInt(priorityInp.value, 10) || 0,
+                listen_port: parseInt(portSelect.value, 10) || 8080,
                 stream_profile_id: existing.stream_profile_id,
                 is_enabled: enabledChk.checked,
                 match_rules: matchRules,
@@ -5073,6 +5365,7 @@
               const created = await api.post('/api/clients', {
                 name: nameInp.value,
                 priority: parseInt(priorityInp.value, 10) || 0,
+                listen_port: parseInt(portSelect.value, 10) || 8080,
                 is_enabled: enabledChk.checked,
                 match_rules: matchRules,
               });
@@ -5093,6 +5386,8 @@
           h('div', { className: 'form-group' }, h('label', null, 'Client Name'), nameInp),
           h('div', { className: 'form-group' }, h('label', null, 'Priority'), priorityInp,
             h('small', { style: 'color: var(--text-muted); display: block' }, 'Lower number = higher priority. Clients are checked in order.')),
+          h('div', { className: 'form-group' }, h('label', null, 'Incoming Port'), portSelect,
+            h('small', { style: 'color: var(--text-muted); display: block' }, 'Which port this client connects through. Jellyfin clients use 8096.')),
           h('div', { className: 'form-group' }, h('label', null, 'Match Rules (all must match)'), rulesContainer, addRuleBtn),
         );
 
@@ -6468,6 +6763,7 @@
         if (type === 'channel') return 'badge-primary';
         if (type === 'stream') return 'badge-info';
         if (type === 'recording') return 'badge-danger';
+        if (type === 'session') return 'badge-success';
         return 'badge-warning';
       }
 
@@ -6491,15 +6787,19 @@
         }
 
         var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:16px' });
-        var count = viewers ? viewers.length : 0;
-        header.appendChild(h('h2', { style: 'margin:0' }, 'Now Playing'));
-        header.appendChild(h('span', { style: 'color:var(--text-muted);font-size:0.95em' }, count + ' active stream' + (count !== 1 ? 's' : '')));
+        var sessionCount = viewers ? viewers.filter(function(v) { return v.type === 'session'; }).length : 0;
+        var streamCount = viewers ? viewers.filter(function(v) { return v.type !== 'session'; }).length : 0;
+        header.appendChild(h('h2', { style: 'margin:0' }, 'Activity'));
+        var countsRow = h('div', { style: 'display:flex;gap:16px;font-size:0.95em;color:var(--text-muted)' });
+        countsRow.appendChild(h('span', null, '\ud83d\udc64 ' + sessionCount + ' user' + (sessionCount !== 1 ? 's' : '')));
+        countsRow.appendChild(h('span', null, '\u25B6 ' + streamCount + ' stream' + (streamCount !== 1 ? 's' : '')));
+        header.appendChild(countsRow);
         container.appendChild(header);
 
         if (!viewers || viewers.length === 0) {
           container.appendChild(h('div', { style: 'text-align:center;padding:48px 16px;color:var(--text-muted)' },
             h('div', { style: 'font-size:3em;margin-bottom:12px;opacity:0.4' }, '\u25B6'),
-            h('p', { style: 'font-size:1.1em;margin:0' }, 'No active streams')
+            h('p', { style: 'font-size:1.1em;margin:0' }, 'No active users or streams')
           ));
           return;
         }
@@ -6511,13 +6811,25 @@
           var card = h('div', { style: 'background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px;' + cardBorder });
 
           var nameRow = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;gap:8px' });
-          var displayName = v.channel_name || v.stream_name || 'Unknown';
-          nameRow.appendChild(h('span', { style: 'font-size:1.15em;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, displayName));
+          var isSession = v.type === 'session';
+          var displayName = isSession ? (v.username || 'Unknown User') : (v.channel_name || v.stream_name || 'Unknown');
+
+          if (isSession) {
+            nameRow.appendChild(h('span', { style: 'display:flex;align-items:center;gap:8px;font-size:1.15em;font-weight:600' },
+              h('span', null, '\ud83d\udc64'),
+              h('span', null, displayName),
+            ));
+          } else {
+            nameRow.appendChild(h('span', { style: 'font-size:1.15em;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, displayName));
+          }
 
           var statusDot = h('span', { style: 'display:inline-flex;align-items:center;gap:4px;font-size:0.85em;white-space:nowrap' });
           if (isRecording) {
             statusDot.appendChild(h('span', { style: 'width:8px;height:8px;border-radius:50%;background:var(--danger);animation:pulse 1.5s ease-in-out infinite' }));
             statusDot.appendChild(document.createTextNode('Recording'));
+          } else if (isSession) {
+            statusDot.appendChild(h('span', { style: 'width:8px;height:8px;border-radius:50%;background:var(--success)' }));
+            statusDot.appendChild(document.createTextNode('Online'));
           } else {
             statusDot.appendChild(h('span', { style: 'width:8px;height:8px;border-radius:50%;background:' + statusColor(v.idle_secs) }));
             statusDot.appendChild(document.createTextNode(statusLabel(v.idle_secs)));
@@ -6525,11 +6837,22 @@
           nameRow.appendChild(statusDot);
           card.appendChild(nameRow);
 
+          if (v.username && !isSession) {
+            card.appendChild(h('div', { style: 'display:flex;align-items:center;gap:6px;font-size:0.9em;color:var(--text-secondary)' },
+              h('span', { style: 'font-weight:500' }, '\ud83d\udc64'),
+              h('span', null, v.username),
+            ));
+          }
+
           var badgeRow = h('div', { style: 'display:flex;flex-wrap:wrap;gap:4px' });
-          var typeLabel = isRecording ? '\u23FA Recording' : v.type.charAt(0).toUpperCase() + v.type.slice(1);
-          badgeRow.appendChild(h('span', { className: 'badge ' + typeBadgeColor(v.type) }, typeLabel));
-          if (v.profile_name) badgeRow.appendChild(h('span', { className: 'badge badge-secondary' }, v.profile_name));
-          if (v.client_name) badgeRow.appendChild(h('span', { className: 'badge badge-success' }, v.client_name));
+          if (isSession) {
+            badgeRow.appendChild(h('span', { className: 'badge badge-success' }, v.client_name || 'Dashboard'));
+          } else {
+            var typeLabel = isRecording ? '\u23FA Recording' : v.type.charAt(0).toUpperCase() + v.type.slice(1);
+            badgeRow.appendChild(h('span', { className: 'badge ' + typeBadgeColor(v.type) }, typeLabel));
+            if (v.profile_name) badgeRow.appendChild(h('span', { className: 'badge badge-secondary' }, v.profile_name));
+            if (v.client_name) badgeRow.appendChild(h('span', { className: 'badge badge-success' }, v.client_name));
+          }
           card.appendChild(badgeRow);
 
           var detailsGrid = h('div', { style: 'display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:0.88em;color:var(--text-muted)' });
@@ -6782,7 +7105,6 @@
     }
   });
 
-  // Test exports
   if (typeof window !== 'undefined') {
     window._testExports = { createDVRTracker: createDVRTracker };
   }

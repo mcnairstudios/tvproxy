@@ -15,26 +15,21 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// scanResult is the output of scanning one transponder.
 type scanResult struct {
 	tp          Transponder
 	channels    []Channel
 	nitMuxes    []Transponder
 	networkID   uint16
-	networkName string // from NIT network_name descriptor (tag 0x40)
+	networkName string
 	elapsed     time.Duration
 	err         error
-	patReceived bool                        // PAT was received — confirms the mux is on air
-	nitComplete bool                        // all NIT sections received (complete mux list)
-	signalOnly  bool                        // was scanned in signal-only mode (pids=0)
-	pmtData     map[uint16]*astits.PMTData  // serviceID → PMT (populated during full scan)
-	programs    map[uint16]uint16           // serviceID → pmtPID from PAT (populated during any scan)
+	patReceived bool
+	nitComplete bool
+	signalOnly  bool
+	pmtData     map[uint16]*astits.PMTData
+	programs    map[uint16]uint16
 }
 
-// scanTransponder tunes via SAT>IP RTSP and collects PAT + SDT + NIT + PMT (for stream metadata).
-// pids controls what the SAT>IP server sends: "0,16,17" for SI-only (fast NIT), "all" for full
-// metadata, "0" for signal-only (PAT confirmation). parentCtx allows callers to cancel early
-// (e.g. when a parallel race winner is found).
 func scanTransponder(parentCtx context.Context, host string, tp Transponder, timeout time.Duration, pids string, log zerolog.Logger) (result scanResult) {
 	start := time.Now()
 	result.tp = tp
@@ -108,13 +103,10 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 		return result
 	}
 
-	// Discard initial data for 2s to let the tuner lock to the new frequency.
-	// SAT>IP servers reuse tuners across sessions; without this delay the
-	// scanner picks up stale TS packets from the previous frequency.
 	lockEnd := time.Now().Add(2 * time.Second)
 	for time.Now().Before(lockEnd) {
 		c.conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-		c.readInterleaved() //nolint:errcheck // discard stale data
+		c.readInterleaved() //nolint:errcheck
 	}
 	c.conn.SetDeadline(time.Now().Add(timeout + 5*time.Second))
 
@@ -139,20 +131,20 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 		}
 	}()
 
-	programs := map[uint16]uint16{} // serviceID → pmtPID
+	programs := map[uint16]uint16{}
 	services := map[uint16]string{}
 	svcTypes := map[uint16]uint8{}
 	svcEncrypted := map[uint16]bool{}
-	pmtData := map[uint16]*astits.PMTData{} // serviceID → PMT
+	pmtData := map[uint16]*astits.PMTData{}
 	result.signalOnly = (pids == "0")
 	patDone, nitDone, sdtReceived := false, false, false
-	sdtSeenSvcIDs := map[uint16]bool{}  // service IDs seen from matching SDT sections
-	sdtSectionsSeen := map[uint8]bool{} // section numbers seen from SDT-actual
-	sdtLastSection := uint8(0)          // last_section_number from SDT header
+	sdtSeenSvcIDs := map[uint16]bool{}
+	sdtSectionsSeen := map[uint8]bool{}
+	sdtLastSection := uint8(0)
 	nitMuxSeen := map[string]bool{}
 	nitSectionsSeen := map[uint8]bool{}
 	nitLastSection := uint8(0)
-	pmtPending := map[uint16]bool{} // pmtPID → collected?
+	pmtPending := map[uint16]bool{}
 
 	dmx := astits.NewDemuxer(ctx, pr, astits.DemuxerOptPacketSize(188))
 	for {
@@ -181,13 +173,6 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 			result.patReceived = true
 		}
 
-		// PID 17 carries SDT-actual (table_id 0x42, current TS) and SDT-other
-		// (0x46, other TSes). Filter to SDT-actual by requiring at least one service
-		// ID that matches a program from our PAT. Track section_number and
-		// last_section_number from the raw packet header (same approach as NIT) so
-		// we know exactly when the full multi-section SDT table has been received.
-		// The previous "noNewSvcs" heuristic was wrong: if section 0 repeated before
-		// section 1 arrived, it would fire early and miss the remaining sections.
 		if d.SDT != nil && patDone {
 			hasOwnService := false
 			for _, s := range d.SDT.Services {
@@ -197,7 +182,6 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 				}
 			}
 			if hasOwnService {
-				// Extract section_number / last_section_number from raw packet header.
 				if p := d.FirstPacket; p != nil && p.Header.PayloadUnitStartIndicator && len(p.Payload) >= 9 {
 					ptr := int(p.Payload[0])
 					base := 1 + ptr
@@ -223,7 +207,6 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 					}
 				}
 
-				// Done when we have seen all sections, or fast-exit if all programs named.
 				allNamed := true
 				for svcID := range programs {
 					if services[svcID] == "" {
@@ -238,11 +221,6 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 			}
 		}
 
-		// Accumulate NIT muxes. PID 16 carries NIT-actual (0x40) and NIT-other (0x41).
-		// Only collect muxes from the same network ID as the first NIT received;
-		// this avoids adding unreachable national-network muxes from NIT-other.
-		// Track section_number / last_section_number from the raw packet payload so
-		// we know when the full multi-section NIT table has been received.
 		if d.NIT != nil {
 			if result.networkID == 0 {
 				result.networkID = d.NIT.NetworkID
@@ -256,10 +234,6 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 			if d.NIT.NetworkID != result.networkID {
 				goto afterNIT
 			}
-			// Extract section_number (byte 6) and last_section_number (byte 7)
-			// from the PSI section header in the raw first-packet payload.
-			// Layout after pointer_field: table_id(1), flags+len(2), tid_ext(2),
-			// version+cni(1), section_number(1), last_section_number(1).
 			if p := d.FirstPacket; p != nil && p.Header.PayloadUnitStartIndicator && len(p.Payload) >= 9 {
 				ptr := int(p.Payload[0])
 				base := 1 + ptr
@@ -313,9 +287,6 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 			}
 		}
 
-		// pids=0:       signal-only — just confirm the mux is on air via PAT.
-		// pids=0,16,17: discovery — wait for PAT + complete NIT.
-		// pids=all:     full scan — wait for PAT + SDT + all PMTs.
 		if pids == "0" {
 			if patDone {
 				break
@@ -397,9 +368,6 @@ func scanTransponder(parentCtx context.Context, host string, tp Transponder, tim
 	return result
 }
 
-// scanParallel scans multiple transponders with up to maxParallel concurrent sessions,
-// requesting pids=all so channel names, service types, and stream components (PCR, video,
-// audio PIDs) are collected in a single pass. progressFn is called after each mux completes.
 func scanParallel(host string, tps []Transponder, maxParallel int, timeout time.Duration, log zerolog.Logger, progressFn func(done, total int)) []scanResult {
 	if maxParallel < 1 {
 		maxParallel = 1

@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// DVB service types (EN 300 468)
 var serviceTypeName = map[uint8]string{
 	0x01: "TV",
 	0x02: "Radio",
@@ -16,7 +15,6 @@ var serviceTypeName = map[uint8]string{
 	0x1f: "TV(HEVC)",
 }
 
-// Stream type names (ISO 13818-1 / DVB)
 var streamTypeName = map[uint8]string{
 	0x01: "MPEG-1 Video",
 	0x02: "MPEG-2 Video",
@@ -32,12 +30,11 @@ var streamTypeName = map[uint8]string{
 	0x87: "E-AC-3 Audio",
 }
 
-// Descriptor tags not yet in go-astits v1.15.0
 const (
 	tagSatelliteDelivery   = 0x43
 	tagCableDelivery       = 0x44
 	tagTerrestrialDelivery = 0x5a
-	tagExtT2Delivery       = 0x04 // extension descriptor tag for T2 delivery system (EN 300 468 §6.4.6.3)
+	tagExtT2Delivery       = 0x04
 )
 
 func serviceTypStr(t uint8) string {
@@ -69,7 +66,6 @@ func byteHex(b uint8) string {
 	return string([]byte{hex[b>>4], hex[b&0xf]})
 }
 
-// dvbString decodes a DVB character string, stripping any leading encoding byte.
 func dvbString(b []byte) string {
 	if len(b) == 0 {
 		return ""
@@ -80,7 +76,6 @@ func dvbString(b []byte) string {
 	return strings.TrimSpace(string(b))
 }
 
-// parseTerrestrialDelivery parses descriptor tag 0x5A. EN 300 468 §6.2.13.4
 func parseTerrestrialDelivery(b []byte) (Transponder, bool) {
 	if len(b) < 11 {
 		return Transponder{}, false
@@ -99,7 +94,6 @@ func parseTerrestrialDelivery(b []byte) (Transponder, bool) {
 	}, true
 }
 
-// parseSatelliteDelivery parses descriptor tag 0x43. EN 300 468 §6.2.13.2
 func parseSatelliteDelivery(b []byte) (Transponder, bool) {
 	if len(b) < 11 {
 		return Transponder{}, false
@@ -127,7 +121,6 @@ func parseSatelliteDelivery(b []byte) (Transponder, bool) {
 	}, true
 }
 
-// parseCableDelivery parses descriptor tag 0x44. EN 300 468 §6.2.13.1
 func parseCableDelivery(b []byte) (Transponder, bool) {
 	if len(b) < 11 {
 		return Transponder{}, false
@@ -150,11 +143,6 @@ func parseCableDelivery(b []byte) (Transponder, bool) {
 	}, true
 }
 
-// parseT2Delivery parses a T2 delivery system descriptor (extension tag 0x04).
-// EN 300 468 §6.4.6.3. b is desc.Extension.Unknown bytes (extension tag already consumed).
-// Layout: [0]=plp_id [1-2]=T2_system_id [3]=SISO_MISO(2)|bandwidth(4)|rsvd(2)
-//
-//	[4]=guard(3)|mode(3)|other_freq(1)|tfs(1)  [5-6]=cell_id [7-10]=centre_frequency
 func parseT2Delivery(b []byte) (Transponder, bool) {
 	if len(b) < 11 {
 		return Transponder{}, false
@@ -166,7 +154,7 @@ func parseT2Delivery(b []byte) (Transponder, bool) {
 	}
 	tfs := b[4] & 0x01
 	if tfs != 0 {
-		return Transponder{}, false // TFS mode not supported
+		return Transponder{}, false
 	}
 	freqHz := uint64(binary.BigEndian.Uint32(b[7:11])) * 10
 	freqMHz := float64(freqHz) / 1e6

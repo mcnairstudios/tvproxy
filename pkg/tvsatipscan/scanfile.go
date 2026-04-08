@@ -19,8 +19,6 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// ListTransmitters returns the sorted list of transmitter names for the given
-// delivery system directory (e.g. "dvb-t", "dvb-s", "dvb-c").
 func ListTransmitters(system string) ([]string, error) {
 	dir := filepath.Join(DVBTablesDir, system)
 	entries, err := os.ReadDir(dir)
@@ -37,8 +35,6 @@ func ListTransmitters(system string) ([]string, error) {
 	return names, nil
 }
 
-// ParseTransmitterFile parses a dtv-scan-tables file and returns the list of
-// transponders. transmitterFile is a relative path like "dvb-t/uk-CrystalPalace".
 func ParseTransmitterFile(transmitterFile string) ([]Transponder, error) {
 	path := filepath.Join(DVBTablesDir, transmitterFile)
 	f, err := os.Open(path)

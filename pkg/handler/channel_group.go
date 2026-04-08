@@ -35,6 +35,7 @@ func (h *ChannelGroupHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Name            string `json:"name"`
+		ImageURL        string `json:"image_url"`
 		IsEnabled       bool   `json:"is_enabled"`
 		JellyfinEnabled bool   `json:"jellyfin_enabled"`
 		JellyfinType    string `json:"jellyfin_type"`
@@ -53,6 +54,7 @@ func (h *ChannelGroupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	group := &models.ChannelGroup{
 		UserID:          user.UserID,
 		Name:            req.Name,
+		ImageURL:        req.ImageURL,
 		IsEnabled:       req.IsEnabled,
 		JellyfinEnabled: req.JellyfinEnabled,
 		JellyfinType:    req.JellyfinType,
@@ -92,6 +94,7 @@ func (h *ChannelGroupHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Name            string `json:"name"`
+		ImageURL        string `json:"image_url"`
 		IsEnabled       bool   `json:"is_enabled"`
 		JellyfinEnabled bool   `json:"jellyfin_enabled"`
 		JellyfinType    string `json:"jellyfin_type"`
@@ -105,6 +108,7 @@ func (h *ChannelGroupHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Name != "" {
 		group.Name = req.Name
 	}
+	group.ImageURL = req.ImageURL
 	group.IsEnabled = req.IsEnabled
 	group.JellyfinEnabled = req.JellyfinEnabled
 	group.JellyfinType = req.JellyfinType

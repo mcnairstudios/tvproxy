@@ -3,6 +3,8 @@ module github.com/gavinmcnair/tvproxy
 go 1.24.0
 
 require (
+	github.com/Eyevinn/mp4ff v0.51.0
+	github.com/asticode/go-astits v1.15.0
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/go-chi/cors v1.2.1
 	github.com/golang-jwt/jwt/v5 v5.2.1
@@ -17,10 +19,8 @@ require (
 )
 
 require (
-	github.com/Eyevinn/mp4ff v0.51.0 // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/asticode/go-astikit v0.30.0 // indirect
-	github.com/asticode/go-astits v1.15.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/btree v1.1.2 // indirect

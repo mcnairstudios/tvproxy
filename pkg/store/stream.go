@@ -69,6 +69,11 @@ func (s *StreamStoreImpl) ListSummaries(_ context.Context) ([]models.StreamSumma
 			Name:          st.Name,
 			Group:         st.Group,
 			Logo:          st.Logo,
+			VODType:       st.VODType,
+			VODSeries:     st.VODSeries,
+			VODSeason:     st.VODSeason,
+			VODEpisode:    st.VODEpisode,
+			VODYear:       st.VODYear,
 		}
 	}
 	return summaries, nil
@@ -98,18 +103,6 @@ func (s *StreamStoreImpl) GetByID(_ context.Context, id string) (*models.Stream,
 		return nil, fmt.Errorf("stream not found: %s", id)
 	}
 	return &st, nil
-}
-
-func (s *StreamStoreImpl) CountByAccountID(_ context.Context, accountID string) (int, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	count := 0
-	for _, v := range s.items {
-		if v.M3UAccountID == accountID {
-			count++
-		}
-	}
-	return count, nil
 }
 
 func (s *StreamStoreImpl) BulkUpsert(_ context.Context, streams []models.Stream) error {
@@ -181,18 +174,6 @@ func (s *StreamStoreImpl) ListBySatIPSourceID(_ context.Context, sourceID string
 		return items[i].CreatedAt.Before(items[j].CreatedAt)
 	})
 	return items, nil
-}
-
-func (s *StreamStoreImpl) CountBySatIPSourceID(_ context.Context, sourceID string) (int, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	count := 0
-	for _, v := range s.items {
-		if v.SatIPSourceID == sourceID {
-			count++
-		}
-	}
-	return count, nil
 }
 
 func (s *StreamStoreImpl) DeleteBySatIPSourceID(_ context.Context, sourceID string) error {

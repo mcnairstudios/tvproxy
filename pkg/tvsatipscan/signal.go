@@ -7,34 +7,27 @@ import (
 	"time"
 )
 
-// SignalInfo holds all tuner metadata from a SAT>IP DESCRIBE response.
 type SignalInfo struct {
-	// Signal quality
 	Lock    bool `json:"lock"`
-	Level   int  `json:"level"`   // 0–255 signal strength
-	Quality int  `json:"quality"` // 0–15 SNR
+	Level   int  `json:"level"`
+	Quality int  `json:"quality"`
 	BER     int  `json:"ber"`
 
-	// Tuner identity
-	FeID int `json:"fe_id"` // physical frontend number
+	FeID int `json:"fe_id"`
 
-	// Tune parameters (confirmed from server, not just URL)
 	FreqMHz float64 `json:"freq_mhz"`
 	BwMHz   int     `json:"bw_mhz"`
-	Msys    string  `json:"msys"`    // dvbt/dvbt2/dvbc/dvbs/dvbs2
-	Mtype   string  `json:"mtype"`   // 256qam/64qam/8psk/etc
-	PLPID   string  `json:"plp_id"`  // DVB-T2 PLP
-	T2ID    string  `json:"t2_id"`   // DVB-T2 system ID
+	Msys    string  `json:"msys"`
+	Mtype   string  `json:"mtype"`
+	PLPID   string  `json:"plp_id"`
+	T2ID    string  `json:"t2_id"`
 
-	// Stream info
-	BitratKbps int  `json:"bitrate_kbps"` // b=AS: transport stream bitrate
-	Active     bool `json:"active"`       // a=sendonly vs a=inactive
+	BitratKbps int  `json:"bitrate_kbps"`
+	Active     bool `json:"active"`
 
-	// Server identity
-	Server string `json:"server"` // RTSP Server header
+	Server string `json:"server"`
 }
 
-// LevelPct returns signal level as a 0–100 percentage.
 func (s *SignalInfo) LevelPct() int {
 	if s.Level == 0 {
 		return 0
@@ -42,7 +35,6 @@ func (s *SignalInfo) LevelPct() int {
 	return s.Level * 100 / 255
 }
 
-// QualityPct returns signal quality as a 0–100 percentage.
 func (s *SignalInfo) QualityPct() int {
 	if s.Quality == 0 {
 		return 0
@@ -50,8 +42,6 @@ func (s *SignalInfo) QualityPct() int {
 	return s.Quality * 100 / 15
 }
 
-// QuerySignal sends an RTSP DESCRIBE to the SAT>IP server and parses all
-// available tuner metadata from the SDP response. It does not allocate a tuner.
 func QuerySignal(rtspURL string, timeout time.Duration) (*SignalInfo, error) {
 	host := extractHost(rtspURL)
 	if host == "" {
@@ -63,7 +53,7 @@ func QuerySignal(rtspURL string, timeout time.Duration) (*SignalInfo, error) {
 		return nil, err
 	}
 	defer c.close()
-	c.conn.SetDeadline(time.Now().Add(timeout)) //nolint
+	c.conn.SetDeadline(time.Now().Add(timeout))
 
 	resp, err := c.send("DESCRIBE", rtspURL, map[string]string{"Accept": "application/sdp"}, nil)
 	if err != nil {
@@ -83,7 +73,6 @@ func QuerySignal(rtspURL string, timeout time.Duration) (*SignalInfo, error) {
 	return info, nil
 }
 
-// extractHost returns "host:port" from an rtsp:// URL, defaulting to port 554.
 func extractHost(u string) string {
 	u = strings.TrimPrefix(u, "rtsp://")
 	u = strings.TrimPrefix(u, "rtsps://")
@@ -95,13 +84,6 @@ func extractHost(u string) string {
 	return host
 }
 
-// parseTunerSDP extracts all SAT>IP tuner fields from an SDP body.
-//
-// Example fmtp line:
-//
-//	a=fmtp:33 ver=1.1;tuner=1,255,1,15,546.00,8,dvbt2,,256qam,,,,0,0;pids=0
-//
-// Positional tuner fields: fe,level,lock,quality,freq,bw,msys,plp,mtype,t2id,...
 func parseTunerSDP(sdp string) *SignalInfo {
 	info := &SignalInfo{}
 	found := false
@@ -149,8 +131,6 @@ func parseTunerSDP(sdp string) *SignalInfo {
 				if len(fields) > 6 {
 					info.Msys = fields[6]
 				}
-				// fields[7] is often empty or PLP; fields[8] is mtype on some devices
-				// Handle both orderings by checking for known msys/mtype strings
 				for i := 7; i < len(fields); i++ {
 					f := strings.TrimSpace(fields[i])
 					if f == "" {
@@ -184,7 +164,6 @@ func isModulationType(s string) bool {
 }
 
 func looksLikePLP(s string) bool {
-	// PLP IDs are small integers; avoid misidentifying zero-valued extras
 	if _, err := strconv.Atoi(s); err == nil {
 		return true
 	}

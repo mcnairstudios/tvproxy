@@ -23,7 +23,6 @@ type ScheduledRecordingStore interface {
 	ListByChannelAndTimeRange(ctx context.Context, channelID, userID string, start, stop time.Time) ([]models.ScheduledRecording, error)
 	UpdateStatus(ctx context.Context, id, status, lastError string) error
 	UpdateRecordingState(ctx context.Context, id, sessionID, segmentID string) error
-	UpdateFilePath(ctx context.Context, id, filePath string) error
 	Delete(ctx context.Context, id string) error
 }
 
@@ -173,12 +172,6 @@ func (s *ScheduledRecordingStoreImpl) UpdateRecordingState(_ context.Context, id
 	return s.updateField(id, func(r *models.ScheduledRecording) {
 		r.SessionID = sessionID
 		r.SegmentID = segmentID
-	})
-}
-
-func (s *ScheduledRecordingStoreImpl) UpdateFilePath(_ context.Context, id, filePath string) error {
-	return s.updateField(id, func(r *models.ScheduledRecording) {
-		r.FilePath = filePath
 	})
 }
 

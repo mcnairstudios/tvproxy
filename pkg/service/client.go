@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -39,23 +40,52 @@ func (s *ClientService) MatchClient(ctx context.Context, r *http.Request) (*mode
 		return nil, "", err
 	}
 
+	originPort := requestOriginPort(r)
 	debug := s.settingsService.IsDebug()
+
 	for _, client := range clients {
-		if len(client.MatchRules) == 0 {
+		if !s.matchesClient(r, client, originPort, debug) {
 			continue
 		}
-		if s.matchesAllRules(r, client, debug) {
-			profile, err := s.streamProfileRepo.GetByID(ctx, client.StreamProfileID)
-			if err != nil {
-				s.log.Warn().Err(err).Str("client_id", client.ID).Str("client", client.Name).Msg("matched but profile not found")
-				continue
-			}
-			s.log.Info().Str("client", client.Name).Str("profile", profile.Name).Msg("client detected")
-			return profile, client.Name, nil
+		profile, err := s.streamProfileRepo.GetByID(ctx, client.StreamProfileID)
+		if err != nil {
+			s.log.Warn().Err(err).Str("client_id", client.ID).Str("client", client.Name).Msg("matched but profile not found")
+			continue
 		}
+		s.log.Info().Str("client", client.Name).Str("profile", profile.Name).Int("port", originPort).Msg("client detected")
+		return profile, client.Name, nil
 	}
 
 	return nil, "", nil
+}
+
+func requestOriginPort(r *http.Request) int {
+	if p := r.URL.Query().Get("_port"); p != "" {
+		if port, err := strconv.Atoi(p); err == nil {
+			return port
+		}
+	}
+	if p := r.Header.Get("X-TVProxy-Port"); p != "" {
+		if port, err := strconv.Atoi(p); err == nil {
+			return port
+		}
+	}
+	return 8080
+}
+
+func (s *ClientService) matchesClient(r *http.Request, client models.Client, originPort int, debug bool) bool {
+	if client.ListenPort > 0 && client.ListenPort != originPort {
+		if debug {
+			s.log.Debug().Str("client", client.Name).Int("want_port", client.ListenPort).Int("got_port", originPort).Msg("port mismatch, skipping")
+		}
+		return false
+	}
+
+	if len(client.MatchRules) == 0 {
+		return client.ListenPort > 0 && client.ListenPort == originPort
+	}
+
+	return s.matchesAllRules(r, client, debug)
 }
 
 func (s *ClientService) ListClients(ctx context.Context) ([]models.Client, error) {

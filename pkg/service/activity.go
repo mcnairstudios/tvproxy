@@ -12,6 +12,7 @@ import (
 
 type ViewerOpts struct {
 	ID           string
+	Username     string
 	ChannelID    string
 	ChannelName  string
 	StreamID     string
@@ -21,7 +22,7 @@ type ViewerOpts struct {
 	UserAgent    string
 	ClientName   string
 	RemoteAddr   string
-	Type     string
+	Type         string
 }
 
 type viewerEntry struct {
@@ -30,15 +31,49 @@ type viewerEntry struct {
 	lastActive time.Time
 }
 
+type userSession struct {
+	UserID     string
+	Username   string
+	Source     string
+	RemoteAddr string
+	UserAgent  string
+	FirstSeen  time.Time
+	LastSeen   time.Time
+}
+
 type ActivityService struct {
-	mu      sync.RWMutex
-	viewers map[string]*viewerEntry
+	mu       sync.RWMutex
+	viewers  map[string]*viewerEntry
+	sessions map[string]*userSession
 }
 
 func NewActivityService() *ActivityService {
 	return &ActivityService{
-		viewers: make(map[string]*viewerEntry),
+		viewers:  make(map[string]*viewerEntry),
+		sessions: make(map[string]*userSession),
 	}
+}
+
+func (s *ActivityService) TouchUser(userID, username, source, remoteAddr, userAgent string) {
+	key := userID + ":" + source
+	s.mu.Lock()
+	now := time.Now()
+	if sess, ok := s.sessions[key]; ok {
+		sess.LastSeen = now
+		sess.RemoteAddr = remoteAddr
+		sess.UserAgent = userAgent
+	} else {
+		s.sessions[key] = &userSession{
+			UserID:     userID,
+			Username:   username,
+			Source:     source,
+			RemoteAddr: remoteAddr,
+			UserAgent:  userAgent,
+			FirstSeen:  now,
+			LastSeen:   now,
+		}
+	}
+	s.mu.Unlock()
 }
 
 func (s *ActivityService) Add(opts ViewerOpts) string {
@@ -81,10 +116,32 @@ func (s *ActivityService) Remove(id string) {
 func (s *ActivityService) List() []models.ActiveViewer {
 	s.mu.RLock()
 	now := time.Now()
-	list := make([]models.ActiveViewer, 0, len(s.viewers))
+	sessionTimeout := 20 * time.Minute
+
+	list := make([]models.ActiveViewer, 0, len(s.viewers)+len(s.sessions))
+
+	for _, sess := range s.sessions {
+		idle := now.Sub(sess.LastSeen)
+		if idle > sessionTimeout {
+			continue
+		}
+		list = append(list, models.ActiveViewer{
+			ID:         sess.UserID,
+			Username:   sess.Username,
+			ClientName: sess.Source,
+			RemoteAddr: sess.RemoteAddr,
+			UserAgent:  sess.UserAgent,
+			StartedAt:  sess.FirstSeen.Format(time.RFC3339),
+			LastActive: sess.LastSeen.Format(time.RFC3339),
+			IdleSecs:   idle.Seconds(),
+			Type:       "session",
+		})
+	}
+
 	for _, v := range s.viewers {
 		list = append(list, models.ActiveViewer{
 			ID:           v.ID,
+			Username:     v.Username,
 			ChannelID:    v.ChannelID,
 			ChannelName:  v.ChannelName,
 			StreamID:     v.StreamID,

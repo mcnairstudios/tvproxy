@@ -22,7 +22,6 @@ type HDHRDeviceStore interface {
 	Delete(ctx context.Context, id string) error
 	NextAvailablePort(ctx context.Context) (int, error)
 	SetChannelGroups(ctx context.Context, deviceID string, groupIDs []string) error
-	GetChannelGroups(ctx context.Context, deviceID string) ([]string, error)
 }
 
 type HDHRDeviceStoreImpl struct {
@@ -149,17 +148,6 @@ func (s *HDHRDeviceStoreImpl) SetChannelGroups(_ context.Context, deviceID strin
 		}
 	}
 	return fmt.Errorf("hdhr device not found")
-}
-
-func (s *HDHRDeviceStoreImpl) GetChannelGroups(_ context.Context, deviceID string) ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, d := range s.devices {
-		if d.ID == deviceID {
-			return d.ChannelGroupIDs, nil
-		}
-	}
-	return nil, fmt.Errorf("hdhr device not found")
 }
 
 func (s *HDHRDeviceStoreImpl) ClearAndSave() error {

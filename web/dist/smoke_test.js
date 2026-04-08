@@ -106,6 +106,7 @@ realSetTimeout(async () => {
     'satip-sources',
     'channels',        // has groupBy — this is the key one to test
     'channel-groups',
+    'favorites',
     'epg-sources',
     'stream-profiles',
     'hdhr-devices',

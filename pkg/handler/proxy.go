@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 
+	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
 
@@ -37,8 +38,20 @@ func stripExtension(id string) string {
 	return id
 }
 
+func injectUsernameParam(r *http.Request) {
+	if r.URL.Query().Get("_user") != "" {
+		return
+	}
+	if user := middleware.UserFromContext(r.Context()); user != nil {
+		q := r.URL.Query()
+		q.Set("_user", user.Username)
+		r.URL.RawQuery = q.Encode()
+	}
+}
+
 func (h *ProxyHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	channelID := stripExtension(chi.URLParam(r, "channelID"))
+	injectUsernameParam(r)
 	h.log.Info().Str("channel_id", channelID).Str("user_agent", r.UserAgent()).Str("remote_addr", r.RemoteAddr).Msg("client connected")
 	if h.settingsService.IsDebug() {
 		for k, v := range r.Header {

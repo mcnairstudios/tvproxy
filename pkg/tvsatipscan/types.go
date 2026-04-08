@@ -8,15 +8,14 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// Transponder holds the full tuning parameters for one multiplex.
 type Transponder struct {
 	FreqMHz      float64
-	System       string // dvbt, dvbt2, dvbs, dvbs2, dvbc
+	System       string
 	Modulation   string
-	BandwidthMHz int    // DVB-T/T2
-	SymbolRateKS int    // DVB-S/C (kSym/s)
-	Polarization string // h or v (DVB-S)
-	PLPID        int    // DVB-T2 Physical Layer Pipe ID
+	BandwidthMHz int
+	SymbolRateKS int
+	Polarization string
+	PLPID        int
 }
 
 func (t Transponder) String() string {
@@ -32,10 +31,7 @@ func (t Transponder) String() string {
 	}
 }
 
-// RTSPURL builds the SAT>IP tuning URL. pids is the PID list ("0,16,17" for
-// SI-only, "all" for full scan, or a custom comma-separated list).
 func (t Transponder) RTSPURL(host, pids string) string {
-	// "sdt" is an internal scan mode — map to SI-only PIDs for the actual request.
 	if pids == "sdt" {
 		pids = "0,16,17"
 	}
@@ -56,27 +52,20 @@ func (t Transponder) RTSPURL(host, pids string) string {
 	return b.String()
 }
 
-// MuxKey returns a stable deduplication key for this transponder.
-// DVB-T/T2 frequencies from NIT may differ by a few hundred kHz from the seed
-// (e.g. NIT reports 529.833 MHz while the seed is 530 MHz for the same mux).
-// DVB-T/T2 are rounded to the nearest MHz; DVB-S/C keep full precision because
-// their transponders can be legitimately 1 MHz apart.
 func (t Transponder) MuxKey() string {
 	return muxKey(t)
 }
 
-// StreamComponent describes one elementary stream in a PMT.
 type StreamComponent struct {
 	PID        uint16
 	StreamType uint8
 	Language   string
-	AudioType  uint8  // ISO 639 audio_type: 0=normal, 1=clean effects, 2=hearing impaired, 3=audio description
-	Label      string // component descriptor text (e.g. "English AD")
-	Category   string // video, audio, subtitle, teletext
+	AudioType  uint8
+	Label      string
+	Category   string
 	TypeName   string
 }
 
-// Channel is a discovered DVB service with full metadata.
 type Channel struct {
 	Name        string
 	ServiceID   uint16
@@ -88,9 +77,6 @@ type Channel struct {
 	Transponder Transponder
 }
 
-// RTSPURL builds the SAT>IP URL for this specific channel, requesting only the
-// PIDs needed to decode it (PAT + PMT + all elementary streams). If stream
-// metadata is unavailable, falls back to "all".
 func (ch Channel) RTSPURL(host string) string {
 	pids := fmt.Sprintf("0,%d", ch.PMTPID)
 	for _, s := range ch.Streams {
@@ -102,35 +88,31 @@ func (ch Channel) RTSPURL(host string) string {
 	return ch.Transponder.RTSPURL(host, pids)
 }
 
-// ScanResult is the output of a complete scan.
 type ScanResult struct {
 	Host          string
 	NetworkName   string
 	Muxes         []Transponder
 	Channels      []Channel
-	NoSignalMuxes []Transponder // muxes that were scanned but returned no channels
-	ErrorMuxes    []Transponder // muxes that returned an RTSP/transport error
+	NoSignalMuxes []Transponder
+	ErrorMuxes    []Transponder
 }
 
-// Config configures a scan operation.
 type Config struct {
-	SeedTimeout     time.Duration // timeout for blind seed scans (fast pass)
-	MuxTimeout      time.Duration // timeout for discovered muxes and slow retry
-	Timeout         time.Duration // per-transponder timeout for the final channel scan
-	Parallel        int           // max parallel scans during final channel scan
-	Verbose         bool          // log RTSP exchange at debug level
-	Satellite       string        // satellite ID for DVB-S/S2 ("" = auto-detect)
-	TransmitterFile string        // relative path to dtv-scan-tables file (e.g. "dvb-t/uk-CrystalPalace")
+	SeedTimeout     time.Duration
+	MuxTimeout      time.Duration
+	Timeout         time.Duration
+	Parallel        int
+	Verbose         bool
+	Satellite       string
+	TransmitterFile string
 	Log             zerolog.Logger
-	OnMuxScanned    func(done, total int) // called after each mux completes (may be nil)
+	OnMuxScanned    func(done, total int)
 }
 
-// ServiceTypeName returns the human-readable name for a DVB service type byte.
 func ServiceTypeName(t uint8) string {
 	return serviceTypStr(t)
 }
 
-// StreamTypeName returns the human-readable name for an ISO 13818-1 stream type byte.
 func StreamTypeName(t uint8) string {
 	return streamTypStr(t)
 }

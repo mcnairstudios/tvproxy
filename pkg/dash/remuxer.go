@@ -89,7 +89,6 @@ func (r *Remuxer) Start(ctx context.Context) error {
 		return fmt.Errorf("creating dash output dir: %w", err)
 	}
 
-	// Wait for the file to have enough data for Shaka to parse
 	waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer waitCancel()
 	for {

@@ -47,3 +47,4 @@ wireguard_profiles.json
 tmdb_cache/
 cache/
 jellyfin-openapi-stable.json
+users/

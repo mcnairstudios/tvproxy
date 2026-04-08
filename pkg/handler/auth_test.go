@@ -37,7 +37,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	require.NoError(t, err)
 
 	authHandler := NewAuthHandler(authService)
-	authMW := middleware.NewAuthMiddleware(authService, "", "")
+	authMW := middleware.NewAuthMiddleware(authService, nil, "", "")
 
 	r := chi.NewRouter()
 
@@ -314,7 +314,7 @@ func TestAPIKeyAuthentication(t *testing.T) {
 	authService := service.NewAuthService(userStore, "test-jwt-secret", 15*time.Minute, 7*24*time.Hour)
 
 	authHandler := NewAuthHandler(authService)
-	authMW := middleware.NewAuthMiddleware(authService, "my-api-key", "")
+	authMW := middleware.NewAuthMiddleware(authService, nil, "my-api-key", "")
 
 	r := chi.NewRouter()
 	r.Group(func(r chi.Router) {
@@ -343,7 +343,7 @@ func TestAPIKeyAuthenticationWrongKey(t *testing.T) {
 	authService := service.NewAuthService(userStore, "test-jwt-secret", 15*time.Minute, 7*24*time.Hour)
 
 	authHandler := NewAuthHandler(authService)
-	authMW := middleware.NewAuthMiddleware(authService, "my-api-key", "")
+	authMW := middleware.NewAuthMiddleware(authService, nil, "my-api-key", "")
 
 	r := chi.NewRouter()
 	r.Group(func(r chi.Router) {

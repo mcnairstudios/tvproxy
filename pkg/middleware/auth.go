@@ -25,13 +25,14 @@ func UserFromContext(ctx context.Context) *ContextUser {
 }
 
 type AuthMiddleware struct {
-	authService *service.AuthService
-	apiKey      string
-	adminUserID string
+	authService     *service.AuthService
+	activityService *service.ActivityService
+	apiKey          string
+	adminUserID     string
 }
 
-func NewAuthMiddleware(authService *service.AuthService, apiKey string, adminUserID string) *AuthMiddleware {
-	return &AuthMiddleware{authService: authService, apiKey: apiKey, adminUserID: adminUserID}
+func NewAuthMiddleware(authService *service.AuthService, activityService *service.ActivityService, apiKey string, adminUserID string) *AuthMiddleware {
+	return &AuthMiddleware{authService: authService, activityService: activityService, apiKey: apiKey, adminUserID: adminUserID}
 }
 
 func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
@@ -72,6 +73,9 @@ func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 			Username: claims.Username,
 			IsAdmin:  claims.IsAdmin,
 		})
+		if m.activityService != nil {
+			m.activityService.TouchUser(claims.UserID, claims.Username, "Dashboard", r.RemoteAddr, r.UserAgent())
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

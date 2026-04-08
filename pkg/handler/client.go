@@ -31,10 +31,11 @@ func (h *ClientHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type clientCreateRequest struct {
-	Name      string                   `json:"name"`
-	Priority  int                      `json:"priority"`
-	IsEnabled bool                     `json:"is_enabled"`
-	Rules     []clientMatchRuleRequest `json:"match_rules"`
+	Name       string                   `json:"name"`
+	Priority   int                      `json:"priority"`
+	ListenPort int                      `json:"listen_port"`
+	IsEnabled  bool                     `json:"is_enabled"`
+	Rules      []clientMatchRuleRequest `json:"match_rules"`
 }
 
 type clientMatchRuleRequest struct {
@@ -53,8 +54,8 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if len(req.Rules) == 0 {
-		respondError(w, http.StatusBadRequest, "at least one match rule is required")
+	if len(req.Rules) == 0 && req.ListenPort == 0 {
+		respondError(w, http.StatusBadRequest, "at least one match rule or a listen port is required")
 		return
 	}
 	if err := validateRules(req.Rules); err != nil {
@@ -63,9 +64,10 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &models.Client{
-		Name:      req.Name,
-		Priority:  req.Priority,
-		IsEnabled: req.IsEnabled,
+		Name:       req.Name,
+		Priority:   req.Priority,
+		ListenPort: req.ListenPort,
+		IsEnabled:  req.IsEnabled,
 	}
 	rules := toMatchRules("", req.Rules)
 
@@ -105,6 +107,7 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name            string                   `json:"name"`
 		Priority        *int                     `json:"priority"`
+		ListenPort      *int                     `json:"listen_port"`
 		StreamProfileID *string                  `json:"stream_profile_id"`
 		IsEnabled       *bool                    `json:"is_enabled"`
 		Rules           []clientMatchRuleRequest `json:"match_rules"`
@@ -115,8 +118,8 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Rules != nil {
-		if len(req.Rules) == 0 {
-			respondError(w, http.StatusBadRequest, "at least one match rule is required")
+		if len(req.Rules) == 0 && client.ListenPort == 0 {
+			respondError(w, http.StatusBadRequest, "at least one match rule or a listen port is required")
 			return
 		}
 		if err := validateRules(req.Rules); err != nil {
@@ -130,6 +133,9 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Priority != nil {
 		client.Priority = *req.Priority
+	}
+	if req.ListenPort != nil {
+		client.ListenPort = *req.ListenPort
 	}
 	if req.StreamProfileID != nil {
 		client.StreamProfileID = *req.StreamProfileID

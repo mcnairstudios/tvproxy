@@ -21,7 +21,6 @@ func TestNew(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	// Verify migrations were applied
 	var count int
 	err = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM schema_migrations").Scan(&count)
 	require.NoError(t, err)
@@ -33,7 +32,6 @@ func TestMigrationsIdempotent(t *testing.T) {
 	dbPath := filepath.Join(dir, "test.db")
 	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
 
-	// Run migrations twice
 	db, err := New(context.Background(), dbPath, log)
 	require.NoError(t, err)
 	db.Close()
@@ -57,7 +55,6 @@ func TestInTx(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	// Successful transaction
 	ctx := context.Background()
 	err = db.InTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "INSERT INTO core_settings (key, value) VALUES ('test', 'value')")

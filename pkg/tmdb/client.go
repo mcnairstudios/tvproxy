@@ -92,7 +92,9 @@ func (c *Client) Search(query, mediaType string) (map[string]any, error) {
 	defer resp.Body.Close()
 
 	var result map[string]any
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
 
 	if results, ok := result["results"].([]any); ok && len(results) > 0 {
 		c.cache.Set(cacheKey, result)
@@ -128,7 +130,9 @@ func (c *Client) Details(mediaType, id string) (any, error) {
 	defer resp.Body.Close()
 
 	var result any
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
 
 	c.cache.Set(cacheKey, result)
 	return result, nil
@@ -155,7 +159,9 @@ func (c *Client) Season(tvID, seasonNum string) (any, error) {
 	defer resp.Body.Close()
 
 	var result any
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
 
 	c.cache.Set(cacheKey, result)
 	return result, nil

@@ -18,8 +18,6 @@ type StreamReader interface {
 	ListByAccountID(ctx context.Context, accountID string) ([]models.Stream, error)
 	ListBySatIPSourceID(ctx context.Context, sourceID string) ([]models.Stream, error)
 	GetByID(ctx context.Context, id string) (*models.Stream, error)
-	CountByAccountID(ctx context.Context, accountID string) (int, error)
-	CountBySatIPSourceID(ctx context.Context, sourceID string) (int, error)
 }
 
 type StreamWriter interface {

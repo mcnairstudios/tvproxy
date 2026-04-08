@@ -9,8 +9,6 @@ import (
 	"strings"
 )
 
-// fetchSatIPCaps queries the UPnP desc.xml for SAT>IP server capabilities.
-// Returns a map of canonical system name → tuner count, e.g. {"dvbt2": 4, "dvbc": 4}.
 func fetchSatIPCaps(httpBase string) (map[string]int, error) {
 	resp, err := http.Get(httpBase + "/desc.xml")
 	if err != nil {
@@ -40,8 +38,6 @@ func fetchSatIPCaps(httpBase string) (map[string]int, error) {
 	return caps, nil
 }
 
-// workerCount derives the physical tuner count from SAT>IP caps.
-// All reported types share the same hardware pool, so return the max across all types.
 func workerCount(caps map[string]int) int {
 	max := 1
 	for _, n := range caps {

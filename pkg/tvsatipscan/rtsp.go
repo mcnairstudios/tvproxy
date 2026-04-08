@@ -11,14 +11,12 @@ import (
 	"time"
 )
 
-// rtspResponse holds a parsed RTSP response.
 type rtspResponse struct {
 	status  int
 	headers map[string]string
 	body    []byte
 }
 
-// rtspClient is a minimal RTSP client for SAT>IP scanning over TCP.
 type rtspClient struct {
 	conn net.Conn
 	br   *bufio.Reader
@@ -35,10 +33,6 @@ func dialRTSP(host string, timeout time.Duration) (*rtspClient, error) {
 
 func (c *rtspClient) close() { c.conn.Close() }
 
-// teardown sends a TEARDOWN request without reading the response. This is safe
-// to call while an RTP reader goroutine is still active on the same connection,
-// because TCP is full-duplex — writing does not race with concurrent reads on
-// the bufio.Reader.
 func (c *rtspClient) teardown(controlURL, session string) {
 	c.cseq++
 	req := fmt.Sprintf("TEARDOWN %s RTSP/1.0\r\nCSeq: %d\r\nUser-Agent: dvbscan\r\nSession: %s\r\n\r\n",
@@ -105,9 +99,6 @@ func (c *rtspClient) readResponse() (*rtspResponse, error) {
 	return &rtspResponse{status: status, headers: hdrs, body: body}, nil
 }
 
-// readInterleaved reads the next RTP data packet from a TCP-interleaved RTSP
-// session (RFC 2326 §10.12). Channel 0 carries RTP; channel 1 carries RTCP.
-// Packets on channels other than 0 are silently discarded.
 func (c *rtspClient) readInterleaved() ([]byte, error) {
 	for {
 		b, err := c.br.ReadByte()
@@ -136,8 +127,6 @@ func (c *rtspClient) readInterleaved() ([]byte, error) {
 	}
 }
 
-// stripRTPHeader strips the fixed and optional extension parts of an RTP header,
-// returning the payload (MPEG-TS packets).
 func stripRTPHeader(pkt []byte) ([]byte, error) {
 	if len(pkt) < 12 {
 		return nil, fmt.Errorf("RTP packet too short")

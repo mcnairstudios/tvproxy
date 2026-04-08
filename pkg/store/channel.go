@@ -282,7 +282,6 @@ func (s *ChannelStoreImpl) RemoveStreamMappings(_ context.Context, streamIDs []s
 			}
 		}
 		s.channels[i].StreamIDs = keptStreams
-		// cascade delete channels that had streams and are now empty
 		if hadStreams && len(keptStreams) == 0 {
 			changed = true
 			continue

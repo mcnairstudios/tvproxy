@@ -228,12 +228,6 @@ func (s *ProfileStoreImpl) CreateDirect(profile *models.StreamProfile) {
 	s.profiles = append(s.profiles, *profile)
 }
 
-func (s *ProfileStoreImpl) Count() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.profiles)
-}
-
 func (s *ProfileStoreImpl) ClearAndSave() error {
 	s.mu.Lock()
 	s.profiles = nil

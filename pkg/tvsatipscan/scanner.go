@@ -5,12 +5,6 @@ import (
 	"sort"
 )
 
-// Scan performs a complete channel scan against the SAT>IP server at host:rtspPort.
-// httpPort is the UPnP HTTP port for capability discovery. cfg controls timing and
-// parallelism.
-//
-// When cfg.TransmitterFile is set, seeds are loaded from the dtv-scan-tables file
-// and capability/NIT discovery is skipped. Otherwise a blind NIT BFS sweep is used.
 func Scan(host string, httpPort int, cfg Config) (*ScanResult, error) {
 	muxes, networkName, err := resolveMuxes(host, httpPort, cfg)
 	if err != nil {
@@ -63,14 +57,10 @@ func Scan(host string, httpPort int, cfg Config) (*ScanResult, error) {
 	}, nil
 }
 
-// DiscoverMuxes performs only the mux discovery step.
-// When cfg.TransmitterFile is set, returns the muxes from the file directly.
-// Otherwise performs a NIT BFS sweep.
 func DiscoverMuxes(host string, httpPort int, cfg Config) ([]Transponder, string, error) {
 	return resolveMuxes(host, httpPort, cfg)
 }
 
-// resolveMuxes returns the mux list either from a transmitter file or via NIT BFS.
 func resolveMuxes(host string, httpPort int, cfg Config) ([]Transponder, string, error) {
 	if cfg.TransmitterFile != "" {
 		cfg.Log.Info().Str("file", cfg.TransmitterFile).Msg("loading muxes from transmitter file")
@@ -85,7 +75,6 @@ func resolveMuxes(host string, httpPort int, cfg Config) ([]Transponder, string,
 	return discoverMuxesViaNIT(host, httpPort, cfg)
 }
 
-// discoverMuxesViaNIT performs capability discovery then NIT BFS sweep.
 func discoverMuxesViaNIT(host string, httpPort int, cfg Config) ([]Transponder, string, error) {
 	httpBase := fmt.Sprintf("http://%s:%d", splitHost(host), httpPort)
 
@@ -119,7 +108,6 @@ func discoverMuxesViaNIT(host string, httpPort int, cfg Config) ([]Transponder, 
 	return muxes, networkName, nil
 }
 
-// applySatelliteSeeds handles DVB-S satellite detection and populates defaultSeeds["dvbs2"].
 func applySatelliteSeeds(host string, caps map[string]int, cfg Config) {
 	hasSat := caps["dvbs2"] > 0 || caps["dvbs"] > 0
 	if !hasSat {
@@ -142,7 +130,6 @@ func applySatelliteSeeds(host string, caps map[string]int, cfg Config) {
 	}
 }
 
-// splitHost extracts the hostname (without port) from a host:port string.
 func splitHost(hostport string) string {
 	for i := len(hostport) - 1; i >= 0; i-- {
 		if hostport[i] == ':' {

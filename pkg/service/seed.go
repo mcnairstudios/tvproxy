@@ -82,6 +82,7 @@ func SeedClientDefaults(_ context.Context, defs *defaults.ClientDefaults, profil
 			ID:              uuid.New().String(),
 			Name:            c.Name,
 			Priority:        c.Priority,
+			ListenPort:      c.ListenPort,
 			StreamProfileID: profile.ID,
 			IsEnabled:       true,
 			MatchRules:      rules,

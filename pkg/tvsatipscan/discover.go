@@ -9,10 +9,6 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// detectSatellite probes one seed per known satellite in parallel.
-// The first seed that returns a NIT response wins; all others are cancelled.
-// Returns the satellite identifier (e.g. "S28.2E"), its NIT network name, and
-// its full seed list for use in BFS discovery.
 func detectSatellite(host string, timeout time.Duration, log zerolog.Logger) (id, networkName string, seeds []Transponder) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -44,22 +40,7 @@ func detectSatellite(host string, timeout time.Duration, log zerolog.Logger) (id
 	return "", "", nil
 }
 
-// discoverMuxes finds all live muxes via NIT BFS using a parallel worker pool.
-//
-// Pass 1: all seeds scanned in parallel at seedTimeout (fast). Successes
-// trigger BFS: newly discovered muxes are queued at muxTimeout and processed
-// within the same pass. Failed seeds are collected for retry.
-//
-// Pass 2: failed seeds retried in parallel at muxTimeout. Only seeds that are
-// worth retrying are included: (a) muxes mentioned in a NIT during pass 1,
-// (b) dvbt2 seeds near the frequency band of found dvbt muxes (±t2Margin MHz),
-// (c) dvbs2/dvbc2 seeds (small count, always worth retrying).
-//
-// At most workerCount(caps) scans run concurrently — one per physical tuner.
 func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout time.Duration, log zerolog.Logger) ([]Transponder, string) {
-	// When both dvbt and dvbt2 are available, defer dvbt2 seeds from Pass 1.
-	// Pass 1 finds dvbt muxes first; Pass 2 retries dvbt2 only in that frequency band.
-	// This avoids scanning all 48 dvbt2 UHF seeds upfront when they will all return "no signal".
 	deferT2 := caps["dvbt2"] > 0 && caps["dvbt"] > 0
 	var deferredT2Seeds []Transponder
 
@@ -107,13 +88,6 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 
 	var detectedNetwork string
 
-	// runPool drains initial items (and any BFS muxes they discover) through the
-	// worker pool. prevScanned carries mux keys already handled in a prior pass so
-	// they are not re-scanned. retryOnFail causes failed initial seeds to be
-	// returned in failedSeeds for the caller to decide whether to retry.
-	//
-	// Returns found muxes, failed initial seeds, and the set of all mux keys
-	// mentioned in any NIT response (used to decide which seeds are worth retrying).
 	runPool := func(initial []workItem, prevScanned map[string]bool, retryOnFail bool) (found []Transponder, failedSeeds []Transponder, nitMentioned map[string]bool) {
 		nitMentioned = map[string]bool{}
 		discoveryComplete := false
@@ -205,13 +179,7 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 
 	allFound := append([]Transponder(nil), found1...)
 
-	// Pass 2: retry seeds worth a slow scan:
-	//   (a) appeared in a NIT during pass 1 — confirmed on the network
-	//   (b) dvbt2: hardware locks slowly; only retry seeds within the frequency
-	//       band of dvbt muxes found in pass 1 ± t2Margin MHz. T2 is always
-	//       adjacent to the T cluster — no need to sweep the whole UHF band.
-	//   (c) dvbs2/dvbc2: small seed count, retry all.
-	const t2Margin = 16.0 // MHz (~2 UHF channels)
+	const t2Margin = 16.0
 	var minT, maxT float64
 	for _, f := range found1 {
 		if f.System == "dvbt" {
@@ -232,13 +200,12 @@ func discoverMuxes(host string, caps map[string]int, seedTimeout, muxTimeout tim
 		case seed.System == "dvbt2":
 			keep = minT > 0 && seed.FreqMHz >= minT-t2Margin && seed.FreqMHz <= maxT+t2Margin
 		case strings.HasSuffix(seed.System, "2"):
-			keep = true // dvbs2, dvbc2: small seed count, retry all
+			keep = true
 		}
 		if keep {
 			pass2 = append(pass2, workItem{seed, muxTimeout, false})
 		}
 	}
-	// Add deferred dvbt2 seeds (not in pass 1) for frequencies near found dvbt muxes.
 	for _, seed := range deferredT2Seeds {
 		k := muxKey(seed)
 		if scanned[k] {

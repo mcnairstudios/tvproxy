@@ -119,6 +119,7 @@ func main() {
 	if err := channelGroupStore.Load(); err != nil {
 		log.Fatal().Err(err).Msg("failed to load channel group store")
 	}
+	favoriteStore := store.NewFavoriteStore(dataDir)
 	logoStore := store.NewLogoStore(filepath.Join(dataDir, "logos.json"))
 	if err := logoStore.Load(); err != nil {
 		log.Fatal().Err(err).Msg("failed to load logo store")
@@ -216,7 +217,7 @@ func main() {
 	schedulerService := service.NewSchedulerService(scheduledRecStore, channelStore, vodService, cfg, log)
 	dlnaService := service.NewDLNAService(channelStore, channelGroupStore, userStore, settingsService, logoService, vodService, cfg, log)
 
-	authMW := middleware.NewAuthMiddleware(authService, cfg.APIKey, adminUserID)
+	authMW := middleware.NewAuthMiddleware(authService, activityService, cfg.APIKey, adminUserID)
 
 	dashManager := dash.NewManager(log)
 	sessionMgr.SetOnCleanup(func(channelID string) {
@@ -256,6 +257,7 @@ func main() {
 		proxy:        handler.NewProxyHandler(proxyService, settingsService, log),
 		vod:          handler.NewVODHandler(vodService, clientService, dashManager, log),
 		activity:     handler.NewActivityHandler(activityService),
+		favorite:     handler.NewFavoriteHandler(favoriteStore),
 		settings:     handler.NewSettingsHandler(settingsService, exportService, dataResetter, authService, streamStore, epgStore),
 		client:       handler.NewClientHandler(clientService),
 		scheduler:    handler.NewSchedulerHandler(schedulerService, log),
@@ -275,7 +277,7 @@ func main() {
 	staticRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "static")
 	registerStaticRoutes(r, staticRoot, distFS, versionedIndexBytes)
 
-	jellyfinServer := jellyfin.NewServer("TVProxy", cfg.BaseURL, authService, channelStore, channelGroupStore, streamStore, epgStore, logoService, tmdbClient, log)
+	jellyfinServer := jellyfin.NewServer("TVProxy", cfg.BaseURL, authService, activityService, favoriteStore, channelStore, channelGroupStore, streamStore, epgStore, logoService, tmdbClient, log)
 	go func() {
 		jfRouter := chi.NewRouter()
 		jfRouter.Use(func(next http.Handler) http.Handler {

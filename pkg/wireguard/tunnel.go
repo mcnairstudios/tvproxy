@@ -27,11 +27,11 @@ type PeerStats struct {
 }
 
 type Config struct {
-	PrivateKey    string // base64
-	Address       string // e.g. "10.20.30.40/24"
-	DNS           string // e.g. "1.1.1.1"
-	PeerPublicKey string // base64
-	PeerEndpoint  string // e.g. "vpn.example.com:51820"
+	PrivateKey    string
+	Address       string
+	DNS           string
+	PeerPublicKey string
+	PeerEndpoint  string
 }
 
 type Tunnel struct {

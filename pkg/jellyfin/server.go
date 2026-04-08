@@ -1,14 +1,12 @@
 package jellyfin
 
 import (
-	"context"
 	"crypto/rand"
-	"fmt"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -21,43 +19,66 @@ import (
 )
 
 type Server struct {
-	serverID     string
-	serverName   string
-	baseURL      string
-	auth         *service.AuthService
-	channels      store.ChannelStore
-	channelGroups store.ChannelGroupStore
-	streams       store.StreamReader
-	epg           store.EPGStore
-	logoService   *service.LogoService
-	tmdbClient    *tmdb.Client
-	log           zerolog.Logger
-	tokens        sync.Map
+	serverID        string
+	serverName      string
+	baseURL         string
+	auth            *service.AuthService
+	activityService *service.ActivityService
+	favorites       store.FavoriteStore
+	channels        store.ChannelStore
+	channelGroups   store.ChannelGroupStore
+	streams         store.StreamReader
+	epg             store.EPGStore
+	logoService     *service.LogoService
+	tmdbClient      *tmdb.Client
+	log             zerolog.Logger
+	tokens          sync.Map
 }
 
-func NewServer(serverName, baseURL string, auth *service.AuthService, channels store.ChannelStore, channelGroups store.ChannelGroupStore, streams store.StreamReader, epg store.EPGStore, logoService *service.LogoService, tmdbClient *tmdb.Client, log zerolog.Logger) *Server {
+func NewServer(serverName, baseURL string, auth *service.AuthService, activityService *service.ActivityService, favorites store.FavoriteStore, channels store.ChannelStore, channelGroups store.ChannelGroupStore, streams store.StreamReader, epg store.EPGStore, logoService *service.LogoService, tmdbClient *tmdb.Client, log zerolog.Logger) *Server {
+	return &Server{
+		serverID:        generateGUID(),
+		serverName:      serverName,
+		baseURL:         baseURL,
+		auth:            auth,
+		activityService: activityService,
+		favorites:       favorites,
+		channels:        channels,
+		channelGroups:   channelGroups,
+		streams:         streams,
+		epg:             epg,
+		logoService:     logoService,
+		tmdbClient:      tmdbClient,
+		log:             log.With().Str("component", "jellyfin").Logger(),
+	}
+}
+
+func generateGUID() string {
 	id := make([]byte, 16)
 	rand.Read(id)
 	h := hex.EncodeToString(id)
-	guid := h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
-	return &Server{
-		serverID:      guid,
-		serverName:    serverName,
-		baseURL:       baseURL,
-		auth:          auth,
-		channels:      channels,
-		channelGroups: channelGroups,
-		streams:       streams,
-		epg:           epg,
-		logoService:   logoService,
-		tmdbClient:    tmdbClient,
-		log:           log.With().Str("component", "jellyfin").Logger(),
-	}
+	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }
 
 func (s *Server) Router() chi.Router {
 	r := chi.NewRouter()
 
+	s.registerWebRoutes(r)
+	s.registerPublicRoutes(r)
+	s.registerMediaRoutes(r)
+
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireAuth)
+		s.registerUserRoutes(r)
+		s.registerLibraryRoutes(r)
+		s.registerLiveTvRoutes(r)
+		s.registerSessionRoutes(r)
+	})
+
+	return r
+}
+
+func (s *Server) registerWebRoutes(r chi.Router) {
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("Jellyfin Server"))
@@ -72,152 +93,131 @@ func (s *Server) Router() chi.Router {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("<!DOCTYPE html><html><body><h1>TVProxy Jellyfin API</h1><p>Use a Jellyfin client app to connect.</p></body></html>"))
 	})
-	r.Get("/web/{file}", func(w http.ResponseWriter, r *http.Request) {
-		file := chi.URLParam(r, "file")
-		switch file {
-		case "config.json":
-			s.respondJSON(w, http.StatusOK, map[string]any{
-				"menuLinks": []any{}, "multiserver": false, "themes": []any{}, "plugins": []any{},
-			})
-		case "manifest.json":
-			s.respondJSON(w, http.StatusOK, map[string]any{
-				"name": "TVProxy", "short_name": "TVProxy", "start_url": "/web/index.html",
-				"display": "standalone", "background_color": "#1a1d23", "theme_color": "#3b82f6",
-			})
-		default:
-			w.WriteHeader(http.StatusOK)
-		}
-	})
-
+	r.Get("/web/{file}", s.webFile)
 	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
+}
 
+func (s *Server) registerPublicRoutes(r chi.Router) {
 	r.Get("/System/Info/Public", s.systemInfoPublic)
 	r.Get("/System/Info", s.systemInfo)
 	r.Get("/System/Ping", s.ping)
 	r.Post("/System/Ping", s.ping)
-
 	r.Get("/Branding/Configuration", s.brandingConfig)
 	r.Get("/Branding/Css", s.brandingCSS)
-
+	r.Get("/Branding/Splashscreen", notFound)
 	r.Get("/QuickConnect/Enabled", s.quickConnectEnabled)
-
 	r.Get("/Users/Public", s.usersPublic)
 	r.Post("/Users/AuthenticateByName", s.authenticateByName)
+	r.Get("/UserImage", notFound)
+	r.Head("/UserImage", notFound)
+}
 
-	r.Get("/Branding/Splashscreen", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	})
-	r.Get("/UserImage", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	})
-	r.Head("/UserImage", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	})
-	r.Get("/Items/{itemId}/Images/{imageType}", s.getImage)
-	r.Get("/Items/{itemId}/Images/{imageType}/{imageIndex}", s.getImage)
-	r.Head("/Items/{itemId}/Images/{imageType}", s.getImage)
-	r.Head("/Items/{itemId}/Images/{imageType}/{imageIndex}", s.getImage)
+func (s *Server) registerMediaRoutes(r chi.Router) {
+	r.Get("/Items/{itemId}/Images/{imageType}", s.serveImage)
+	r.Get("/Items/{itemId}/Images/{imageType}/{imageIndex}", s.serveImage)
+	r.Head("/Items/{itemId}/Images/{imageType}", s.serveImage)
+	r.Head("/Items/{itemId}/Images/{imageType}/{imageIndex}", s.serveImage)
 	r.Get("/Videos/{itemId}/stream", s.videoStream)
 	r.Get("/Videos/{itemId}/stream.{container}", s.videoStream)
 	r.Head("/Videos/{itemId}/stream", s.videoStream)
 	r.Head("/Videos/{itemId}/stream.{container}", s.videoStream)
+}
 
-	r.Group(func(r chi.Router) {
-		r.Use(s.requireAuth)
+func (s *Server) registerUserRoutes(r chi.Router) {
+	r.Get("/Users/Me", s.usersMe)
+	r.Get("/Users", s.usersList)
+	r.Get("/Users/{userId}", s.userByID)
+	r.Post("/Users/Configuration", noContent)
+	r.Post("/Users/Password", noContent)
+}
 
-		r.Get("/Users/Me", s.usersMe)
-		r.Get("/Users", s.usersList)
-		r.Get("/Users/{userId}", s.userByID)
+func (s *Server) registerLibraryRoutes(r chi.Router) {
+	r.Get("/UserViews", s.userViews)
+	r.Get("/Items", s.listItems)
+	r.Get("/Items/Filters", s.listFilters)
+	r.Get("/Items/{itemId}", s.itemDetail)
+	r.Get("/Items/Latest", s.latestItems)
+	r.Get("/Items/Resume", s.listResumeItems)
+	r.Get("/Items/Counts", s.itemCounts)
+	r.Get("/Items/Suggestions", s.listSuggestions)
+	r.Get("/UserItems/Resume", s.listResumeItems)
+	r.Get("/Users/{userId}/Items", s.listItems)
+	r.Get("/Users/{userId}/Items/Latest", s.latestItems)
+	r.Get("/Users/{userId}/Items/Resume", s.listResumeItems)
+	r.Get("/Users/{userId}/Items/{itemId}", s.itemDetail)
+	r.Get("/Shows/NextUp", s.listResumeItems)
+	r.Get("/Shows/{seriesId}/Seasons", s.listSeasons)
+	r.Get("/Shows/{seriesId}/Episodes", s.listEpisodes)
+	r.Get("/Items/{itemId}/Similar", s.listSimilarItems)
+	r.Get("/Items/{itemId}/LocalTrailers", s.listSpecialFeatures)
+	r.Get("/Items/{itemId}/SpecialFeatures", s.listSpecialFeatures)
+	r.Get("/Items/{itemId}/ThemeMedia", s.listSpecialFeatures)
+	r.Get("/Items/{itemId}/ThemeSongs", s.listSpecialFeatures)
+	r.Get("/Items/{itemId}/ThemeVideos", s.listSpecialFeatures)
+	r.Get("/Items/{itemId}/InstantMix", s.listSpecialFeatures)
+	r.Post("/Items/{itemId}/PlaybackInfo", s.playbackInfo)
+	r.Get("/Playback/BitrateTest", s.bitrateTest)
 
-		r.Get("/UserViews", s.userViews)
-
-		r.Get("/Items", s.getItems)
-		r.Get("/Items/Filters", s.getFilters)
-		r.Get("/Items/{itemId}", s.getItem)
-		r.Get("/Items/Latest", s.getLatest)
-		r.Get("/Items/Resume", s.getResume)
-		r.Get("/UserItems/Resume", s.getResume)
-		r.Get("/Users/{userId}/Items", s.getItems)
-		r.Post("/Users/Configuration", s.sessionsCapabilities)
-		r.Post("/Users/Password", s.sessionsCapabilities)
-		r.Get("/Users/{userId}/Items/Latest", s.getLatest)
-		r.Get("/Users/{userId}/Items/Resume", s.getResume)
-		r.Get("/Users/{userId}/Items/{itemId}", s.getItem)
-		r.Get("/Shows/NextUp", s.getResume)
-
-		r.Get("/Shows/{seriesId}/Seasons", s.getSeasons)
-		r.Get("/Shows/{seriesId}/Episodes", s.getEpisodes)
-
-		r.Get("/Items/{itemId}/Similar", s.getSimilar)
-		r.Get("/Items/{itemId}/LocalTrailers", s.getSpecialFeatures)
-		r.Get("/Items/{itemId}/SpecialFeatures", s.getSpecialFeatures)
-		r.Get("/Items/{itemId}/ThemeMedia", s.getSpecialFeatures)
-		r.Get("/Items/{itemId}/ThemeSongs", s.getSpecialFeatures)
-		r.Get("/Items/{itemId}/ThemeVideos", s.getSpecialFeatures)
-		r.Get("/Items/{itemId}/InstantMix", s.getSpecialFeatures)
-
-		r.Post("/Items/{itemId}/PlaybackInfo", s.playbackInfo)
-		r.Get("/Items/Counts", s.itemCounts)
-		r.Get("/Items/Suggestions", s.getSuggestions)
-
-		r.Get("/Persons", s.emptyQueryResult)
-		r.Get("/Persons/{personId}/Images/{imageType}", func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
+	r.Get("/Persons", s.emptyQueryResult)
+	r.Get("/Persons/{personId}/Images/{imageType}", notFound)
+	r.Get("/Persons/{personId}", func(w http.ResponseWriter, r *http.Request) {
+		s.respondJSON(w, http.StatusOK, BaseItemDto{
+			Name: chi.URLParam(r, "personId"), ServerID: s.serverID,
+			ID: chi.URLParam(r, "personId"), Type: "Person",
 		})
-		r.Get("/Persons/{personId}", func(w http.ResponseWriter, r *http.Request) {
-			s.respondJSON(w, http.StatusOK, BaseItemDto{
-				Name: chi.URLParam(r, "personId"), ServerID: s.serverID,
-				ID: chi.URLParam(r, "personId"), Type: "Person",
-			})
+	})
+	r.Get("/Studios", s.emptyQueryResult)
+	r.Get("/Artists", s.emptyQueryResult)
+	r.Get("/Genres", s.emptyQueryResult)
+	r.Get("/Genres/{genreName}", func(w http.ResponseWriter, r *http.Request) {
+		name := chi.URLParam(r, "genreName")
+		s.respondJSON(w, http.StatusOK, BaseItemDto{
+			Name: name, ServerID: s.serverID,
+			ID: fmt.Sprintf("genre_%x", hashString(name)), Type: "Genre",
 		})
-		r.Get("/Studios", s.emptyQueryResult)
-		r.Get("/Artists", s.emptyQueryResult)
-		r.Get("/Genres", s.emptyQueryResult)
-		r.Get("/Genres/{genreName}", func(w http.ResponseWriter, r *http.Request) {
-			name := chi.URLParam(r, "genreName")
-			s.respondJSON(w, http.StatusOK, BaseItemDto{
-				Name: name, ServerID: s.serverID,
-				ID: fmt.Sprintf("genre_%x", hashString(name)), Type: "Genre",
-			})
-		})
-
-		r.Get("/Sessions", s.sessionsGet)
-		r.Get("/System/ActivityLog/Entries", s.emptyQueryResult)
-		r.Get("/Notifications/{userId}/Summary", func(w http.ResponseWriter, r *http.Request) {
-			s.respondJSON(w, http.StatusOK, map[string]int{
-				"UnreadCount": 0, "MaxUnreadCount": 0,
-			})
-		})
-		r.Get("/LiveTv/Info", s.liveTvInfo)
-		r.Get("/LiveTv/Channels", s.liveTvChannels)
-		r.Get("/LiveTv/Programs", s.liveTvPrograms)
-		r.Get("/LiveTv/Programs/Recommended", s.liveTvPrograms)
-		r.Post("/LiveTv/Programs", s.liveTvPrograms)
-		r.Get("/LiveTv/GuideInfo", s.liveTvGuideInfo)
-
-		r.Get("/Playback/BitrateTest", s.bitrateTest)
-
-		r.Post("/Sessions/Capabilities/Full", s.sessionsCapabilities)
-		r.Post("/Sessions/Playing", s.sessionsPlaying)
-		r.Post("/Sessions/Playing/Progress", s.sessionsPlaying)
-		r.Post("/Sessions/Playing/Stopped", s.sessionsPlaying)
-
-		r.Get("/DisplayPreferences/{id}", s.displayPreferences)
-		r.Post("/DisplayPreferences/{id}", s.sessionsCapabilities)
-
-		r.Post("/UserPlayedItems/{itemId}", s.markPlayed)
-		r.Delete("/UserPlayedItems/{itemId}", s.markPlayed)
-		r.Post("/UserFavoriteItems/{itemId}", s.markFavorite)
-		r.Delete("/UserFavoriteItems/{itemId}", s.markFavorite)
-		r.Get("/UserItems/{itemId}/UserData", s.getUserData)
-		r.Post("/UserItems/{itemId}/UserData", s.sessionsCapabilities)
-		r.Post("/UserItems/{itemId}/Rating", s.getUserData)
-		r.Delete("/UserItems/{itemId}/Rating", s.getUserData)
 	})
 
-	return r
+	r.Post("/UserPlayedItems/{itemId}", s.markPlayed)
+	r.Delete("/UserPlayedItems/{itemId}", s.markPlayed)
+	r.Post("/UserFavoriteItems/{itemId}", s.markFavorite)
+	r.Delete("/UserFavoriteItems/{itemId}", s.markFavorite)
+	r.Get("/UserItems/{itemId}/UserData", s.getUserData)
+	r.Post("/UserItems/{itemId}/UserData", noContent)
+	r.Post("/UserItems/{itemId}/Rating", s.getUserData)
+	r.Delete("/UserItems/{itemId}/Rating", s.getUserData)
+}
+
+func (s *Server) registerLiveTvRoutes(r chi.Router) {
+	r.Get("/LiveTv/Info", s.liveTvInfo)
+	r.Get("/LiveTv/Channels", s.liveTvChannels)
+	r.Get("/LiveTv/Programs", s.liveTvPrograms)
+	r.Get("/LiveTv/Programs/Recommended", s.liveTvPrograms)
+	r.Post("/LiveTv/Programs", s.liveTvPrograms)
+	r.Get("/LiveTv/GuideInfo", s.liveTvGuideInfo)
+}
+
+func (s *Server) registerSessionRoutes(r chi.Router) {
+	r.Get("/Sessions", s.sessionsGet)
+	r.Get("/System/ActivityLog/Entries", s.emptyQueryResult)
+	r.Get("/Notifications/{userId}/Summary", func(w http.ResponseWriter, r *http.Request) {
+		s.respondJSON(w, http.StatusOK, map[string]int{"UnreadCount": 0, "MaxUnreadCount": 0})
+	})
+	r.Post("/Sessions/Capabilities/Full", noContent)
+	r.Post("/Sessions/Playing", noContent)
+	r.Post("/Sessions/Playing/Progress", noContent)
+	r.Post("/Sessions/Playing/Stopped", noContent)
+	r.Get("/DisplayPreferences/{id}", s.displayPreferences)
+	r.Post("/DisplayPreferences/{id}", noContent)
+}
+
+func notFound(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotFound)
+}
+
+func noContent(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) respondJSON(w http.ResponseWriter, status int, v any) {
@@ -225,6 +225,10 @@ func (s *Server) respondJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("X-Application", "Jellyfin")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+func (s *Server) emptyQueryResult(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, emptyResult())
 }
 
 func (s *Server) systemInfoPublic(w http.ResponseWriter, r *http.Request) {
@@ -240,22 +244,17 @@ func (s *Server) systemInfoPublic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, map[string]any{
-		"LocalAddress":             s.baseURL,
-		"ServerName":               s.serverName,
-		"Version":                  "10.10.6",
-		"ProductName":              "Jellyfin Server",
-		"OperatingSystem":          "Linux",
-		"OperatingSystemDisplayName": "Linux",
-		"Id":                       s.serverID,
-		"StartupWizardCompleted":   true,
-		"HasPendingRestart":        false,
-		"IsShuttingDown":           false,
-		"SupportsLibraryMonitor":   false,
-		"WebSocketPortNumber":      0,
-		"CanSelfRestart":           false,
-		"CanLaunchWebBrowser":      false,
-		"HasUpdateAvailable":       false,
+	s.respondJSON(w, http.StatusOK, SystemInfo{
+		PublicSystemInfo: PublicSystemInfo{
+			LocalAddress:           s.baseURL,
+			ServerName:             s.serverName,
+			Version:                "10.10.6",
+			ProductName:            "Jellyfin Server",
+			OperatingSystem:        "Linux",
+			ID:                     s.serverID,
+			StartupWizardCompleted: true,
+		},
+		OperatingSystemDisplayName: "Linux",
 	})
 }
 
@@ -265,20 +264,32 @@ func (s *Server) ping(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) brandingConfig(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, BrandingConfiguration{
-		LoginDisclaimer:     "",
-		CustomCSS:           "",
-		SplashscreenEnabled: false,
-	})
+	s.respondJSON(w, http.StatusOK, BrandingConfiguration{})
 }
 
 func (s *Server) brandingCSS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/css")
-	w.Write([]byte(""))
 }
 
 func (s *Server) quickConnectEnabled(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, false)
+}
+
+func (s *Server) webFile(w http.ResponseWriter, r *http.Request) {
+	file := chi.URLParam(r, "file")
+	switch file {
+	case "config.json":
+		s.respondJSON(w, http.StatusOK, map[string]any{
+			"menuLinks": []any{}, "multiserver": false, "themes": []any{}, "plugins": []any{},
+		})
+	case "manifest.json":
+		s.respondJSON(w, http.StatusOK, map[string]any{
+			"name": "TVProxy", "short_name": "TVProxy", "start_url": "/web/index.html",
+			"display": "standalone", "background_color": "#1a1d23", "theme_color": "#3b82f6",
+		})
+	default:
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 func (s *Server) usersPublic(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +302,7 @@ func (s *Server) usersPublic(w http.ResponseWriter, r *http.Request) {
 			ID:                    u.ID,
 			HasPassword:           true,
 			HasConfiguredPassword: true,
-			Policy:                s.defaultPolicy(u.IsAdmin),
+			Policy:                defaultPolicy(u.IsAdmin),
 			Configuration: UserConfig{
 				PlayDefaultAudioTrack: true,
 				SubtitleMode:          "Default",
@@ -304,220 +315,36 @@ func (s *Server) usersPublic(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
-	var req AuthenticateByNameRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-		return
-	}
+func (s *Server) usersMe(w http.ResponseWriter, r *http.Request) {
+	userID := s.authenticatedUserID(r)
+	user := s.lookupUser(r, userID)
+	s.respondJSON(w, http.StatusOK, user)
+}
 
-	_, _, err := s.auth.Login(r.Context(), req.Username, req.Pw)
-	if err != nil {
-		http.Error(w, "invalid credentials", http.StatusUnauthorized)
-		return
-	}
+func (s *Server) usersList(w http.ResponseWriter, r *http.Request) {
+	userID := s.authenticatedUserID(r)
+	user := s.lookupUser(r, userID)
+	s.respondJSON(w, http.StatusOK, []UserDto{user})
+}
 
+func (s *Server) userByID(w http.ResponseWriter, r *http.Request) {
+	s.usersMe(w, r)
+}
+
+func (s *Server) lookupUser(r *http.Request, userID string) UserDto {
 	users, _ := s.auth.ListUsers(r.Context())
-	var userID, userName string
-	var isAdmin bool
+	name := "user"
+	isAdmin := false
 	for _, u := range users {
-		if strings.EqualFold(u.Username, req.Username) {
-			userID = u.ID
-			userName = u.Username
+		if u.ID == userID {
+			name = u.Username
 			isAdmin = u.IsAdmin
 			break
 		}
 	}
-
-	tokenBytes := make([]byte, 32)
-	rand.Read(tokenBytes)
-	token := hex.EncodeToString(tokenBytes)
-	s.tokens.Store(token, userID)
-
 	now := time.Now()
-	s.respondJSON(w, http.StatusOK, AuthenticationResult{
-		User: &UserDto{
-			Name:                  userName,
-			ServerID:              s.serverID,
-			ServerName:            s.serverName,
-			ID:                    userID,
-			HasPassword:           true,
-			HasConfiguredPassword: true,
-			LastLoginDate:         &now,
-			LastActivityDate:      &now,
-			Configuration: UserConfig{
-				PlayDefaultAudioTrack: true,
-				SubtitleMode:          "Default",
-			},
-			Policy: s.defaultPolicy(isAdmin),
-		},
-		SessionInfo: &SessionInfo{
-			ID:                 token[:16],
-			UserID:             userID,
-			UserName:           userName,
-			Client:             s.extractClient(r),
-			LastActivityDate:   now,
-			DeviceName:         s.extractDevice(r),
-			DeviceID:           s.extractDeviceID(r),
-			ApplicationVersion: s.extractVersion(r),
-			IsActive:           true,
-			ServerID:           s.serverID,
-		},
-		AccessToken: token,
-		ServerID:    s.serverID,
-	})
-}
-
-func (s *Server) requireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := s.extractToken(r)
-		if token != "" {
-			if _, ok := s.tokens.Load(token); ok {
-				next.ServeHTTP(w, r)
-				return
-			}
-			s.tokens.Store(token, s.getFirstUserID(r.Context()))
-			next.ServeHTTP(w, r)
-			return
-		}
-		auth := r.Header.Get("Authorization")
-		if auth == "" {
-			auth = r.Header.Get("X-Emby-Authorization")
-		}
-		if strings.Contains(auth, "DeviceId=") {
-			next.ServeHTTP(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"Code":"NotAuthenticated"}`))
-	})
-}
-
-func (s *Server) getFirstUserID(ctx context.Context) string {
-	users, _ := s.auth.ListUsers(ctx)
-	if len(users) > 0 {
-		return users[0].ID
-	}
-	return ""
-}
-
-func (s *Server) extractToken(r *http.Request) string {
-	if t := r.URL.Query().Get("api_key"); t != "" {
-		return t
-	}
-	if t := r.URL.Query().Get("ApiKey"); t != "" {
-		return t
-	}
-	if t := r.Header.Get("X-MediaBrowser-Token"); t != "" {
-		return t
-	}
-	if t := r.Header.Get("X-Emby-Token"); t != "" {
-		return t
-	}
-	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		auth = r.Header.Get("X-Emby-Authorization")
-	}
-	if strings.Contains(auth, "Token=") {
-		parts := strings.Split(auth, "Token=")
-		if len(parts) > 1 {
-			token := parts[1]
-			if strings.HasPrefix(token, "\"") {
-				end := strings.Index(token[1:], "\"")
-				if end >= 0 {
-					return token[1 : end+1]
-				}
-			}
-			end := strings.IndexAny(token, ", ")
-			if end >= 0 {
-				return token[:end]
-			}
-			return strings.TrimSpace(token)
-		}
-	}
-	return ""
-}
-
-func (s *Server) extractFromAuth(r *http.Request, key string) string {
-	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		auth = r.Header.Get("X-Emby-Authorization")
-	}
-	if !strings.Contains(auth, key+"=") {
-		return ""
-	}
-	parts := strings.Split(auth, key+"=")
-	if len(parts) < 2 {
-		return ""
-	}
-	val := parts[1]
-	if strings.HasPrefix(val, "\"") {
-		end := strings.Index(val[1:], "\"")
-		if end >= 0 {
-			return val[1 : end+1]
-		}
-	}
-	end := strings.IndexAny(val, ", ")
-	if end >= 0 {
-		return val[:end]
-	}
-	return val
-}
-
-func (s *Server) extractClient(r *http.Request) string {
-	return s.extractFromAuth(r, "Client")
-}
-
-func (s *Server) extractDevice(r *http.Request) string {
-	return s.extractFromAuth(r, "Device")
-}
-
-func (s *Server) extractDeviceID(r *http.Request) string {
-	return s.extractFromAuth(r, "DeviceId")
-}
-
-func (s *Server) extractVersion(r *http.Request) string {
-	return s.extractFromAuth(r, "Version")
-}
-
-func (s *Server) getUserID(r *http.Request) string {
-	token := s.extractToken(r)
-	if v, ok := s.tokens.Load(token); ok {
-		return v.(string)
-	}
-	return ""
-}
-
-func (s *Server) defaultPolicy(isAdmin bool) UserPolicy {
-	return UserPolicy{
-		IsAdministrator:                isAdmin,
-		IsDisabled:                     false,
-		EnableUserPreferenceAccess:     true,
-		EnableRemoteControlOfOtherUsers: isAdmin,
-		EnableSharedDeviceControl:      true,
-		EnableRemoteAccess:             true,
-		EnableLiveTvManagement:         isAdmin,
-		EnableLiveTvAccess:             true,
-		EnableMediaPlayback:            true,
-		EnableAudioPlaybackTranscoding: true,
-		EnableVideoPlaybackTranscoding: true,
-		EnablePlaybackRemuxing:         true,
-		EnableContentDownloading:       true,
-		EnableAllChannels:              true,
-		EnableAllFolders:               true,
-		EnableAllDevices:               true,
-		EnablePublicSharing:            true,
-		AuthenticationProviderId:       "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider",
-		PasswordResetProviderId:        "Jellyfin.Server.Implementations.Users.DefaultPasswordResetProvider",
-	}
-}
-
-func (s *Server) usersMe(w http.ResponseWriter, r *http.Request) {
-	userID := s.getUserID(r)
-	now := time.Now()
-	s.respondJSON(w, http.StatusOK, UserDto{
-		Name:                  "admin",
+	return UserDto{
+		Name:                  name,
 		ServerID:              s.serverID,
 		ServerName:            s.serverName,
 		ID:                    userID,
@@ -529,48 +356,69 @@ func (s *Server) usersMe(w http.ResponseWriter, r *http.Request) {
 			PlayDefaultAudioTrack: true,
 			SubtitleMode:          "Default",
 		},
-		Policy: s.defaultPolicy(true),
+		Policy: defaultPolicy(isAdmin),
+	}
+}
+
+func (s *Server) itemCounts(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, map[string]int{
+		"MovieCount": 0, "SeriesCount": 0, "EpisodeCount": 0,
+		"ArtistCount": 0, "ProgramCount": 0, "TrailerCount": 0,
+		"SongCount": 0, "AlbumCount": 0, "MusicVideoCount": 0,
+		"BoxSetCount": 0, "BookCount": 0, "ItemCount": 0,
 	})
 }
 
-func (s *Server) usersList(w http.ResponseWriter, r *http.Request) {
-	userID := s.getUserID(r)
-	now := time.Now()
-	s.respondJSON(w, http.StatusOK, []UserDto{
-		{
-			Name:                  "admin",
-			ServerID:              s.serverID,
-			ServerName:            s.serverName,
-			ID:                    userID,
-			HasPassword:           true,
-			HasConfiguredPassword: true,
-			LastLoginDate:         &now,
-			LastActivityDate:      &now,
-			Configuration: UserConfig{
-				PlayDefaultAudioTrack: true,
-				SubtitleMode:          "Default",
-			},
-			Policy: s.defaultPolicy(true),
-		},
+func (s *Server) sessionsGet(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, []SessionInfo{})
+}
+
+func (s *Server) getUserData(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, UserItemData{Key: chi.URLParam(r, "itemId")})
+}
+
+func (s *Server) displayPreferences(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, map[string]any{
+		"Id":               chi.URLParam(r, "id"),
+		"SortBy":           "SortName",
+		"SortOrder":        "Ascending",
+		"RememberIndexing": false,
+		"RememberSorting":  false,
+		"Client":           s.extractAuthField(r, "Client"),
+		"CustomPrefs":      map[string]string{},
 	})
 }
 
-func (s *Server) userByID(w http.ResponseWriter, r *http.Request) {
-	s.usersMe(w, r)
+func (s *Server) markPlayed(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, UserItemData{
+		Played: r.Method == "POST",
+		Key:    chi.URLParam(r, "itemId"),
+	})
 }
 
-func (s *Server) sessionsCapabilities(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNoContent)
-}
+func (s *Server) markFavorite(w http.ResponseWriter, r *http.Request) {
+	itemID := chi.URLParam(r, "itemId")
+	userID := s.authenticatedUserID(r)
+	isFav := r.Method == "POST"
 
-func (s *Server) sessionsPlaying(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNoContent)
+	if s.favorites != nil && userID != "" {
+		if isFav {
+			s.favorites.Add(r.Context(), userID, addDashes(itemID))
+		} else {
+			s.favorites.Remove(r.Context(), userID, addDashes(itemID))
+		}
+	}
+
+	s.respondJSON(w, http.StatusOK, UserItemData{
+		IsFavorite: isFav,
+		Key:        itemID,
+	})
 }
 
 func (s *Server) bitrateTest(w http.ResponseWriter, r *http.Request) {
 	size := 1000000
-	if s := r.URL.Query().Get("size"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 10000000 {
+	if sizeStr := r.URL.Query().Get("size"); sizeStr != "" {
+		if n, err := strconv.Atoi(sizeStr); err == nil && n > 0 && n <= 10000000 {
 			size = n
 		}
 	}
@@ -586,61 +434,4 @@ func (s *Server) bitrateTest(w http.ResponseWriter, r *http.Request) {
 		w.Write(buf[:chunk])
 		written += chunk
 	}
-}
-
-func (s *Server) emptyQueryResult(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0})
-}
-
-func (s *Server) itemCounts(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, map[string]int{
-		"MovieCount":     0,
-		"SeriesCount":    0,
-		"EpisodeCount":   0,
-		"ArtistCount":    0,
-		"ProgramCount":   0,
-		"TrailerCount":   0,
-		"SongCount":      0,
-		"AlbumCount":     0,
-		"MusicVideoCount": 0,
-		"BoxSetCount":    0,
-		"BookCount":      0,
-		"ItemCount":      0,
-	})
-}
-
-func (s *Server) sessionsGet(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, []SessionInfo{})
-}
-
-func (s *Server) getUserData(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, UserItemData{
-		Key: chi.URLParam(r, "itemId"),
-	})
-}
-
-func (s *Server) displayPreferences(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, map[string]any{
-		"Id":              chi.URLParam(r, "id"),
-		"SortBy":          "SortName",
-		"SortOrder":       "Ascending",
-		"RememberIndexing": false,
-		"RememberSorting":  false,
-		"Client":          s.extractClient(r),
-		"CustomPrefs":     map[string]string{},
-	})
-}
-
-func (s *Server) markPlayed(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, UserItemData{
-		Played: r.Method == "POST",
-		Key:    chi.URLParam(r, "itemId"),
-	})
-}
-
-func (s *Server) markFavorite(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, UserItemData{
-		IsFavorite: r.Method == "POST",
-		Key:        chi.URLParam(r, "itemId"),
-	})
 }

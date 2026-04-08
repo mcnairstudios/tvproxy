@@ -19,7 +19,6 @@ type ChannelGroupStore interface {
 	GetByID(ctx context.Context, id string) (*models.ChannelGroup, error)
 	GetByName(ctx context.Context, name string) (*models.ChannelGroup, error)
 	GetByIDForUser(ctx context.Context, id, userID string) (*models.ChannelGroup, error)
-	GetByNameForUser(ctx context.Context, name, userID string) (*models.ChannelGroup, error)
 	List(ctx context.Context) ([]models.ChannelGroup, error)
 	ListByUserID(ctx context.Context, userID string) ([]models.ChannelGroup, error)
 	Update(ctx context.Context, group *models.ChannelGroup) error
@@ -101,18 +100,6 @@ func (s *ChannelGroupStoreImpl) GetByIDForUser(_ context.Context, id, userID str
 	defer s.mu.RUnlock()
 	for i := range s.groups {
 		if s.groups[i].ID == id && s.groups[i].UserID == userID {
-			g := s.groups[i]
-			return &g, nil
-		}
-	}
-	return nil, fmt.Errorf("channel group not found")
-}
-
-func (s *ChannelGroupStoreImpl) GetByNameForUser(_ context.Context, name, userID string) (*models.ChannelGroup, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for i := range s.groups {
-		if s.groups[i].Name == name && s.groups[i].UserID == userID {
 			g := s.groups[i]
 			return &g, nil
 		}

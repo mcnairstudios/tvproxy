@@ -107,6 +107,16 @@ func profileDisplayName(profile *models.StreamProfile) string {
 	return "Direct"
 }
 
+func requestUsername(r *http.Request) string {
+	if u := r.URL.Query().Get("_user"); u != "" {
+		return u
+	}
+	if u := r.Header.Get("X-TVProxy-User"); u != "" {
+		return u
+	}
+	return ""
+}
+
 func writeStreamHeaders(w http.ResponseWriter, contentType string) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Connection", "close")
@@ -135,6 +145,7 @@ func (s *ProxyService) ProxyStream(ctx context.Context, w http.ResponseWriter, r
 	var viewerID string
 	if s.activity != nil {
 		viewerID = s.activity.Add(ViewerOpts{
+			Username:    requestUsername(r),
 			ChannelID:   channelID,
 			ChannelName: channel.Name,
 			ProfileName: profileDisplayName(streamProfile),
@@ -330,7 +341,15 @@ func (s *ProxyService) startHTTPPassthrough(ctx context.Context, channelID strin
 }
 
 func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream *models.Stream, profile *models.StreamProfile) (io.ReadCloser, error) {
-	argsStr := strings.Replace(profile.Args, "{input}", "pipe:0", 1)
+	useDirectInput := !ffmpeg.IsHTTPURL(stream.URL)
+
+	var inputToken string
+	if useDirectInput {
+		inputToken = stream.URL
+	} else {
+		inputToken = "pipe:0"
+	}
+	argsStr := strings.Replace(profile.Args, "{input}", inputToken, 1)
 	args := ffmpeg.ShellSplit(argsStr)
 
 	s.log.Info().
@@ -338,42 +357,53 @@ func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream
 		Str("stream_id", stream.ID).
 		Str("url", stream.URL).
 		Str("profile", profile.Name).
+		Bool("direct_input", useDirectInput).
 		Strs("args", args).
 		Msg("starting transcoding")
 
-	resp, err := httputil.Fetch(ctx, s.httpClient, s.config, stream.URL)
-	if err != nil {
-		s.log.Error().Err(err).Str("channel_id", channelID).Str("url", stream.URL).Msg("ffmpeg upstream connection failed")
-		return nil, fmt.Errorf("upstream connection failed: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		httputil.LogUpstreamFailure(s.log, resp, stream.URL)
-		resp.Body.Close()
-		return nil, fmt.Errorf("upstream returned %d", resp.StatusCode)
+	var httpBody io.ReadCloser
+	if !useDirectInput {
+		resp, err := httputil.Fetch(ctx, s.httpClient, s.config, stream.URL)
+		if err != nil {
+			s.log.Error().Err(err).Str("channel_id", channelID).Str("url", stream.URL).Msg("ffmpeg upstream connection failed")
+			return nil, fmt.Errorf("upstream connection failed: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			httputil.LogUpstreamFailure(s.log, resp, stream.URL)
+			resp.Body.Close()
+			return nil, fmt.Errorf("upstream returned %d", resp.StatusCode)
+		}
+		httpBody = resp.Body
 	}
 
 	cmd := exec.CommandContext(ctx, profile.Command, args...)
-	cmd.Stdin = resp.Body
+	cmd.Stdin = httpBody
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		resp.Body.Close()
+		if httpBody != nil {
+			httpBody.Close()
+		}
 		return nil, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		resp.Body.Close()
+		if httpBody != nil {
+			httpBody.Close()
+		}
 		return nil, fmt.Errorf("creating stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		resp.Body.Close()
+		if httpBody != nil {
+			httpBody.Close()
+		}
 		return nil, fmt.Errorf("starting ffmpeg: %w", err)
 	}
 
 	go s.logFFmpegStderr(channelID, stderr)
-	go s.waitFFmpeg(ctx, channelID, cmd, resp.Body)
+	go s.waitFFmpeg(ctx, channelID, cmd, httpBody)
 
 	return stdout, nil
 }
@@ -536,6 +566,7 @@ func (s *ProxyService) ProxyRawStream(ctx context.Context, w http.ResponseWriter
 	var viewerID string
 	if s.activity != nil {
 		viewerID = s.activity.Add(ViewerOpts{
+			Username:     requestUsername(r),
 			StreamID:     streamID,
 			StreamName:   stream.Name,
 			M3UAccountID: stream.M3UAccountID,

@@ -5,13 +5,8 @@ import (
 	"time"
 )
 
-// typeOrder controls the order system types are tried as BFS entry points.
 var typeOrder = []string{"dvbt2", "dvbt", "dvbs2", "dvbs", "dvbc", "dvbc2"}
 
-// defaultSeeds holds seed transponders for each system type.
-// DVB-T/T2: full UHF sweep, channels 21–68 (474–850 MHz, 8 MHz steps) — works at any European transmitter.
-// DVB-T2 seeds use 256qam only — 64qam seeds lock to DVB-T signal and win incorrectly.
-// DVB-S2: populated after capability discovery and satellite detection (see scanner.go).
 var defaultSeeds map[string][]Transponder
 
 func init() {
@@ -33,11 +28,6 @@ func init() {
 	}
 }
 
-// muxKey returns a stable string key for a transponder used for deduplication.
-// DVB-T/T2 frequencies from NIT may differ by a few hundred kHz from the seed
-// (e.g. NIT reports 529.833 MHz while the seed is 530 MHz for the same mux).
-// Round DVB-T/T2 to the nearest MHz. DVB-S/C keep full precision because their
-// transponders can be legitimately 1 MHz apart.
 func muxKey(t Transponder) string {
 	if t.System == "dvbt2" {
 		return fmt.Sprintf("%.0f/%s/%d", t.FreqMHz, t.System, t.PLPID)
@@ -48,9 +38,8 @@ func muxKey(t Transponder) string {
 	return fmt.Sprintf("%g/%s", t.FreqMHz, t.System)
 }
 
-// workItem is one pending scan task in the worker pool.
 type workItem struct {
 	tp         Transponder
 	timeout    time.Duration
-	signalOnly bool // use pids=0 (PAT-only confirmation, no NIT)
+	signalOnly bool
 }

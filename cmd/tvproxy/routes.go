@@ -32,6 +32,7 @@ type routeHandlers struct {
 	proxy        *handler.ProxyHandler
 	vod          *handler.VODHandler
 	activity     *handler.ActivityHandler
+	favorite     *handler.FavoriteHandler
 	settings     *handler.SettingsHandler
 	client       *handler.ClientHandler
 	scheduler    *handler.SchedulerHandler
@@ -246,6 +247,13 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 		r.Route("/api/activity", func(r chi.Router) {
 			r.Use(authMW.RequireAdmin)
 			r.Get("/", h.activity.List)
+		})
+
+		r.Route("/api/favorites", func(r chi.Router) {
+			r.Get("/", h.favorite.List)
+			r.Post("/{itemId}", h.favorite.Add)
+			r.Delete("/{itemId}", h.favorite.Remove)
+			r.Get("/{itemId}", h.favorite.IsFavorite)
 		})
 
 		r.Route("/api/wireguard", func(r chi.Router) {

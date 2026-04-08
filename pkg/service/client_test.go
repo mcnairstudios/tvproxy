@@ -87,7 +87,7 @@ func TestMatchRule(t *testing.T) {
 			name:   "exists match — header present with empty value",
 			header: map[string]string{"Icy-Metadata": ""},
 			rule:   models.ClientMatchRule{HeaderName: "Icy-Metadata", MatchType: "exists"},
-			want:   false, // Go's Header.Get returns "" for both absent and empty
+			want:   false,
 		},
 	}
 

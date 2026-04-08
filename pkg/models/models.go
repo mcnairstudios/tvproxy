@@ -17,14 +17,14 @@ type M3UAccount struct {
 	ID              string     `json:"id"`
 	Name            string     `json:"name"`
 	URL             string     `json:"url"`
-	Type            string     `json:"type"` // "m3u" or "xtream"
+	Type            string     `json:"type"`
 	Username        string     `json:"username,omitempty"`
 	Password        string     `json:"password,omitempty"`
 	MaxStreams      int        `json:"max_streams"`
 	IsEnabled       bool       `json:"is_enabled"`
 	LastRefreshed   *time.Time `json:"last_refreshed,omitempty"`
 	StreamCount     int        `json:"stream_count"`
-	RefreshInterval int        `json:"refresh_interval"` // seconds, 0 = use default
+	RefreshInterval int        `json:"refresh_interval"`
 	LastError       string     `json:"last_error"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
@@ -47,10 +47,10 @@ type SatIPSource struct {
 type StreamTrack struct {
 	PID       uint16 `json:"pid"`
 	Type      string `json:"type"`
-	Category  string `json:"category,omitempty"`  // video, audio, subtitle, teletext
+	Category  string `json:"category,omitempty"`
 	Language  string `json:"language,omitempty"`
-	AudioType uint8  `json:"audio_type,omitempty"` // 0=normal, 1=clean, 2=hearing impaired, 3=audio description
-	Label     string `json:"label,omitempty"`      // component descriptor text e.g. "English AD"
+	AudioType uint8  `json:"audio_type,omitempty"`
+	Label     string `json:"label,omitempty"`
 }
 
 type Stream struct {
@@ -69,6 +69,7 @@ type Stream struct {
 	VODCollection string        `json:"vod_collection,omitempty"`
 	VODSeason     int           `json:"vod_season,omitempty"`
 	VODEpisode    int           `json:"vod_episode,omitempty"`
+	VODYear       int           `json:"vod_year,omitempty"`
 	VODVCodec     string        `json:"vod_vcodec,omitempty"`
 	VODACodec     string        `json:"vod_acodec,omitempty"`
 	VODRes        string        `json:"vod_resolution,omitempty"`
@@ -106,6 +107,7 @@ type ChannelGroup struct {
 	ID              string    `json:"id"`
 	UserID          string    `json:"user_id"`
 	Name            string    `json:"name"`
+	ImageURL        string    `json:"image_url,omitempty"`
 	IsEnabled       bool      `json:"is_enabled"`
 	JellyfinEnabled bool      `json:"jellyfin_enabled"`
 	JellyfinType    string    `json:"jellyfin_type,omitempty"`
@@ -212,6 +214,7 @@ type Client struct {
 	ID              string            `json:"id"`
 	Name            string            `json:"name"`
 	Priority        int               `json:"priority"`
+	ListenPort      int               `json:"listen_port"`
 	StreamProfileID string            `json:"stream_profile_id"`
 	IsEnabled       bool              `json:"is_enabled"`
 	MatchRules      []ClientMatchRule `json:"match_rules"`
@@ -229,6 +232,7 @@ type ClientMatchRule struct {
 
 type ActiveViewer struct {
 	ID           string  `json:"id"`
+	Username     string  `json:"username,omitempty"`
 	ChannelID    string  `json:"channel_id,omitempty"`
 	ChannelName  string  `json:"channel_name,omitempty"`
 	StreamID     string  `json:"stream_id,omitempty"`
@@ -251,6 +255,11 @@ type StreamSummary struct {
 	Name          string `json:"name"`
 	Group         string `json:"group"`
 	Logo          string `json:"logo,omitempty"`
+	VODType       string `json:"vod_type,omitempty"`
+	VODSeries     string `json:"vod_series,omitempty"`
+	VODSeason     int    `json:"vod_season,omitempty"`
+	VODEpisode    int    `json:"vod_episode,omitempty"`
+	VODYear       int    `json:"vod_year,omitempty"`
 }
 
 type GuideProgram struct {

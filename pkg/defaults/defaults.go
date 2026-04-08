@@ -17,6 +17,7 @@ type MatchRule struct {
 type ClientDefault struct {
 	Name       string      `json:"name"`
 	Priority   int         `json:"priority"`
+	ListenPort int         `json:"listen_port"`
 	AutoDetect bool        `json:"auto_detect"`
 	HWAccel    string      `json:"hwaccel"`
 	Container  string      `json:"container"`

@@ -220,9 +220,6 @@ func (s *SatIPService) scanSource(ctx context.Context, source *models.SatIPSourc
 		}
 	}
 
-	// Preserve existing streams from muxes that had no signal or errors this scan.
-	// Intermittent scan failures (tuner contention, signal drop) must not delete
-	// channels that were successfully discovered in a previous scan.
 	noSignalKeys := make(map[string]bool, len(result.NoSignalMuxes)+len(result.ErrorMuxes))
 	for _, tp := range result.NoSignalMuxes {
 		noSignalKeys[tp.MuxKey()] = true
@@ -310,9 +307,6 @@ func (s *SatIPService) ClearSource(ctx context.Context, sourceID string) error {
 	return nil
 }
 
-// satipMuxKeyFromURL extracts a deduplication key from a SAT>IP RTSP stream URL.
-// Matches the format produced by Transponder.MuxKey() so we can correlate stored
-// stream URLs back to the transponders reported as no-signal during a scan.
 func satipMuxKeyFromURL(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {

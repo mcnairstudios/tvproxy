@@ -227,6 +227,7 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 		if entry.TVPDur != "" {
 			fmt.Sscanf(entry.TVPDur, "%f", &s.VODDuration)
 		}
+		s.VODYear = extractYearFromName(entry.Name)
 		streams = append(streams, s)
 	}
 
@@ -337,4 +338,16 @@ func computeContentHash(streamURL string) string {
 		return streamURL
 	}
 	return u.Path
+}
+
+func extractYearFromName(name string) int {
+	for i := len(name) - 1; i >= 5; i-- {
+		if name[i] == ')' && i >= 5 && name[i-5] == '(' {
+			var year int
+			if _, err := fmt.Sscanf(name[i-4:i], "%d", &year); err == nil && year >= 1900 && year <= 2099 {
+				return year
+			}
+		}
+	}
+	return 0
 }

@@ -14,10 +14,6 @@ func NewTMDBHandler(client *tmdb.Client) *TMDBHandler {
 	return &TMDBHandler{client: client}
 }
 
-func (h *TMDBHandler) Client() *tmdb.Client {
-	return h.client
-}
-
 func (h *TMDBHandler) Search(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("query")
 	if query == "" {
