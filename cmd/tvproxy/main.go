@@ -199,7 +199,7 @@ func main() {
 	logoCache := logocache.New(filepath.Join(dataDir, "static", "logocache"), cfg, logoTimeout)
 	logoService := service.NewLogoService(logoStore, epgStore, logoCache, log)
 
-	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, cfg, wgHTTPClient, log)
+	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, cfg, dataDir, wgHTTPClient, log)
 	m3uService.CleanupOrphanedStreams(ctx)
 	channelService := service.NewChannelService(channelStore, channelGroupStore, streamStore, log)
 	epgService := service.NewEPGService(epgSourceStore, epgStore, cfg, wgHTTPClient, log)
@@ -241,7 +241,7 @@ func main() {
 	registerRoutes(r, routeHandlers{
 		auth:         handler.NewAuthHandler(authService),
 		user:         handler.NewUserHandler(authService),
-		m3uAccount:   handler.NewM3UAccountHandler(m3uService),
+		m3uAccount:   handler.NewM3UAccountHandler(m3uService, dataDir),
 		satip:        handler.NewSatIPHandler(satipService),
 		stream:       handler.NewStreamHandler(streamStore, streamStore, logoService, tmdbClient),
 		channel:      handler.NewChannelHandler(channelService, logoService),

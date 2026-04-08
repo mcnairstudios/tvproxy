@@ -4442,6 +4442,7 @@
         }},
         { key: 'max_streams', label: 'Max Streams' },
         { key: 'stream_count', label: 'Streams' },
+        { key: 'tls_enrolled', label: 'mTLS', render: function(v) { return v ? '\u2705' : ''; } },
       ],
       fields: [
         { key: 'name', label: 'Name', placeholder: 'My IPTV Provider' },
@@ -4454,6 +4455,7 @@
         { key: 'password', label: 'Password (Xtream)', type: 'password', placeholder: 'Optional for Xtream' },
         { key: 'max_streams', label: 'Max Concurrent Streams', type: 'number', default: 1 },
         { key: 'use_wireguard', label: 'Route via WireGuard', type: 'checkbox' },
+        { key: 'enrollment_token', label: 'Enrollment Token (tvproxy-streams)', placeholder: 'TVP-ENROLL-...', help: 'One-time token from tvproxy-streams for mTLS enrollment' },
       ],
       rowActions: (item, reload) => [
         {

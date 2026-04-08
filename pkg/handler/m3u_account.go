@@ -7,15 +7,17 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
+	"github.com/gavinmcnair/tvproxy/pkg/mtls"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
 
 type M3UAccountHandler struct {
 	m3uService *service.M3UService
+	configDir  string
 }
 
-func NewM3UAccountHandler(m3uService *service.M3UService) *M3UAccountHandler {
-	return &M3UAccountHandler{m3uService: m3uService}
+func NewM3UAccountHandler(m3uService *service.M3UService, configDir string) *M3UAccountHandler {
+	return &M3UAccountHandler{m3uService: m3uService, configDir: configDir}
 }
 
 func (h *M3UAccountHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -23,6 +25,12 @@ func (h *M3UAccountHandler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to list m3u accounts")
 		return
+	}
+
+	for i := range accounts {
+		if mtls.HasCerts(h.configDir, accounts[i].ID) {
+			accounts[i].TLSEnrolled = true
+		}
 	}
 
 	respondJSON(w, http.StatusOK, accounts)
@@ -38,6 +46,7 @@ func (h *M3UAccountHandler) Create(w http.ResponseWriter, r *http.Request) {
 		MaxStreams      int    `json:"max_streams"`
 		IsEnabled       bool   `json:"is_enabled"`
 		UseWireGuard    bool   `json:"use_wireguard"`
+		EnrollmentToken string `json:"enrollment_token"`
 		RefreshInterval int    `json:"refresh_interval"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -67,6 +76,17 @@ func (h *M3UAccountHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.EnrollmentToken != "" {
+		if err := h.enroll(account, req.EnrollmentToken); err != nil {
+			respondJSON(w, http.StatusCreated, map[string]any{
+				"account":      account,
+				"enroll_error": err.Error(),
+			})
+			return
+		}
+		account.TLSEnrolled = true
+	}
+
 	respondJSON(w, http.StatusCreated, account)
 }
 
@@ -79,6 +99,7 @@ func (h *M3UAccountHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	account.TLSEnrolled = mtls.HasCerts(h.configDir, account.ID)
 	respondJSON(w, http.StatusOK, account)
 }
 
@@ -100,6 +121,7 @@ func (h *M3UAccountHandler) Update(w http.ResponseWriter, r *http.Request) {
 		MaxStreams      int    `json:"max_streams"`
 		IsEnabled       bool   `json:"is_enabled"`
 		UseWireGuard    bool   `json:"use_wireguard"`
+		EnrollmentToken string `json:"enrollment_token"`
 		RefreshInterval int    `json:"refresh_interval"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -128,11 +150,24 @@ func (h *M3UAccountHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.EnrollmentToken != "" {
+		if err := h.enroll(account, req.EnrollmentToken); err != nil {
+			respondJSON(w, http.StatusOK, map[string]any{
+				"account":      account,
+				"enroll_error": err.Error(),
+			})
+			return
+		}
+	}
+	account.TLSEnrolled = mtls.HasCerts(h.configDir, account.ID)
+
 	respondJSON(w, http.StatusOK, account)
 }
 
 func (h *M3UAccountHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+
+	mtls.DeleteCerts(h.configDir, id)
 
 	if err := h.m3uService.DeleteAccount(r.Context(), id); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to delete m3u account")
@@ -157,4 +192,12 @@ func (h *M3UAccountHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 func (h *M3UAccountHandler) RefreshStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	respondJSON(w, http.StatusOK, h.m3uService.Get(id))
+}
+
+func (h *M3UAccountHandler) enroll(account *models.M3UAccount, token string) error {
+	result, err := mtls.Enroll(account.URL, token)
+	if err != nil {
+		return err
+	}
+	return mtls.SaveCerts(h.configDir, account.ID, result)
 }

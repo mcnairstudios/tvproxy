@@ -12,6 +12,7 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
+	"github.com/gavinmcnair/tvproxy/pkg/mtls"
 	"github.com/gavinmcnair/tvproxy/pkg/m3u"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
@@ -24,6 +25,7 @@ type M3UService struct {
 	channelStore    store.ChannelStore
 	logoService     *LogoService
 	config          *config.Config
+	configDir       string
 	httpClient      *http.Client
 	log             zerolog.Logger
 	StatusTracker
@@ -35,6 +37,7 @@ func NewM3UService(
 	channelStore store.ChannelStore,
 	logoService *LogoService,
 	cfg *config.Config,
+	configDir string,
 	httpClient *http.Client,
 	log zerolog.Logger,
 ) *M3UService {
@@ -47,6 +50,7 @@ func NewM3UService(
 		channelStore:    channelStore,
 		logoService:    logoService,
 		config:         cfg,
+		configDir:      configDir,
 		httpClient:     httpClient,
 		log:            log.With().Str("service", "m3u").Logger(),
 		StatusTracker:  NewStatusTracker(),
@@ -172,11 +176,21 @@ func (s *M3UService) refreshXtreamAccount(ctx context.Context, account *models.M
 	return s.upsertAndFinalize(ctx, account, streams, keepIDs)
 }
 
+func (s *M3UService) httpClientForAccount(account *models.M3UAccount) *http.Client {
+	if s.configDir != "" {
+		if tlsClient, err := mtls.TLSClient(s.configDir, account.ID); err == nil {
+			return tlsClient
+		}
+	}
+	return s.httpClient
+}
+
 func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UAccount) error {
 	s.log.Info().Str("account_id", account.ID).Str("name", account.Name).Msg("refreshing m3u account")
 	s.Set(account.ID, RefreshStatus{State: "running", Message: "Downloading playlist..."})
 
-	result, err := httputil.FetchConditional(ctx, s.httpClient, s.config, account.URL, account.ETag, s.log)
+	client := s.httpClientForAccount(account)
+	result, err := httputil.FetchConditional(ctx, client, s.config, account.URL, account.ETag, s.log)
 	if err != nil {
 		return fmt.Errorf("fetching m3u url: %w", err)
 	}

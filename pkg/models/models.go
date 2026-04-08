@@ -27,6 +27,7 @@ type M3UAccount struct {
 	RefreshInterval int        `json:"refresh_interval"`
 	LastError       string     `json:"last_error"`
 	UseWireGuard    bool       `json:"use_wireguard"`
+	TLSEnrolled     bool       `json:"tls_enrolled"`
 	ETag            string     `json:"etag,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
