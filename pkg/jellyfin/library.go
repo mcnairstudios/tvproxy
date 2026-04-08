@@ -748,7 +748,59 @@ func (s *Server) liveTvChannels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) liveTvPrograms(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0})
+	ctx := r.Context()
+	channels, _ := s.channels.List(ctx)
+	epgData, _ := s.epg.ListEPGData(ctx)
+
+	epgByChannel := make(map[string]string)
+	var epgIDs []string
+	for _, e := range epgData {
+		epgByChannel[e.ChannelID] = e.ID
+		epgIDs = append(epgIDs, e.ID)
+	}
+
+	programs, _ := s.epg.ListProgramsByEPGDataIDs(ctx, epgIDs)
+
+	var items []BaseItemDto
+	now := time.Now()
+
+	for _, ch := range channels {
+		epgID := epgByChannel[ch.TvgID]
+		if epgID == "" {
+			continue
+		}
+		progs := programs[epgID]
+		for _, p := range progs {
+			if p.Stop.Before(now.Add(-2*time.Hour)) || p.Start.After(now.Add(24*time.Hour)) {
+				continue
+			}
+
+			chID := strings.ReplaceAll(ch.ID, "-", "")
+			item := BaseItemDto{
+				Name:     p.Title,
+				ServerID: s.serverID,
+				ID:       fmt.Sprintf("prog_%s_%d", chID, p.Start.Unix()),
+				Type:     "LiveTvProgram",
+				Overview: p.Description,
+				ParentID: chID,
+			}
+
+			if !p.Start.IsZero() {
+				item.PremiereDate = p.Start.Format(time.RFC3339)
+			}
+			if !p.Start.IsZero() && !p.Stop.IsZero() {
+				item.RunTimeTicks = int64(p.Stop.Sub(p.Start).Seconds() * 10000000)
+			}
+
+			items = append(items, item)
+		}
+	}
+
+	if items == nil {
+		items = []BaseItemDto{}
+	}
+
+	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{Items: items, TotalRecordCount: len(items)})
 }
 
 func (s *Server) liveTvGuideInfo(w http.ResponseWriter, r *http.Request) {
