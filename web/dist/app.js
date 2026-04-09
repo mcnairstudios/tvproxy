@@ -5723,15 +5723,7 @@
           return nameA.localeCompare(nameB);
         });
 
-        var titleCount = standalone.length + Object.keys(collections).length;
-        var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;' });
-        header.appendChild(h('h2', { style: 'margin:0' }, 'Movies'));
-        var headerRight = h('div', { style: 'display:flex;align-items:center;gap:16px' });
         var syncSpan = h('span', { id: 'tmdb-sync-movies', style: 'display:none;font-size:0.85em;color:var(--accent)' });
-        headerRight.appendChild(syncSpan);
-        headerRight.appendChild(h('span', { style: 'color:var(--text-muted);font-size:0.95em' }, items.length + ' titles'));
-        header.appendChild(headerRight);
-        container.appendChild(header);
 
         var syncPoll = setInterval(function() {
           if (!document.getElementById('tmdb-sync-movies')) { clearInterval(syncPoll); return; }
@@ -5830,7 +5822,8 @@
         if (decadeList.length > 0) dropdowns.push({ label: 'Decades', options: decadeList, keyPrefix: 'decade_', group: 'decade' });
         if (genreNames.length > 0) dropdowns.push({ label: 'Genres', options: genreNames, keyPrefix: 'genre_', group: 'genre' });
 
-        mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
+        var movieHeaderRight = mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
+        movieHeaderRight.insertBefore(syncSpan, movieHeaderRight.firstChild);
 
         mg.buildGrid(container, displayItems, function(di, af) {
           if (af['fav:yes']) {
@@ -5981,13 +5974,7 @@
           return;
         }
 
-        var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;' });
-        header.appendChild(h('h2', { style: 'margin:0' }, 'TV Series'));
-        var headerRight2 = h('div', { style: 'display:flex;align-items:center;gap:16px' });
         var syncSpan2 = h('span', { id: 'tmdb-sync-tv', style: 'display:none;font-size:0.85em;color:var(--accent)' });
-        headerRight2.appendChild(syncSpan2);
-        header.appendChild(headerRight2);
-        container.appendChild(header);
 
         var seriesMap = {};
         items.forEach(function(item) {
@@ -6002,8 +5989,6 @@
         });
 
         var seriesList = Object.values(seriesMap).sort(function(a, b) { return a.name.localeCompare(b.name); });
-        headerRight2.appendChild(h('span', { style: 'color:var(--text-muted);font-size:0.95em' }, seriesList.length + ' series'));
-        header.appendChild(headerRight2);
 
         var syncPoll2 = setInterval(function() {
           if (!document.getElementById('tmdb-sync-tv')) { clearInterval(syncPoll2); return; }
@@ -6068,7 +6053,8 @@
         if (tvDecadeList.length > 0) dropdowns.push({ label: 'Decades', options: tvDecadeList, keyPrefix: 'decade_', group: 'decade' });
         if (tvGenreNames.length > 0) dropdowns.push({ label: 'Genres', options: tvGenreNames, keyPrefix: 'genre_', group: 'genre' });
 
-        mg.buildFilterBar(container, pills, dropdowns, seriesList.length);
+        var tvHeaderRight = mg.buildFilterBar(container, pills, dropdowns, seriesList.length);
+        tvHeaderRight.insertBefore(syncSpan2, tvHeaderRight.firstChild);
 
         mg.buildGrid(container, seriesList, function(show, af) {
           if (af['fav:yes']) {
