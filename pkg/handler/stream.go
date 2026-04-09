@@ -94,6 +94,7 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 	series := r.URL.Query().Get("series")
 
 	source := r.URL.Query().Get("source")
+	lang := r.URL.Query().Get("lang")
 
 	var streams []models.Stream
 	var err error
@@ -107,14 +108,19 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if source != "" {
+	if source != "" || lang != "" {
 		var filtered []models.Stream
 		for _, s := range streams {
-			if source == "xtream" && s.CacheType == "xtream" {
-				filtered = append(filtered, s)
-			} else if source == "local" && s.CacheType != "xtream" {
-				filtered = append(filtered, s)
+			if source == "xtream" && s.CacheType != "xtream" {
+				continue
 			}
+			if source == "local" && s.CacheType == "xtream" {
+				continue
+			}
+			if lang != "" && s.Language != lang {
+				continue
+			}
+			filtered = append(filtered, s)
 		}
 		streams = filtered
 	}

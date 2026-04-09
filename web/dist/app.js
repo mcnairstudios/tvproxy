@@ -6236,29 +6236,30 @@
       container.innerHTML = '';
       container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading IPTV movies...'));
       try {
-        var items = await api.get('/api/vod/library?type=movie&source=xtream');
-        container.innerHTML = '';
-        if (items.length === 0) {
-          container.appendChild(h('div', { style: 'text-align:center;padding:48px;color:var(--text-muted)' },
-            h('div', { style: 'font-size:3em;margin-bottom:12px;opacity:0.4' }, '\uD83C\uDF1F'),
-            h('p', { style: 'font-size:1.1em' }, 'No IPTV movies found. Add an Xtream Codes source and refresh.')
-          ));
-          return;
-        }
-        var displayItems = items.map(function(item) { return { type: 'movie', item: item }; });
-        displayItems.sort(function(a, b) { return a.item.name.localeCompare(b.item.name); });
+        var currentLang = '';
+        async function loadMovies() {
+          var url = '/api/vod/library?type=movie&source=xtream';
+          if (currentLang) url += '&lang=' + encodeURIComponent(currentLang);
+          var items = await api.get(url);
+          container.innerHTML = '';
+          if (items.length === 0) {
+            container.appendChild(h('div', { style: 'text-align:center;padding:48px;color:var(--text-muted)' },
+              h('div', { style: 'font-size:3em;margin-bottom:12px;opacity:0.4' }, '\uD83C\uDF1F'),
+              h('p', { style: 'font-size:1.1em' }, currentLang ? 'No movies for ' + currentLang : 'No IPTV movies found.')
+            ));
+            return;
+          }
+          var displayItems = items.map(function(item) { return { type: 'movie', item: item }; });
+          displayItems.sort(function(a, b) { return a.item.name.localeCompare(b.item.name); });
 
-        var decades = {};
-        var genreCounts = {};
-        var langCounts = {};
-        items.forEach(function(item) {
-          if (item.year && item.year.length === 4) decades[item.year.substring(0, 3) + '0s'] = true;
-          (item.genres || []).forEach(function(g) { genreCounts[g] = (genreCounts[g] || 0) + 1; });
-          if (item.language) langCounts[item.language] = (langCounts[item.language] || 0) + 1;
-        });
-        var decadeList = Object.keys(decades).sort();
-        var genreNames = Object.keys(genreCounts).sort(function(a, b) { return genreCounts[b] - genreCounts[a]; });
-        var langNames = Object.keys(langCounts).sort(function(a, b) { return langCounts[b] - langCounts[a]; });
+          var decades = {};
+          var genreCounts = {};
+          items.forEach(function(item) {
+            if (item.year && item.year.length === 4) decades[item.year.substring(0, 3) + '0s'] = true;
+            (item.genres || []).forEach(function(g) { genreCounts[g] = (genreCounts[g] || 0) + 1; });
+          });
+          var decadeList = Object.keys(decades).sort();
+          var genreNames = Object.keys(genreCounts).sort(function(a, b) { return genreCounts[b] - genreCounts[a]; });
 
         if (!_favoriteIds) await loadFavorites();
         var mg = pages._mediaGrid({
@@ -6283,22 +6284,39 @@
             });
           },
         });
-        var pills = [{ label: '\u2B50 Favorites', key: 'fav:yes', group: 'collection' }];
-        var dropdowns = [];
-        if (langNames.length > 1) dropdowns.push({ label: 'Language', options: langNames, keyPrefix: 'lang_', group: 'age' });
-        if (decadeList.length > 0) dropdowns.push({ label: 'Decades', options: decadeList, keyPrefix: 'decade_', group: 'decade' });
-        if (genreNames.length > 0) dropdowns.push({ label: 'Genres', options: genreNames, keyPrefix: 'genre_', group: 'genre' });
-        mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
-        mg.buildGrid(container, displayItems, function(di, af) {
-          if (af['fav:yes'] && (!_favoriteIds || !_favoriteIds.has(di.item.id))) return false;
-          var activeLangs = []; Object.keys(af).forEach(function(k) { if (k.startsWith('lang_')) activeLangs.push(k.replace('lang_', '')); });
-          if (activeLangs.length > 0 && activeLangs.indexOf(di.item.language || '') === -1) return false;
-          var hasDecade = Object.keys(af).some(function(k) { return k.startsWith('decade_'); });
-          if (hasDecade) { var ad = {}; Object.keys(af).forEach(function(k) { if (k.startsWith('decade_')) ad[k.replace('decade_', '')] = true; }); if (!di.item.year || !ad[di.item.year.substring(0, 3) + '0s']) return false; }
-          var ag = []; Object.keys(af).forEach(function(k) { if (k.startsWith('genre_')) ag.push(k.replace('genre_', '')); });
-          if (ag.length > 0 && !ag.every(function(g) { return (di.item.genres || []).indexOf(g) >= 0; })) return false;
-          return true;
-        });
+          var pills = [{ label: '\u2B50 Favorites', key: 'fav:yes', group: 'collection' }];
+          var dropdowns = [];
+          if (decadeList.length > 0) dropdowns.push({ label: 'Decades', options: decadeList, keyPrefix: 'decade_', group: 'decade' });
+          if (genreNames.length > 0) dropdowns.push({ label: 'Genres', options: genreNames, keyPrefix: 'genre_', group: 'genre' });
+          var headerRight = mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
+
+          var langSelect = h('select', { style: 'padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;cursor:pointer;' });
+          langSelect.appendChild(h('option', { value: '' }, 'All Languages'));
+          var knownLangs = {};
+          items.forEach(function(item) { if (item.language) knownLangs[item.language] = (knownLangs[item.language] || 0) + 1; });
+          Object.keys(knownLangs).sort(function(a, b) { return knownLangs[b] - knownLangs[a]; }).forEach(function(l) {
+            var opt = h('option', { value: l }, l + ' (' + knownLangs[l] + ')');
+            if (l === currentLang) opt.selected = true;
+            langSelect.appendChild(opt);
+          });
+          langSelect.onchange = function() {
+            currentLang = langSelect.value;
+            container.innerHTML = '';
+            container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...'));
+            loadMovies();
+          };
+          headerRight.insertBefore(langSelect, headerRight.firstChild);
+
+          mg.buildGrid(container, displayItems, function(di, af) {
+            if (af['fav:yes'] && (!_favoriteIds || !_favoriteIds.has(di.item.id))) return false;
+            var hasDecade = Object.keys(af).some(function(k) { return k.startsWith('decade_'); });
+            if (hasDecade) { var ad = {}; Object.keys(af).forEach(function(k) { if (k.startsWith('decade_')) ad[k.replace('decade_', '')] = true; }); if (!di.item.year || !ad[di.item.year.substring(0, 3) + '0s']) return false; }
+            var ag = []; Object.keys(af).forEach(function(k) { if (k.startsWith('genre_')) ag.push(k.replace('genre_', '')); });
+            if (ag.length > 0 && !ag.every(function(g) { return (di.item.genres || []).indexOf(g) >= 0; })) return false;
+            return true;
+          });
+        }
+        await loadMovies();
       } catch(err) {
         container.innerHTML = '';
         container.appendChild(h('p', { style: 'color:var(--danger)' }, 'Failed to load: ' + err.message));
