@@ -597,7 +597,7 @@ func (s *M3UService) syncXtreamSeries(account *models.M3UAccount, seriesList []x
 		}
 
 		synced++
-		if synced%50 == 0 {
+		if synced%200 == 0 {
 			s.xtreamCache.Save()
 			s.streamStore.Save()
 			s.log.Info().Int("synced", synced).Int("total", len(seriesList)).Msg("xtream series sync progress")
