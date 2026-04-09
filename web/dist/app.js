@@ -5747,14 +5747,12 @@
           }).catch(function() {});
         }, 2000);
 
-        var kidsCerts = { 'U': 1, 'PG': 1, 'G': 1, 'PG-13': 1, '12': 1, '12A': 1, 'TV-Y': 1, 'TV-Y7': 1, 'TV-G': 1, 'TV-PG': 1 };
+        if (!_favoriteIds) await loadFavorites();
+
         var decades = {};
         displayItems.forEach(function(di) {
           var yr = di.type === 'movie' ? di.item.year : null;
-          if (yr && yr.length === 4) {
-            var dec = yr.substring(0, 3) + '0s';
-            decades[dec] = true;
-          }
+          if (yr && yr.length === 4) decades[yr.substring(0, 3) + '0s'] = true;
           if (di.type === 'collection') {
             di.collection.movies.forEach(function(m) {
               if (m.year && m.year.length === 4) decades[m.year.substring(0, 3) + '0s'] = true;
@@ -5762,215 +5760,56 @@
           }
         });
         var decadeList = Object.keys(decades).sort();
-
-        var activeFilters = {};
-        var filterBar = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;' });
-
-        var pillBase = 'padding:5px 14px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:500;transition:all 0.15s;';
-        var pillGroups = {
-          age:        { off: pillBase + 'border:1px solid rgba(168,85,247,0.3);background:rgba(168,85,247,0.08);color:#a855f7;', on: pillBase + 'border:1px solid #a855f7;background:#a855f7;color:#fff;' },
-          collection: { off: pillBase + 'border:1px solid rgba(234,179,8,0.3);background:rgba(234,179,8,0.08);color:#eab308;', on: pillBase + 'border:1px solid #eab308;background:#eab308;color:#000;' },
-          decade:     { off: pillBase + 'border:1px solid rgba(34,197,94,0.3);background:rgba(34,197,94,0.08);color:#22c55e;', on: pillBase + 'border:1px solid #22c55e;background:#22c55e;color:#fff;' },
-          genre:      { off: pillBase + 'border:1px solid rgba(59,130,246,0.3);background:rgba(59,130,246,0.08);color:#3b82f6;', on: pillBase + 'border:1px solid #3b82f6;background:#3b82f6;color:#fff;' },
-        };
-
-        function makePill(label, key, parent, group) {
-          var styles = pillGroups[group] || pillGroups.genre;
-          var btn = h('button', { style: styles.off }, label);
-          btn.onclick = function() {
-            if (activeFilters[key]) { delete activeFilters[key]; btn.style.cssText = styles.off; }
-            else { activeFilters[key] = true; btn.style.cssText = styles.on; }
-            renderGrid();
-          };
-          (parent || filterBar).appendChild(btn);
-          return btn;
-        }
-
-        if (!_favoriteIds) await loadFavorites();
-
-        var searchInput = h('input', { type: 'text', placeholder: '\uD83D\uDD0D Search...', style: 'padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;width:180px;' });
-        searchInput.oninput = function() { renderGrid(); };
-        filterBar.appendChild(searchInput);
-        filterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
-
-        makePill('\u2B50 Favorites', 'fav:yes', filterBar, 'collection');
-        makePill('Kids', 'kids', null, 'age');
-        makePill('15+', 'adult', null, 'age');
-        makePill('Collections', 'collections', null, 'collection');
-
-        function makePillDropdown(label, options, keyPrefix, group, parent) {
-          var wrap = h('div', { style: 'position:relative;display:inline-block;' });
-          var styles = pillGroups[group] || pillGroups.genre;
-          var trigger = h('button', { style: styles.off }, label + ' \u25BE');
-          var popover = h('div', { style: 'position:absolute;top:calc(100% + 4px);left:0;background:#1a1d23;border:1px solid var(--border);border-radius:12px;padding:8px;z-index:50;min-width:200px;max-width:360px;flex-wrap:wrap;gap:6px;box-shadow:0 8px 30px rgba(0,0,0,0.4);display:none;' });
-          var activeCount = 0;
-          options.forEach(function(opt) {
-            var key = keyPrefix + opt;
-            var pill = h('button', { style: styles.off }, opt);
-            pill.onclick = function(e) {
-              e.stopPropagation();
-              if (activeFilters[key]) { delete activeFilters[key]; pill.style.cssText = styles.off; activeCount--; }
-              else { activeFilters[key] = true; pill.style.cssText = styles.on; activeCount++; }
-              trigger.textContent = activeCount > 0 ? label + ' (' + activeCount + ') \u25BE' : label + ' \u25BE';
-              trigger.style.cssText = activeCount > 0 ? styles.on : styles.off;
-              renderGrid();
-            };
-            popover.appendChild(pill);
-          });
-          trigger.onclick = function(e) {
-            e.stopPropagation();
-            var showing = popover.style.display === 'flex';
-            popover.style.display = showing ? 'none' : 'flex';
-          };
-          document.addEventListener('click', function() { popover.style.display = 'none'; });
-          wrap.appendChild(trigger);
-          wrap.appendChild(popover);
-          (parent || filterBar).appendChild(wrap);
-        }
-
-        if (decadeList.length > 0) {
-          filterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
-          makePillDropdown('Decades', decadeList, 'decade_', 'decade');
-        }
-
         var genreCounts = {};
         items.forEach(function(item) {
           (item.genres || []).forEach(function(g) { genreCounts[g] = (genreCounts[g] || 0) + 1; });
         });
         var genreNames = Object.keys(genreCounts).sort(function(a, b) { return genreCounts[b] - genreCounts[a]; });
 
-        if (genreNames.length > 0) {
-          makePillDropdown('Genres', genreNames, 'genre_', 'genre');
-        }
-
-        container.appendChild(filterBar);
-
-        var countSpan = headerRight.querySelector('span:last-child');
-
-        var grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:20px;' });
-
-        function matchesFilters(di) {
-          var searchTerm = searchInput.value.trim().toLowerCase();
-          if (searchTerm) {
-            var itemName = di.type === 'movie' ? di.item.name : di.collection.name;
-            if (itemName.toLowerCase().indexOf(searchTerm) === -1) return false;
-          }
-          if (activeFilters['fav:yes']) {
-            if (di.type === 'movie') { if (!_favoriteIds || !_favoriteIds.has(di.item.id)) return false; }
-            else if (di.type === 'collection') { var anyFav = di.collection.movies.some(function(m) { return _favoriteIds && _favoriteIds.has(m.id); }); if (!anyFav) return false; }
-          }
-          var hasAge = activeFilters.kids || activeFilters.adult;
-          var hasDecade = Object.keys(activeFilters).some(function(k) { return k.startsWith('decade_'); });
-          var hasColl = activeFilters.collections;
-
-          if (hasColl && di.type !== 'collection') return false;
-
-          var itemYear = di.type === 'movie' ? di.item.year : null;
-          var itemCert = di.type === 'movie' ? di.item.certification : null;
-          var collMovies = di.type === 'collection' ? di.collection.movies : null;
-
-          if (hasAge) {
-            if (di.type === 'movie' && itemCert) {
-              var isKid = kidsCerts[itemCert];
-              if (activeFilters.kids && !activeFilters.adult && !isKid) return false;
-              if (activeFilters.adult && !activeFilters.kids && isKid) return false;
+        var mg = pages._mediaGrid({
+          title: 'Movies',
+          getName: function(di) { return di.type === 'movie' ? di.item.name : di.collection.name; },
+          getPoster: function(di) {
+            if (di.type === 'movie') return di.item.poster_url || '';
+            var cp = di.collection.movies.find(function(m) { return m.collection_poster; });
+            return cp ? cp.collection_poster : (di.collection.movies.find(function(m) { return m.poster_url; }) || {}).poster_url || '';
+          },
+          getOverlayBadge: function(di) {
+            if (di.type === 'collection') return di.collection.movies.length + ' films';
+            return null;
+          },
+          getBadges: function(di) {
+            if (di.type === 'collection') return [];
+            var item = di.item;
+            var b = [];
+            if (item.year) b.push(item.year);
+            if (item.certification) b.push(item.certification);
+            if (item.rating > 0) b.push('\u2605 ' + item.rating.toFixed(1));
+            if (item.resolution) b.push(item.resolution);
+            if (item.audio) b.push(item.audio);
+            if (item.duration > 0) {
+              var hrs = Math.floor(item.duration / 3600);
+              var mins = Math.floor((item.duration % 3600) / 60);
+              b.push(hrs > 0 ? hrs + 'h ' + mins + 'm' : mins + 'm');
             }
-            if (di.type === 'collection' && collMovies) {
-              var rated = collMovies.filter(function(m) { return m.certification; });
-              if (rated.length > 0) {
-                var anyMatch = rated.some(function(m) {
-                  var isK = kidsCerts[m.certification];
-                  if (activeFilters.kids && activeFilters.adult) return true;
-                  return activeFilters.kids ? isK : !isK;
-                });
-                if (!anyMatch) return false;
-              }
+            return b;
+          },
+          getGenres: function(di) {
+            if (di.type === 'movie') return di.item.genres;
+            return [];
+          },
+          onCardClick: function(di) {
+            if (di.type === 'collection') { showCollectionModal(di.collection); return; }
+            var item = di.item;
+            var timeBadges = [];
+            if (item.duration > 0) {
+              var hrs = Math.floor(item.duration / 3600);
+              var mins = Math.floor((item.duration % 3600) / 60);
+              timeBadges.push(hrs > 0 ? hrs + 'h ' + mins + 'm' : mins + 'm');
             }
-          }
-
-          if (hasDecade) {
-            var activeDecades = {};
-            Object.keys(activeFilters).forEach(function(k) { if (k.startsWith('decade_')) activeDecades[k.replace('decade_', '')] = true; });
-            if (di.type === 'movie') {
-              if (!itemYear || !activeDecades[itemYear.substring(0, 3) + '0s']) return false;
-            }
-            if (di.type === 'collection' && collMovies) {
-              var anyDecade = collMovies.some(function(m) { return m.year && activeDecades[m.year.substring(0, 3) + '0s']; });
-              if (!anyDecade) return false;
-            }
-          }
-
-          var activeGenres = [];
-          Object.keys(activeFilters).forEach(function(k) { if (k.startsWith('genre_')) activeGenres.push(k.replace('genre_', '')); });
-          if (activeGenres.length > 0) {
-            var itemGenres = di.type === 'movie' ? (di.item.genres || []) : [];
-            if (di.type === 'collection' && collMovies) {
-              itemGenres = [];
-              collMovies.forEach(function(m) { (m.genres || []).forEach(function(g) { if (itemGenres.indexOf(g) === -1) itemGenres.push(g); }); });
-            }
-            var allMatch = activeGenres.every(function(g) { return itemGenres.indexOf(g) >= 0; });
-            if (!allMatch) return false;
-          }
-
-          return true;
-        }
-
-        function renderGrid() {
-          grid.innerHTML = '';
-          var filtered = displayItems.filter(matchesFilters);
-          var count = 0;
-          filtered.forEach(function(di) {
-            if (di.type === 'movie') { renderMovieCard(di.item, grid); count++; }
-            else { renderCollectionCard(di.collection, grid); count++; }
-          });
-          countSpan.textContent = count + ' / ' + displayItems.length + ' titles';
-          setupGridKeyJump(grid);
-        }
-
-        function renderMovieCard(item, parent) {
-          var card = h('div', { style: 'cursor:pointer;border-radius:12px;overflow:hidden;background:var(--bg-card);border:1px solid var(--border);transition:transform 0.2s,box-shadow 0.2s;' });
-          card.dataset.sortName = item.name;
-          card.onmouseenter = function() { card.style.transform = 'scale(1.03)'; card.style.boxShadow = '0 8px 30px rgba(0,0,0,0.3)'; };
-          card.onmouseleave = function() { card.style.transform = ''; card.style.boxShadow = ''; };
-
-          var posterWrap = h('div', { style: 'width:100%;aspect-ratio:2/3;background:linear-gradient(135deg,#1a1a2e,#16213e);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;' });
-          if (item.poster_url) {
-            posterWrap.appendChild(h('img', { src: item.poster_url, style: 'width:100%;height:100%;object-fit:cover;' }));
-          } else {
-            posterWrap.appendChild(h('div', { style: 'padding:12px;text-align:center;color:#fff;font-size:14px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.5);' }, item.name));
-          }
-          card.appendChild(posterWrap);
-
-          var info = h('div', { style: 'padding:10px 12px;' });
-          info.appendChild(h('div', { style: 'font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, item.name));
-
-          var badges = [];
-          if (item.year) badges.push(item.year);
-          if (item.certification) badges.push(item.certification);
-          if (item.rating > 0) badges.push('\u2605 ' + item.rating.toFixed(1));
-          if (item.resolution) badges.push(item.resolution);
-          if (item.audio) badges.push(item.audio);
-          if (item.duration > 0) {
-            var hrs = Math.floor(item.duration / 3600);
-            var mins = Math.floor((item.duration % 3600) / 60);
-            badges.push(hrs > 0 ? hrs + 'h ' + mins + 'm' : mins + 'm');
-          }
-          if (badges.length) {
-            var badgeRow = h('div', { style: 'display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;' });
-            badges.forEach(function(b) { badgeRow.appendChild(h('span', { style: 'font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.08);color:var(--text-muted);' }, b)); });
-            info.appendChild(badgeRow);
-          }
-          if (item.genres && item.genres.length) {
-            var genreRow = h('div', { style: 'display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;' });
-            item.genres.slice(0, 2).forEach(function(g) { genreRow.appendChild(h('span', { style: 'font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(59,130,246,0.15);color:#60a5fa;' }, g)); });
-            info.appendChild(genreRow);
-          }
-          card.appendChild(info);
-
-          card.onclick = function() {
             showProgrammeModal({
               title: item.name, mediaType: 'movie',
-              time: badges.filter(function(b) { return b.includes('h') || b.includes('m'); }).join(''),
+              time: timeBadges.join(''),
               description: item.overview || '',
               year: item.year, certification: item.certification,
               rating: item.rating, genres: item.genres,
@@ -5978,9 +5817,56 @@
               isLive: false, isFuture: false, vodStreamURL: item.url, vodStreamID: item.id,
               tmdbID: item.tmdb_id,
             });
-          };
-          parent.appendChild(card);
-        }
+          },
+        });
+
+        var pills = [
+          { label: '\u2B50 Favorites', key: 'fav:yes', group: 'collection' },
+          { label: 'Kids', key: 'kids', group: 'age' },
+          { label: '15+', key: 'adult', group: 'age' },
+          { label: 'Collections', key: 'collections', group: 'collection' },
+        ];
+        var dropdowns = [];
+        if (decadeList.length > 0) dropdowns.push({ label: 'Decades', options: decadeList, keyPrefix: 'decade_', group: 'decade' });
+        if (genreNames.length > 0) dropdowns.push({ label: 'Genres', options: genreNames, keyPrefix: 'genre_', group: 'genre' });
+
+        mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
+
+        mg.buildGrid(container, displayItems, function(di, af) {
+          if (af['fav:yes']) {
+            if (di.type === 'movie') { if (!_favoriteIds || !_favoriteIds.has(di.item.id)) return false; }
+            else { var anyFav = di.collection.movies.some(function(m) { return _favoriteIds && _favoriteIds.has(m.id); }); if (!anyFav) return false; }
+          }
+          if (af.collections && di.type !== 'collection') return false;
+          var hasAge = af.kids || af.adult;
+          if (hasAge) {
+            if (di.type === 'movie' && di.item.certification) {
+              var isKid = mg.kidsCerts[di.item.certification];
+              if (af.kids && !af.adult && !isKid) return false;
+              if (af.adult && !af.kids && isKid) return false;
+            }
+            if (di.type === 'collection') {
+              var rated = di.collection.movies.filter(function(m) { return m.certification; });
+              if (rated.length > 0) {
+                var anyMatch = rated.some(function(m) { var isK = mg.kidsCerts[m.certification]; return (af.kids && af.adult) || (af.kids ? isK : !isK); });
+                if (!anyMatch) return false;
+              }
+            }
+          }
+          var hasDecade = Object.keys(af).some(function(k) { return k.startsWith('decade_'); });
+          if (hasDecade) {
+            var ad = {}; Object.keys(af).forEach(function(k) { if (k.startsWith('decade_')) ad[k.replace('decade_', '')] = true; });
+            if (di.type === 'movie') { if (!di.item.year || !ad[di.item.year.substring(0, 3) + '0s']) return false; }
+            if (di.type === 'collection') { var anyDec = di.collection.movies.some(function(m) { return m.year && ad[m.year.substring(0, 3) + '0s']; }); if (!anyDec) return false; }
+          }
+          var ag = []; Object.keys(af).forEach(function(k) { if (k.startsWith('genre_')) ag.push(k.replace('genre_', '')); });
+          if (ag.length > 0) {
+            var ig = di.type === 'movie' ? (di.item.genres || []) : [];
+            if (di.type === 'collection') { ig = []; di.collection.movies.forEach(function(m) { (m.genres || []).forEach(function(g) { if (ig.indexOf(g) === -1) ig.push(g); }); }); }
+            if (!ag.every(function(g) { return ig.indexOf(g) >= 0; })) return false;
+          }
+          return true;
+        });
 
         function showCollectionModal(col) {
           var overlay = document.createElement('div');
@@ -6073,32 +5959,6 @@
           }
         }
 
-        function renderCollectionCard(col, parent) {
-          var card = h('div', { style: 'cursor:pointer;border-radius:12px;overflow:hidden;background:var(--bg-card);border:1px solid var(--border);transition:transform 0.2s,box-shadow 0.2s;' });
-          card.dataset.sortName = col.name;
-          card.onmouseenter = function() { card.style.transform = 'scale(1.03)'; card.style.boxShadow = '0 8px 30px rgba(0,0,0,0.3)'; };
-          card.onmouseleave = function() { card.style.transform = ''; card.style.boxShadow = ''; };
-
-          var posterWrap = h('div', { style: 'width:100%;aspect-ratio:2/3;background:linear-gradient(135deg,#1a1a2e,#16213e);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;' });
-          var colPoster = col.movies.find(function(m) { return m.collection_poster; });
-          var posterSrc = colPoster ? colPoster.collection_poster : (col.movies.find(function(m) { return m.poster_url; }) || {}).poster_url;
-          if (posterSrc) {
-            posterWrap.appendChild(h('img', { src: posterSrc, style: 'width:100%;height:100%;object-fit:cover;' }));
-          } else {
-            posterWrap.appendChild(h('div', { style: 'padding:12px;text-align:center;color:#fff;font-size:14px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.5);' }, col.name));
-          }
-          posterWrap.appendChild(h('div', { style: 'position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,0.7);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;' }, col.movies.length + ' films'));
-          card.appendChild(posterWrap);
-
-          card.appendChild(h('div', { style: 'padding:10px 12px;' },
-            h('div', { style: 'font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, col.name)));
-
-          card.onclick = function() { showCollectionModal(col); };
-          parent.appendChild(card);
-        }
-
-        container.appendChild(grid);
-        renderGrid();
       } catch(err) {
         container.innerHTML = '';
         container.appendChild(h('p', { style: 'color:var(--danger)' }, 'Failed to load: ' + err.message));
