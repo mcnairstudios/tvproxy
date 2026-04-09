@@ -35,6 +35,7 @@ type VODService struct {
 	streamProfileRepo  store.ProfileStore
 	sourceProfileStore store.SourceProfileStore
 	m3uAccountStore    store.M3UAccountStore
+	satipSourceStore   store.SatIPSourceStore
 	settingsService    *SettingsService
 	sessionMgr         *session.Manager
 	recordingStore     store.RecordingStore
@@ -51,6 +52,7 @@ func NewVODService(
 	streamProfileRepo store.ProfileStore,
 	sourceProfileStore store.SourceProfileStore,
 	m3uAccountStore store.M3UAccountStore,
+	satipSourceStore store.SatIPSourceStore,
 	settingsService *SettingsService,
 	sessionMgr *session.Manager,
 	recordingStore store.RecordingStore,
@@ -65,6 +67,7 @@ func NewVODService(
 		streamProfileRepo:  streamProfileRepo,
 		sourceProfileStore: sourceProfileStore,
 		m3uAccountStore:    m3uAccountStore,
+		satipSourceStore:   satipSourceStore,
 		settingsService:    settingsService,
 		sessionMgr:        sessionMgr,
 		recordingStore:    recordingStore,
@@ -106,6 +109,13 @@ func (s *VODService) lookupSourceProfile(ctx context.Context, m3uAccountID, sati
 	if m3uAccountID != "" && s.m3uAccountStore != nil {
 		if acct, err := s.m3uAccountStore.GetByID(ctx, m3uAccountID); err == nil && acct.SourceProfileID != "" {
 			if sp, err := s.sourceProfileStore.GetByID(ctx, acct.SourceProfileID); err == nil {
+				return sp
+			}
+		}
+	}
+	if satipSourceID != "" && s.satipSourceStore != nil {
+		if src, err := s.satipSourceStore.GetByID(ctx, satipSourceID); err == nil && src.SourceProfileID != "" {
+			if sp, err := s.sourceProfileStore.GetByID(ctx, src.SourceProfileID); err == nil {
 				return sp
 			}
 		}

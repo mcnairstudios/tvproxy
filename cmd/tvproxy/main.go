@@ -226,7 +226,7 @@ func main() {
 	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, recordingStore, log)
 	wgMultiClient := wgMultiService.HTTPClient()
 	sessionMgr := session.NewManager(cfg, wgHTTPClient, wgMultiClient, recordingStore, log)
-	vodService := service.NewVODService(channelStore, streamStore, profileStore, sourceProfileStore, m3uAccountStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
+	vodService := service.NewVODService(channelStore, streamStore, profileStore, sourceProfileStore, m3uAccountStore, satipSourceStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
 	vodService.RecoverRecordings(ctx)
 	go m3uService.ResumeSeriesSync(ctx)
 	schedulerService := service.NewSchedulerService(scheduledRecStore, channelStore, vodService, cfg, log)
