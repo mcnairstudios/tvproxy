@@ -14,10 +14,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     dtv-scan-tables \
-    curl \
-    && curl -sL https://github.com/shaka-project/shaka-packager/releases/download/v3.7.0/packager-linux-x64 -o /usr/local/bin/packager \
-    && chmod +x /usr/local/bin/packager \
-    && apt-get remove -y curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /tvproxy /usr/local/bin/tvproxy
