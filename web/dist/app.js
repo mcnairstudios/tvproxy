@@ -5590,7 +5590,7 @@
           const profileName = profileMap[existing.stream_profile_id] || '(unknown)';
           formContent.appendChild(h('div', { className: 'form-group' }, h('label', null, 'Stream Profile'),
             h('input', { type: 'text', value: profileName, disabled: true, style: 'opacity: 0.7' }),
-            h('small', { style: 'color: var(--text-muted); display: block' }, 'Auto-created on client creation. Edit the profile via Stream Profiles to change encoding settings.')));
+            h('small', { style: 'color: var(--text-muted); display: block' }, 'Auto-created on client creation. Edit the profile via Client Stream Profiles to change output settings.')));
         }
 
         formContent.appendChild(h('div', { className: 'form-check', style: 'display:flex;align-items:center;gap:6px' }, enabledChk, h('label', { style: 'cursor:pointer;margin:0' }, 'Enabled')));
@@ -6762,7 +6762,7 @@
         };
 
         container.appendChild(h('div', { className: 'table-container', style: 'margin-top: 24px' },
-          h('div', { className: 'table-header' }, h('h3', null, 'Encoding Defaults')),
+          h('div', { className: 'table-header' }, h('h3', null, 'Recording Encoding')),
           h('div', { style: 'padding: 16px; font-size: 15px' },
             h('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:12px' },
               h('label', { for: 'setting-default-hwaccel', style: 'margin:0;min-width:160px' }, 'Hardware acceleration:'),
@@ -6773,7 +6773,7 @@
               videoCodecSelect,
             ),
             h('p', { style: 'color: var(--text-muted); margin-top: 8px; font-size: 13px' },
-              'System-wide encoding defaults. Any stream profile set to "Global Default" uses these values. Set hardware acceleration to match your GPU. Video codec controls the output format — copy passes through the source codec without re-encoding.'),
+              'Used for scheduled recordings only. Live playback and VOD negotiate codec settings automatically from Source and Client Stream Profiles. Set hardware acceleration to match your GPU.'),
           ),
         ));
 
