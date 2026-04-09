@@ -663,25 +663,25 @@ func (s *Server) enrichSeriesItem(name string, tmdbID int) BaseItemDto {
 	}
 
 	if tmdbID > 0 {
-	if sr := s.tmdbClient.LookupSeries(tmdbID); sr != nil {
-		item.Overview = sr.Overview
-		item.CommunityRating = sr.Rating
-		item.OfficialRating = sr.Certification
-		item.Genres = sr.Genres
-		item.GenreItems = genreItems(sr.Genres)
-		if sr.Year != "" {
-			if yr, _ := strconv.Atoi(sr.Year); yr > 0 {
-				item.ProductionYear = yr
-				item.PremiereDate = sr.Year + "-01-01T00:00:00.0000000Z"
+		if sr := s.tmdbClient.LookupSeries(tmdbID); sr != nil {
+			item.Overview = sr.Overview
+			item.CommunityRating = sr.Rating
+			item.OfficialRating = sr.Certification
+			item.Genres = sr.Genres
+			item.GenreItems = genreItems(sr.Genres)
+			if sr.Year != "" {
+				if yr, _ := strconv.Atoi(sr.Year); yr > 0 {
+					item.ProductionYear = yr
+					item.PremiereDate = sr.Year + "-01-01T00:00:00.0000000Z"
+				}
+			}
+			if sr.PosterPath != "" {
+				item.ImageTags["Primary"] = "tmdb"
+			}
+			if sr.BackdropPath != "" {
+				item.BackdropImageTags = []string{"tmdb"}
 			}
 		}
-		if sr.PosterPath != "" {
-			item.ImageTags["Primary"] = "tmdb"
-		}
-		if sr.BackdropPath != "" {
-			item.BackdropImageTags = []string{"tmdb"}
-		}
-	}
 	}
 
 	return item
