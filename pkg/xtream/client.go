@@ -30,10 +30,17 @@ type Stream struct {
 	Name         string `json:"name"`
 	StreamType   string `json:"stream_type"`
 	StreamID     int    `json:"stream_id"`
-	StreamIcon   string `json:"stream_icon"`
+	StreamIcon   any    `json:"stream_icon"`
 	EPGChannelID string `json:"epg_channel_id"`
 	CategoryID   string `json:"category_id"`
 	CategoryName string `json:"category_name"`
+}
+
+func (s Stream) Icon() string {
+	if str, ok := s.StreamIcon.(string); ok {
+		return str
+	}
+	return ""
 }
 
 type ServerInfo struct {
@@ -107,12 +114,31 @@ type VODStream struct {
 	Name         string `json:"name"`
 	StreamType   string `json:"stream_type"`
 	StreamID     int    `json:"stream_id"`
-	StreamIcon   string `json:"stream_icon"`
-	Rating       string `json:"rating"`
+	StreamIcon   any    `json:"stream_icon"`
+	Rating       any    `json:"rating"`
 	IsAdult      string `json:"is_adult"`
 	CategoryID   string `json:"category_id"`
 	CategoryName string `json:"category_name"`
 	ContainerExt string `json:"container_extension"`
+}
+
+func (v VODStream) Icon() string {
+	if s, ok := v.StreamIcon.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func (v VODStream) RatingStr() string {
+	switch r := v.Rating.(type) {
+	case string:
+		return r
+	case float64:
+		if r > 0 {
+			return fmt.Sprintf("%.1f", r)
+		}
+	}
+	return ""
 }
 
 type VODInfo struct {
