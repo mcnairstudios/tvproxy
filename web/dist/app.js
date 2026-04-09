@@ -5638,7 +5638,7 @@
 
         if (!_favoriteIds) await loadFavorites();
 
-        var searchInput = h('input', { type: 'text', placeholder: 'Search...', style: 'padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;width:180px;' });
+        var searchInput = h('input', { type: 'text', placeholder: '\uD83D\uDD0D Search...', style: 'padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;width:180px;' });
         searchInput.oninput = function() { renderGrid(); };
         filterBar.appendChild(searchInput);
         filterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
@@ -6016,7 +6016,7 @@
           return btn;
         }
 
-        var tvSearchInput = h('input', { type: 'text', placeholder: 'Search...', style: 'padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;width:180px;' });
+        var tvSearchInput = h('input', { type: 'text', placeholder: '\uD83D\uDD0D Search...', style: 'padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;width:180px;' });
         tvSearchInput.oninput = function() { renderTvGrid(); };
         tvFilterBar.appendChild(tvSearchInput);
         tvFilterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
