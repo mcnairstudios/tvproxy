@@ -164,16 +164,8 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 	audioOnly := strings.EqualFold(streamGroup, "radio")
 	sa := s.composeSessionArgs(ctx, profileName, streamURL, streamGroup)
 
-	sessionArgs := sa.Args
-	sessionVideoCodec := sa.OutputVideoCodec
-	sessionAudioCodec := sa.OutputAudioCodec
-	sessionHWAccel := sa.OutputHWAccel
 	var hlsOutDir string
 	if sa.Delivery == "hls" {
-		sessionArgs = ""
-		sessionVideoCodec = "copy"
-		sessionAudioCodec = "aac"
-		sessionHWAccel = ""
 		hlsOutDir = filepath.Join(os.TempDir(), "tvproxy-hls", streamID)
 		os.MkdirAll(hlsOutDir, 0755)
 	}
@@ -185,13 +177,13 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		StreamName:       streamName,
 		ChannelName:      channelName,
 		ProfileName:      profileName,
-		OutputVideoCodec: sessionVideoCodec,
-		OutputAudioCodec: sessionAudioCodec,
+		OutputVideoCodec: sa.OutputVideoCodec,
+		OutputAudioCodec: sa.OutputAudioCodec,
 		OutputContainer:  sa.Container,
-		OutputHWAccel:    sessionHWAccel,
+		OutputHWAccel:    sa.OutputHWAccel,
 		UseWireGuard:     useWG,
 		Command:          sa.Command,
-		Args:             sessionArgs,
+		Args:             sa.Args,
 		OutputDir:        s.config.VODOutputDir,
 		HLSOutputDir:     hlsOutDir,
 		MetadataOnly:     false,
@@ -233,16 +225,8 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 
 	sa := s.composeSessionArgs(ctx, profileName, streamURL, stream.Group)
 
-	streamSessionArgs := sa.Args
-	streamSessionVideoCodec := sa.OutputVideoCodec
-	streamSessionAudioCodec := sa.OutputAudioCodec
-	streamSessionHWAccel := sa.OutputHWAccel
 	var hlsOutputDir string
 	if sa.Delivery == "hls" && stream.VODDuration == 0 {
-		streamSessionArgs = ""
-		streamSessionVideoCodec = "copy"
-		streamSessionAudioCodec = "aac"
-		streamSessionHWAccel = ""
 		hlsOutputDir = filepath.Join(os.TempDir(), "tvproxy-hls", streamID)
 		os.MkdirAll(hlsOutputDir, 0755)
 	}
@@ -254,13 +238,13 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		StreamName:       stream.Name,
 		ChannelName:      stream.Name,
 		ProfileName:      profileName,
-		OutputVideoCodec: streamSessionVideoCodec,
-		OutputAudioCodec: streamSessionAudioCodec,
+		OutputVideoCodec: sa.OutputVideoCodec,
+		OutputAudioCodec: sa.OutputAudioCodec,
 		OutputContainer:  sa.Container,
-		OutputHWAccel:    streamSessionHWAccel,
+		OutputHWAccel:    sa.OutputHWAccel,
 		UseWireGuard:     stream.UseWireGuard,
 		Command:          sa.Command,
-		Args:             streamSessionArgs,
+		Args:             sa.Args,
 		OutputDir:        s.config.VODOutputDir,
 		HLSOutputDir:     hlsOutputDir,
 		KnownDuration:    stream.VODDuration,

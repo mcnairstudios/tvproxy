@@ -79,3 +79,18 @@ func SanitizeFilename(title string, t time.Time) string {
 	}
 	return name + "_" + t.Format("20060102_1504")
 }
+
+func MapEncoder(codec string) string {
+	switch codec {
+	case "", "copy":
+		return "copy"
+	case "h264":
+		return "libx264"
+	case "h265":
+		return "libx265"
+	case "av1":
+		return "libsvtav1"
+	default:
+		return codec
+	}
+}

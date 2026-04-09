@@ -99,30 +99,16 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 }
 
 
-func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string, useWireGuard bool, hlsOutputDir string) []string {
+func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string, useWireGuard bool, hlsOutputDir string, opts StartOpts) []string {
 	pipeInput := ffmpeg.IsHTTPURL(inputURL) && useWireGuard
+
+	if pipeInput && hlsOutputDir != "" {
+		return m.buildDualOutputArgs(hlsOutputDir, outputPath, opts)
+	}
 
 	var args []string
 	if argsStr == "" {
-		if pipeInput && hlsOutputDir != "" {
-			segPattern := filepath.Join(hlsOutputDir, "seg%d.mp4")
-			playlistPath := filepath.Join(hlsOutputDir, "playlist.m3u8")
-			args = ffmpeg.ShellSplit(
-				"-hide_banner -loglevel warning -nostdin" +
-					" -f mpegts -analyzeduration 1000000 -probesize 1000000" +
-					" -err_detect ignore_err -fflags +genpts+discardcorrupt" +
-					" -i pipe:0 -map 0:v:0? -map 0:a:0?" +
-					" -c:v copy -c:a aac -ac 2 -b:a 192k" +
-					" -max_muxing_queue_size 2048" +
-					" -f hls -hls_time 6 -hls_segment_type fmp4" +
-					" -hls_fmp4_init_filename init.mp4" +
-					" -start_number 0 -hls_playlist_type event -hls_list_size 0" +
-					" -hls_segment_filename " + segPattern +
-					" -y " + playlistPath +
-					" -c:v copy -c:a aac -ac 2 -b:a 192k" +
-					" -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof" +
-					" {output}")
-		} else if pipeInput {
+		if pipeInput {
 			args = ffmpeg.ShellSplit("-hide_banner -loglevel warning -nostdin -f mpegts -analyzeduration 1000000 -probesize 1000000 -err_detect ignore_err -fflags +genpts+discardcorrupt -i pipe:0 -map 0:v:0? -map 0:a:0? -c:v copy -c:a aac -ac 2 -b:a 192k -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof {output}")
 		} else {
 			args = ffmpeg.ShellSplit("-hide_banner -loglevel warning -i {input} -c copy -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof {output}")
@@ -147,6 +133,77 @@ func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string, 
 	args = append([]string{"-y"}, args...)
 	args = append(args, "-progress", "pipe:2")
 
+	return args
+}
+
+func (m *Manager) buildDualOutputArgs(hlsDir, mp4Path string, opts StartOpts) []string {
+	videoCodec := opts.OutputVideoCodec
+	if videoCodec == "" || videoCodec == "default" {
+		videoCodec = "copy"
+	}
+	audioCodec := opts.OutputAudioCodec
+	if audioCodec == "" || audioCodec == "default" {
+		audioCodec = "aac"
+	}
+	hwaccel := opts.OutputHWAccel
+
+	var args []string
+	args = append(args, "-y", "-hide_banner", "-loglevel", "warning", "-nostdin")
+
+	if videoCodec != "copy" && hwaccel != "" && hwaccel != "none" && hwaccel != "default" {
+		switch hwaccel {
+		case "vaapi":
+			args = append(args, "-init_hw_device", "vaapi=va:/dev/dri/renderD128", "-filter_hw_device", "va")
+		case "qsv":
+			args = append(args, "-init_hw_device", "vaapi=va:/dev/dri/renderD128", "-init_hw_device", "qsv=qs@va", "-hwaccel", "qsv", "-hwaccel_output_format", "qsv")
+		case "nvenc", "cuda":
+			args = append(args, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+		case "videotoolbox":
+			args = append(args, "-hwaccel", "videotoolbox")
+		}
+	}
+
+	args = append(args,
+		"-f", "mpegts",
+		"-analyzeduration", "1000000",
+		"-probesize", "1000000",
+		"-err_detect", "ignore_err",
+		"-fflags", "+genpts+discardcorrupt",
+		"-i", "pipe:0",
+		"-map", "0:v:0?",
+		"-map", "0:a:0?",
+	)
+
+	venc := ffmpeg.MapEncoder(videoCodec)
+	args = append(args, "-c:v", venc)
+	if audioCodec == "copy" {
+		args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "192k")
+	} else {
+		args = append(args, "-c:a", audioCodec, "-ac", "2", "-b:a", "192k")
+	}
+
+	args = append(args,
+		"-max_muxing_queue_size", "2048",
+		"-f", "hls",
+		"-hls_time", "6",
+		"-hls_segment_type", "fmp4",
+		"-hls_fmp4_init_filename", "init.mp4",
+		"-start_number", "0",
+		"-hls_playlist_type", "event",
+		"-hls_list_size", "0",
+		"-hls_segment_filename", filepath.Join(hlsDir, "seg%d.mp4"),
+		"-y", filepath.Join(hlsDir, "playlist.m3u8"),
+	)
+
+	args = append(args,
+		"-c:v", "copy",
+		"-c:a", "copy",
+		"-f", "mp4",
+		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
+		mp4Path,
+	)
+
+	args = append(args, "-progress", "pipe:2")
 	return args
 }
 
@@ -499,7 +556,7 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 	go m.probeAsync(s, opts.StreamURL)
 
 	if !opts.MetadataOnly {
-		args := m.buildArgs(opts.Args, opts.StreamURL, filePath, opts.UseWireGuard, opts.HLSOutputDir)
+		args := m.buildArgs(opts.Args, opts.StreamURL, filePath, opts.UseWireGuard, opts.HLSOutputDir, opts)
 		command := opts.Command
 		if command == "" {
 			command = "ffmpeg"
