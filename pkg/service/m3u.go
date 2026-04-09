@@ -591,16 +591,18 @@ func (s *M3UService) RefreshAllAccounts(ctx context.Context) error {
 var streamNamespace = uuid.MustParse("f47ac10b-58cc-4372-a567-0e02b2c3d479")
 
 func extractLanguage(name string) (cleanName, lang string) {
-	if len(name) > 3 && name[2] == ':' && name[0] >= 'A' && name[0] <= 'Z' && name[1] >= 'A' && name[1] <= 'Z' {
-		return strings.TrimSpace(name[3:]), name[:2]
-	}
-	if len(name) > 4 && name[3] == ':' && name[0] >= 'A' && name[0] <= 'Z' && name[1] >= 'A' && name[1] <= 'Z' && name[2] >= 'A' && name[2] <= 'Z' {
-		return strings.TrimSpace(name[4:]), name[:3]
-	}
-	if len(name) > 3 && name[2] == ' ' && name[0] >= 'A' && name[0] <= 'Z' && name[1] >= 'A' && name[1] <= 'Z' {
-		rest := strings.TrimLeft(name[2:], " -:|")
-		if rest != name[2:] {
-			return strings.TrimSpace(rest), name[:2]
+	idx := strings.Index(name, ":")
+	if idx >= 2 && idx <= 3 {
+		prefix := strings.TrimSpace(name[:idx])
+		isLang := len(prefix) >= 2 && len(prefix) <= 3
+		for _, c := range prefix {
+			if c < 'A' || c > 'Z' {
+				isLang = false
+				break
+			}
+		}
+		if isLang {
+			return strings.TrimSpace(name[idx+1:]), prefix
 		}
 	}
 	return name, ""
