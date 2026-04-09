@@ -3939,7 +3939,10 @@
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
           startLevel: -1,
-          debug: false
+          debug: false,
+          fragLoadingTimeOut: 30000,
+          manifestLoadingTimeOut: 30000,
+          levelLoadingTimeOut: 30000
         });
         hlsInstance = hlsPlayer;
         hlsPlayer.loadSource(streamSrc);
