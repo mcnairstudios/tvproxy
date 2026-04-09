@@ -5236,10 +5236,11 @@
       update: true,
       columns: [
         { key: 'name', label: 'Name' },
+        { key: 'probe_mode', label: 'Probe', render: item => ({auto:'Auto',declared:'Declared',none:'None'})[item.probe_mode] || item.probe_mode || 'Declared' },
         { key: 'transport', label: 'Transport', render: item => ({http:'HTTP',rtsp:'RTSP',file:'File'})[item.transport] || item.transport },
-        { key: 'video_codec', label: 'Video', render: item => ({h264:'H.264',hevc:'HEVC',mpeg2video:'MPEG-2',av1:'AV1'})[item.video_codec] || item.video_codec || 'Unknown' },
-        { key: 'audio_codec', label: 'Audio', render: item => ({aac:'AAC',aac_latm:'AAC-LATM',mp2:'MP2',ac3:'AC3',eac3:'E-AC3',opus:'Opus'})[item.audio_codec] || item.audio_codec || 'Unknown' },
-        { key: 'container', label: 'Container', render: item => ({mpegts:'MPEG-TS',mp4:'MP4',matroska:'MKV',avi:'AVI'})[item.container] || item.container || 'Unknown' },
+        { key: 'video_codec', label: 'Video', render: item => item.video_codec ? ({h264:'H.264',hevc:'HEVC',mpeg2video:'MPEG-2',av1:'AV1'})[item.video_codec] || item.video_codec : 'Auto' },
+        { key: 'audio_codec', label: 'Audio', render: item => item.audio_codec ? ({aac:'AAC',aac_latm:'AAC-LATM',mp2:'MP2',ac3:'AC3',eac3:'E-AC3',opus:'Opus'})[item.audio_codec] || item.audio_codec : 'Auto' },
+        { key: 'container', label: 'Container', render: item => item.container ? ({mpegts:'MPEG-TS',mp4:'MP4',matroska:'MKV',avi:'AVI'})[item.container] || item.container : 'Auto' },
         { key: 'deinterlace', label: 'Deinterlace', render: item => item.deinterlace ? h('span', { className: 'badge badge-info' }, 'Yes') : '' },
       ],
       fields: [
