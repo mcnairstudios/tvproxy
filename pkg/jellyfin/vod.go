@@ -282,17 +282,17 @@ func (s *Server) listSeasons(w http.ResponseWriter, r *http.Request) {
 	var items []BaseItemDto
 	for num := range seasonSet {
 		items = append(items, BaseItemDto{
-			Name:         fmt.Sprintf("Season %d", num),
-			ServerID:     s.serverID,
-			ID:           fmt.Sprintf("%s_s%d", targetID, num),
-			Type:         "Season",
-			SeriesName:   name,
-			SeriesID:     targetID,
-			IndexNumber:  num,
-			IsFolder:     true,
-			ChildCount:   seasonEpCount[num],
-			ImageTags:    map[string]string{},
-			UserData:     &UserItemData{Key: fmt.Sprintf("%s_s%d", targetID, num)},
+			Name:        fmt.Sprintf("Season %d", num),
+			ServerID:    s.serverID,
+			ID:          fmt.Sprintf("%s_s%d", targetID, num),
+			Type:        "Season",
+			SeriesName:  name,
+			SeriesID:    targetID,
+			IndexNumber: num,
+			IsFolder:    true,
+			ChildCount:  seasonEpCount[num],
+			ImageTags:   map[string]string{},
+			UserData:    &UserItemData{Key: fmt.Sprintf("%s_s%d", targetID, num)},
 		})
 	}
 

@@ -27,7 +27,6 @@ func (h *M3UAccountHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
 	respondJSON(w, http.StatusOK, accounts)
 }
 
@@ -60,7 +59,7 @@ func (h *M3UAccountHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Type:            req.Type,
 		Username:        req.Username,
 		Password:        req.Password,
-		MaxStreams:       req.MaxStreams,
+		MaxStreams:      req.MaxStreams,
 		IsEnabled:       req.IsEnabled,
 		UseWireGuard:    req.UseWireGuard,
 		RefreshInterval: req.RefreshInterval,

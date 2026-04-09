@@ -12,9 +12,9 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
-	"github.com/gavinmcnair/tvproxy/pkg/mtls"
 	"github.com/gavinmcnair/tvproxy/pkg/m3u"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
+	"github.com/gavinmcnair/tvproxy/pkg/mtls"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/xtream"
 )
@@ -48,12 +48,12 @@ func NewM3UService(
 		m3uAccountStore: m3uAccountStore,
 		streamStore:     streamStore,
 		channelStore:    channelStore,
-		logoService:    logoService,
-		config:         cfg,
-		configDir:      configDir,
-		httpClient:     httpClient,
-		log:            log.With().Str("service", "m3u").Logger(),
-		StatusTracker:  NewStatusTracker(),
+		logoService:     logoService,
+		config:          cfg,
+		configDir:       configDir,
+		httpClient:      httpClient,
+		log:             log.With().Str("service", "m3u").Logger(),
+		StatusTracker:   NewStatusTracker(),
 	}
 }
 
@@ -225,24 +225,24 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 		id := deterministicStreamID(hash)
 		keepIDs = append(keepIDs, id)
 		s := models.Stream{
-			ID:           id,
-			M3UAccountID: account.ID,
-			Name:         entry.Name,
-			URL:          entry.URL,
-			Group:        entry.Group,
-			Logo:         entry.Logo,
-			TvgID:        entry.TvgID,
-			TvgName:      entry.TvgName,
-			ContentHash:  hash,
-			UseWireGuard: account.UseWireGuard,
-			IsActive:     true,
+			ID:            id,
+			M3UAccountID:  account.ID,
+			Name:          entry.Name,
+			URL:           entry.URL,
+			Group:         entry.Group,
+			Logo:          entry.Logo,
+			TvgID:         entry.TvgID,
+			TvgName:       entry.TvgName,
+			ContentHash:   hash,
+			UseWireGuard:  account.UseWireGuard,
+			IsActive:      true,
 			VODType:       entry.TVPType,
 			VODSeries:     entry.TVPSeries,
 			VODCollection: entry.TVPCollection,
-			VODVCodec:    entry.TVPVCodec,
-			VODACodec:    entry.TVPACodec,
-			VODRes:       entry.TVPRes,
-			VODAudio:     entry.TVPAudio,
+			VODVCodec:     entry.TVPVCodec,
+			VODACodec:     entry.TVPACodec,
+			VODRes:        entry.TVPRes,
+			VODAudio:      entry.TVPAudio,
 		}
 		if entry.TVPSeason != "" {
 			fmt.Sscanf(entry.TVPSeason, "%d", &s.VODSeason)
@@ -349,7 +349,6 @@ func (s *M3UService) RefreshAllAccounts(ctx context.Context) error {
 	}
 	return nil
 }
-
 
 var streamNamespace = uuid.MustParse("f47ac10b-58cc-4372-a567-0e02b2c3d479")
 
