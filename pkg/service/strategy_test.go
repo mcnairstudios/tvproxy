@@ -244,6 +244,35 @@ func TestResolveSessionStrategy_LiveWithSourceProfile(t *testing.T) {
 	}
 }
 
+func TestResolveSessionStrategy_SkipProbe(t *testing.T) {
+	in := StrategyInput{
+		StreamURL: "http://provider.com/live/123.ts",
+		StreamID:  "test-skip",
+		SourceProfile: &models.SourceProfile{
+			ProbeMode:  "none",
+			VideoCodec: "h264",
+			AudioCodec: "aac",
+		},
+	}
+	out := StrategyOutput{Delivery: "hls", Container: "mp4"}
+	s := resolveSessionStrategy(in, out, "/tmp")
+	if !s.SkipProbe {
+		t.Error("SkipProbe should be true for probe_mode=none")
+	}
+
+	in.SourceProfile.ProbeMode = "declared"
+	s = resolveSessionStrategy(in, out, "/tmp")
+	if !s.SkipProbe {
+		t.Error("SkipProbe should be true for probe_mode=declared")
+	}
+
+	in.SourceProfile.ProbeMode = "auto"
+	s = resolveSessionStrategy(in, out, "/tmp")
+	if s.SkipProbe {
+		t.Error("SkipProbe should be false for probe_mode=auto")
+	}
+}
+
 func TestIsLocalURL(t *testing.T) {
 	tests := []struct {
 		url  string
