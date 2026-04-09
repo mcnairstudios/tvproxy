@@ -1588,6 +1588,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  # ── TMDB ───────────────────────────────────────────────────────────
+  /api/tmdb/rematch:
+    post:
+      summary: Rematch a stream to a different TMDB entry
+      tags: [TMDB]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stream_id, tmdb_id, media_type]
+              properties:
+                stream_id:
+                  type: string
+                  format: uuid
+                tmdb_id:
+                  type: integer
+                media_type:
+                  type: string
+                  enum: [movie, series]
+      responses:
+        "200":
+          description: Rematched successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   # ── Activity ────────────────────────────────────────────────────────
   /api/activity:
     get:
@@ -2493,6 +2523,13 @@ components:
           description: Seconds, 0 = use default
         last_error:
           type: string
+        use_wireguard:
+          type: boolean
+          description: Route stream playback through WireGuard tunnel
+        tls_enrolled:
+          type: boolean
+          description: Whether mTLS enrollment with tvproxy-streams completed
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -2522,6 +2559,12 @@ components:
         refresh_interval:
           type: integer
           description: Seconds, 0 = use default
+        use_wireguard:
+          type: boolean
+          description: Route stream playback through WireGuard tunnel
+        enrollment_token:
+          type: string
+          description: One-time token for tvproxy-streams mTLS enrollment (write-only)
 
     Stream:
       type: object
@@ -2546,6 +2589,9 @@ components:
           type: string
         content_hash:
           type: string
+        tmdb_id:
+          type: integer
+          description: TMDB numeric ID (0 if unmatched)
         is_active:
           type: boolean
         created_at:
