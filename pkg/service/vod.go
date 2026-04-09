@@ -353,6 +353,7 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 		Command:          sa.Command,
 		Args:             sa.Args,
 		OutputDir:        s.config.VODOutputDir,
+		MetadataOnly:     sa.Delivery == "hls",
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", 0, false, err
