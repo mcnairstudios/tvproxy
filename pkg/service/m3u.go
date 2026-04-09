@@ -463,6 +463,12 @@ func (s *M3UService) syncXtreamSeries(account *models.M3UAccount, seriesList []x
 		}
 		s.xtreamCache.SetSeries(sr.SeriesID, sm)
 
+		cleanName, lang := extractLanguage(sr.Name)
+		if lang == "" {
+			lang = extractLangFromCategory(sr.CategoryName)
+		}
+
+		var episodeStreams []models.Stream
 		for seasonNum, episodes := range info.Seasons {
 			var season int
 			fmt.Sscanf(seasonNum, "%d", &season)
@@ -476,6 +482,30 @@ func (s *M3UService) syncXtreamSeries(account *models.M3UAccount, seriesList []x
 				if ep.Info.Season > 0 {
 					epSeason = ep.Info.Season
 				}
+				streamURL := client.GetSeriesStreamURL(epID, ep.ContainerExt)
+				hash := computeContentHash(streamURL)
+				id := deterministicStreamID(hash)
+
+				episodeStreams = append(episodeStreams, models.Stream{
+					ID:           id,
+					M3UAccountID: account.ID,
+					Name:         ep.Title,
+					URL:          streamURL,
+					Group:        sr.CategoryName,
+					Logo:         sr.Cover,
+					ContentHash:  hash,
+					VODType:      "series",
+					VODSeries:    cleanName,
+					VODSeason:    epSeason,
+					VODEpisode:   ep.EpisodeNum,
+					VODDuration:  float64(ep.Info.DurationSecs),
+					CacheType:    "xtream",
+					CacheKey:     epID,
+					Language:     lang,
+					UseWireGuard: account.UseWireGuard,
+					IsActive:     true,
+				})
+
 				s.xtreamCache.SetEpisode(epID, &xtream.EpisodeMeta{
 					ID:         epID,
 					EpisodeNum: ep.EpisodeNum,
@@ -488,15 +518,21 @@ func (s *M3UService) syncXtreamSeries(account *models.M3UAccount, seriesList []x
 			}
 		}
 
+		if len(episodeStreams) > 0 {
+			s.streamStore.BulkUpsert(ctx, episodeStreams)
+		}
+
 		synced++
 		if synced%50 == 0 {
 			s.xtreamCache.Save()
+			s.streamStore.Save()
 			s.log.Info().Int("synced", synced).Int("total", len(seriesList)).Msg("xtream series sync progress")
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	s.xtreamCache.Save()
+	s.streamStore.Save()
 	s.log.Info().Int("synced", synced).Msg("xtream series sync complete")
 }
 
