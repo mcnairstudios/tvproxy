@@ -17,20 +17,20 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
-	"github.com/gavinmcnair/tvproxy/pkg/hls"
 	"github.com/gavinmcnair/tvproxy/pkg/database"
 	"github.com/gavinmcnair/tvproxy/pkg/defaults"
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/handler"
+	"github.com/gavinmcnair/tvproxy/pkg/hls"
+	"github.com/gavinmcnair/tvproxy/pkg/jellyfin"
 	"github.com/gavinmcnair/tvproxy/pkg/logocache"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
-	"github.com/gavinmcnair/tvproxy/pkg/jellyfin"
-	"github.com/gavinmcnair/tvproxy/pkg/tmdb"
-	"github.com/gavinmcnair/tvproxy/pkg/xtream"
 	"github.com/gavinmcnair/tvproxy/pkg/session"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
+	"github.com/gavinmcnair/tvproxy/pkg/tmdb"
 	"github.com/gavinmcnair/tvproxy/pkg/worker"
+	"github.com/gavinmcnair/tvproxy/pkg/xtream"
 	"github.com/gavinmcnair/tvproxy/web"
 )
 
@@ -240,32 +240,32 @@ func main() {
 	)
 	tmdbHandler := handler.NewTMDBHandler(tmdbClient, streamStore)
 	registerRoutes(r, routeHandlers{
-		auth:         handler.NewAuthHandler(authService),
-		user:         handler.NewUserHandler(authService),
-		m3uAccount:   handler.NewM3UAccountHandler(m3uService, dataDir),
-		satip:        handler.NewSatIPHandler(satipService),
-		stream:       handler.NewStreamHandler(streamStore, streamStore, logoService, tmdbClient, xtreamCache),
-		channel:      handler.NewChannelHandler(channelService, logoService),
-		channelGroup: handler.NewChannelGroupHandler(channelService),
-		logo:         handler.NewLogoHandler(logoService),
-		profile:      handler.NewStreamProfileHandler(profileStore),
-		epgSource:    handler.NewEPGSourceHandler(epgService),
-		epgData:      handler.NewEPGDataHandler(epgStore, epgStore),
-		hdhr:         handler.NewHDHRHandler(hdhrService, proxyService, cfg),
-		output:       handler.NewOutputHandler(outputService),
-		proxy:        handler.NewProxyHandler(proxyService, settingsService, log),
-		vod:          handler.NewVODHandler(vodService, clientService, hlsManager, log),
-		activity:     handler.NewActivityHandler(activityService),
-		favorite:     handler.NewFavoriteHandler(favoriteStore),
-		settings:     handler.NewSettingsHandler(settingsService, exportService, dataResetter, authService, streamStore, epgStore),
-		client:       handler.NewClientHandler(clientService),
-		scheduler:    handler.NewSchedulerHandler(schedulerService, log),
-		dlna:         handler.NewDLNAHandler(dlnaService, authService, settingsService, cfg, log),
+		auth:           handler.NewAuthHandler(authService),
+		user:           handler.NewUserHandler(authService),
+		m3uAccount:     handler.NewM3UAccountHandler(m3uService, dataDir),
+		satip:          handler.NewSatIPHandler(satipService),
+		stream:         handler.NewStreamHandler(streamStore, streamStore, logoService, tmdbClient, xtreamCache),
+		channel:        handler.NewChannelHandler(channelService, logoService),
+		channelGroup:   handler.NewChannelGroupHandler(channelService),
+		logo:           handler.NewLogoHandler(logoService),
+		profile:        handler.NewStreamProfileHandler(profileStore),
+		epgSource:      handler.NewEPGSourceHandler(epgService),
+		epgData:        handler.NewEPGDataHandler(epgStore, epgStore),
+		hdhr:           handler.NewHDHRHandler(hdhrService, proxyService, cfg),
+		output:         handler.NewOutputHandler(outputService),
+		proxy:          handler.NewProxyHandler(proxyService, settingsService, log),
+		vod:            handler.NewVODHandler(vodService, clientService, hlsManager, log),
+		activity:       handler.NewActivityHandler(activityService),
+		favorite:       handler.NewFavoriteHandler(favoriteStore),
+		settings:       handler.NewSettingsHandler(settingsService, exportService, dataResetter, authService, streamStore, epgStore),
+		client:         handler.NewClientHandler(clientService),
+		scheduler:      handler.NewSchedulerHandler(schedulerService, log),
+		dlna:           handler.NewDLNAHandler(dlnaService, authService, settingsService, cfg, log),
 		wireguard:      handler.NewWireGuardHandler(wgService, log),
 		wireguardMulti: handler.NewMultiWireGuardHandler(wgMultiService, wgProfileStore, log),
-		tmdb:         tmdbHandler,
-		logoCache:    logoCache,
-		log:          log,
+		tmdb:           tmdbHandler,
+		logoCache:      logoCache,
+		log:            log,
 	}, authMW)
 
 	distFS, err := fs.Sub(web.Assets, "dist")
