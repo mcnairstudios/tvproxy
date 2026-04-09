@@ -6338,9 +6338,11 @@
           getName: function(di) { return di.show.name; },
           getPoster: function(di) { var p = ''; di.show.episodes.some(function(ep) { if (ep.poster_url) { p = ep.poster_url; return true; } return false; }); return p; },
           getBadges: function(di) {
-            var b = []; var sc = Object.keys(di.show.seasons).length; var ec = di.show.episodes.length;
-            if (sc > 0) b.push(sc + ' season' + (sc > 1 ? 's' : ''));
-            b.push(ec + ' episode' + (ec > 1 ? 's' : ''));
+            var b = [];
+            var ep0 = di.show.episodes[0];
+            if (ep0 && ep0.year) b.push(ep0.year);
+            if (ep0 && ep0.rating > 0) b.push('\u2605 ' + ep0.rating.toFixed(1));
+            if (ep0 && ep0.certification) b.push(ep0.certification);
             return b;
           },
           getGenres: function(di) { var g = []; di.show.episodes.forEach(function(ep) { (ep.genres || []).forEach(function(genre) { if (g.indexOf(genre) === -1) g.push(genre); }); }); return g; },
