@@ -184,6 +184,18 @@ func (h *M3UAccountHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusAccepted, map[string]string{"message": "refresh started"})
 }
 
+func (h *M3UAccountHandler) HardRefresh(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	go func() {
+		if err := h.m3uService.HardRefreshAccount(context.Background(), id); err != nil {
+			h.m3uService.Log().Error().Err(err).Str("account_id", id).Msg("background m3u hard refresh failed")
+		}
+	}()
+
+	respondJSON(w, http.StatusAccepted, map[string]string{"message": "hard refresh started"})
+}
+
 func (h *M3UAccountHandler) RefreshStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	respondJSON(w, http.StatusOK, h.m3uService.Get(id))

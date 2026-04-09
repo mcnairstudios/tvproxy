@@ -116,6 +116,7 @@ func (s *StreamStoreImpl) BulkUpsert(_ context.Context, streams []models.Stream)
 			st.CreatedAt = existing.CreatedAt
 			if existing.TMDBID > 0 {
 				st.TMDBID = existing.TMDBID
+				st.TMDBManual = existing.TMDBManual
 			}
 		} else {
 			st.CreatedAt = now
@@ -295,6 +296,32 @@ func (s *StreamStoreImpl) UpdateTMDBID(_ context.Context, id string, tmdbID int)
 	st.TMDBID = tmdbID
 	st.UpdatedAt = time.Now()
 	s.items[id] = st
+	return nil
+}
+
+func (s *StreamStoreImpl) SetTMDBManual(_ context.Context, id string, tmdbID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.items[id]
+	if !ok {
+		return fmt.Errorf("stream not found: %s", id)
+	}
+	st.TMDBID = tmdbID
+	st.TMDBManual = true
+	st.UpdatedAt = time.Now()
+	s.items[id] = st
+	return nil
+}
+
+func (s *StreamStoreImpl) ClearAutoTMDBByAccountID(_ context.Context, accountID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, st := range s.items {
+		if st.M3UAccountID == accountID && st.TMDBID > 0 && !st.TMDBManual {
+			st.TMDBID = 0
+			s.items[id] = st
+		}
+	}
 	return nil
 }
 

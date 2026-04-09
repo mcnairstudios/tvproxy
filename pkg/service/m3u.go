@@ -104,6 +104,20 @@ func (s *M3UService) DeleteAccount(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *M3UService) HardRefreshAccount(ctx context.Context, accountID string) error {
+	s.streamStore.ClearAutoTMDBByAccountID(ctx, accountID)
+	s.streamStore.Save()
+
+	account, err := s.m3uAccountStore.GetByID(ctx, accountID)
+	if err != nil {
+		return fmt.Errorf("getting account: %w", err)
+	}
+	account.ETag = ""
+	s.m3uAccountStore.Update(ctx, account)
+
+	return s.RefreshAccount(ctx, accountID)
+}
+
 func (s *M3UService) RefreshAccount(ctx context.Context, accountID string) error {
 	account, err := s.m3uAccountStore.GetByID(ctx, accountID)
 	if err != nil {

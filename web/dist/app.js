@@ -2456,7 +2456,24 @@
               btn.textContent = actions[a].label;
             }
             btn.onclick = actions[a].handler;
-            actionsTd.appendChild(btn);
+            if (actions[a].hoverReveal) {
+              var wrap = h('div', { style: 'display:inline-flex;align-items:center;position:relative;' });
+              var hr = actions[a].hoverReveal;
+              var revealBtn = document.createElement('button');
+              revealBtn.className = 'btn btn-sm';
+              revealBtn.textContent = hr.label;
+              revealBtn.title = hr.label;
+              revealBtn.style.cssText = 'display:none;margin-left:2px;font-size:10px;padding:2px 8px;border-radius:4px;border:none;cursor:pointer;' + (hr.style || '');
+              revealBtn.onclick = hr.handler;
+              var hoverTimer = null;
+              wrap.onmouseenter = function() { hoverTimer = setTimeout(function() { revealBtn.style.display = ''; }, hr.delay || 2000); };
+              wrap.onmouseleave = function() { if (hoverTimer) clearTimeout(hoverTimer); revealBtn.style.display = 'none'; };
+              wrap.appendChild(btn);
+              wrap.appendChild(revealBtn);
+              actionsTd.appendChild(wrap);
+            } else {
+              actionsTd.appendChild(btn);
+            }
           }
         }
         if (config.delete !== false && (typeof config.delete !== 'function' || config.delete(item))) {
@@ -4460,36 +4477,50 @@
         { key: 'use_wireguard', label: 'Route via WireGuard', type: 'checkbox' },
         { key: 'enrollment_token', label: 'Enrollment Token (tvproxy-streams)', placeholder: 'TVP-ENROLL-...', help: 'One-time token from tvproxy-streams for mTLS enrollment' },
       ],
-      rowActions: (item, reload) => [
+      rowActions: (item, reload) => {
+        function pollRefresh() {
+          streamsCache.invalidate();
+          for (var k in streamGroupsCache) delete streamGroupsCache[k];
+          rebuildStreamNav();
+          var pollCount = 0;
+          var pollTimer = setInterval(async () => {
+            try {
+              var status = await api.get('/api/m3u/accounts/' + item.id + '/status');
+              if (status.state === 'done' || status.state === 'error') {
+                clearInterval(pollTimer);
+                reload();
+                if (status.state === 'done') toast.success(item.name + ': ' + status.message);
+                else toast.error(item.name + ': ' + status.message);
+              }
+            } catch (e) {}
+            if (++pollCount > 60) clearInterval(pollTimer);
+          }, 2000);
+        }
+        return [
         {
           label: 'Refresh',
           icon: '\u21BB',
           handler: async () => {
             try {
               await api.post('/api/m3u/accounts/' + item.id + '/refresh');
-              streamsCache.invalidate();
-              for (var k in streamGroupsCache) delete streamGroupsCache[k];
-              rebuildStreamNav();
               toast.success('Refresh started for ' + item.name);
-              var pollCount = 0;
-              var pollTimer = setInterval(async () => {
-                try {
-                  var status = await api.get('/api/m3u/accounts/' + item.id + '/status');
-                  if (status.state === 'done' || status.state === 'error') {
-                    clearInterval(pollTimer);
-                    reload();
-                    if (status.state === 'done') toast.success(item.name + ': ' + status.message);
-                    else toast.error(item.name + ': ' + status.message);
-                  }
-                } catch (e) {}
-                if (++pollCount > 60) clearInterval(pollTimer);
-              }, 2000);
-            } catch (err) {
-              toast.error(err.message);
-            }
+              pollRefresh();
+            } catch (err) { toast.error(err.message); }
+          },
+          hoverReveal: {
+            label: 'Hard',
+            delay: 2000,
+            style: 'background:#d97706;color:#fff;',
+            handler: async () => {
+              try {
+                await api.post('/api/m3u/accounts/' + item.id + '/hard-refresh');
+                toast.success('Hard refresh started for ' + item.name);
+                pollRefresh();
+              } catch (err) { toast.error(err.message); }
+            },
           },
         },
-      ],
+      ];},
     }),
 
     'satip-sources': buildCrudPage({

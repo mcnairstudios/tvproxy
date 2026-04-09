@@ -98,7 +98,7 @@ func (h *TMDBHandler) Rematch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.streamStore.UpdateTMDBID(r.Context(), req.StreamID, req.TMDBID); err != nil {
+	if err := h.streamStore.SetTMDBManual(r.Context(), req.StreamID, req.TMDBID); err != nil {
 		respondError(w, http.StatusNotFound, "stream not found")
 		return
 	}

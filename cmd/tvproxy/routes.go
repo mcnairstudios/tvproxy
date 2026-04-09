@@ -114,6 +114,7 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 				r.Put("/{id}", h.m3uAccount.Update)
 				r.Delete("/{id}", h.m3uAccount.Delete)
 				r.Post("/{id}/refresh", h.m3uAccount.Refresh)
+				r.Post("/{id}/hard-refresh", h.m3uAccount.HardRefresh)
 			})
 		})
 
