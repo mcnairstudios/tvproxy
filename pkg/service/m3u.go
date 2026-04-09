@@ -240,15 +240,29 @@ func (s *M3UService) refreshXtreamAccount(ctx context.Context, account *models.M
 		}
 	}
 
-	s.Set(account.ID, RefreshStatus{State: "running", Message: fmt.Sprintf("Fetching %d series...", len(seriesList))})
-	for idx, sr := range seriesList {
-		if idx%100 == 0 {
-			s.Set(account.ID, RefreshStatus{State: "running", Message: fmt.Sprintf("Series %d/%d...", idx, len(seriesList)), Total: len(seriesList), Progress: idx})
-		}
-		info, err := client.GetSeriesInfo(ctx, sr.SeriesID)
-		if err != nil {
+	for _, sr := range seriesList {
+		hash := computeContentHash(fmt.Sprintf("xtream-series-%d", sr.SeriesID))
+		if _, dup := seen[hash]; dup {
 			continue
 		}
+		seen[hash] = struct{}{}
+		id := deterministicStreamID(hash)
+		keepIDs = append(keepIDs, id)
+		streams = append(streams, models.Stream{
+			ID:           id,
+			M3UAccountID: account.ID,
+			Name:         sr.Name,
+			URL:          fmt.Sprintf("%s/series/%s/%s", account.URL, account.Username, account.Password),
+			Group:        sr.CategoryName,
+			Logo:         sr.Cover,
+			ContentHash:  hash,
+			VODType:      "series",
+			VODSeries:    sr.Name,
+			CacheType:    "xtream",
+			CacheKey:     sr.SeriesID,
+			UseWireGuard: account.UseWireGuard,
+			IsActive:     true,
+		})
 
 		if s.xtreamCache != nil {
 			sm := &xtream.SeriesMeta{
@@ -267,87 +281,7 @@ func (s *M3UService) refreshXtreamAccount(ctx context.Context, account *models.M
 			if len(sr.BackdropPath) > 0 {
 				sm.BackdropURL = sr.BackdropPath[0]
 			}
-			if info.Seasons != nil {
-				for _, rawSeason := range info.RawSeasons {
-					sm.Seasons = append(sm.Seasons, xtream.SeasonMeta{
-						SeasonNumber: rawSeason.SeasonNumber,
-						Name:         rawSeason.Name,
-						AirDate:      rawSeason.AirDate,
-						EpisodeCount: rawSeason.EpisodeCount,
-						CoverURL:     rawSeason.Cover,
-					})
-				}
-			}
 			s.xtreamCache.SetSeries(sr.SeriesID, sm)
-		}
-
-		for seasonNum, episodes := range info.Seasons {
-			var season int
-			fmt.Sscanf(seasonNum, "%d", &season)
-			for _, ep := range episodes {
-				var epID int
-				fmt.Sscanf(ep.ID, "%d", &epID)
-				if epID == 0 {
-					epID = ep.EpisodeNum
-				}
-				streamURL := client.GetSeriesStreamURL(epID, ep.ContainerExt)
-				hash := computeContentHash(streamURL)
-				if _, dup := seen[hash]; dup {
-					continue
-				}
-				seen[hash] = struct{}{}
-				id := deterministicStreamID(hash)
-				keepIDs = append(keepIDs, id)
-
-				var durSecs int
-				if ep.Info.DurationSecs > 0 {
-					durSecs = ep.Info.DurationSecs
-				}
-				epSeason := season
-				if ep.Info.Season > 0 {
-					epSeason = ep.Info.Season
-				}
-
-				streams = append(streams, models.Stream{
-					ID:           id,
-					M3UAccountID: account.ID,
-					Name:         ep.Title,
-					URL:          streamURL,
-					Group:        sr.CategoryName,
-					Logo:         sr.Cover,
-					ContentHash:  hash,
-					VODType:      "series",
-					VODSeries:    sr.Name,
-					VODSeason:    epSeason,
-					VODEpisode:   ep.EpisodeNum,
-					VODDuration:  float64(durSecs),
-					CacheType:    "xtream",
-					CacheKey:     epID,
-					UseWireGuard: account.UseWireGuard,
-					IsActive:     true,
-				})
-
-				if s.xtreamCache != nil {
-					em := &xtream.EpisodeMeta{
-						ID:         epID,
-						EpisodeNum: ep.EpisodeNum,
-						Season:     epSeason,
-						Title:      ep.Title,
-						Duration:   durSecs,
-						Container:  ep.ContainerExt,
-						CoverURL:   ep.Info.MovieImage,
-					}
-					if ep.Info.Video.CodecName != "" {
-						em.VideoCodec = ep.Info.Video.CodecName
-						em.Width = ep.Info.Video.Width
-						em.Height = ep.Info.Video.Height
-					}
-					if ep.Info.Audio.CodecName != "" {
-						em.AudioCodec = ep.Info.Audio.CodecName
-					}
-					s.xtreamCache.SetEpisode(epID, em)
-				}
-			}
 		}
 	}
 
