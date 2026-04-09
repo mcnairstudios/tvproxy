@@ -411,6 +411,10 @@ func (c *Client) resolveSeriesFromCache(searchResult map[string]any) int {
 	if !ok {
 		return tmdbID
 	}
+	s.Certification = extractCertification(detailCached, "GB", "US")
+	if s.Certification != "" {
+		c.meta.SetSeries(tmdbID, s)
+	}
 	detailMap, ok := detailCached.(map[string]any)
 	if !ok {
 		return tmdbID
