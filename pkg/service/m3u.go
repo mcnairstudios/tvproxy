@@ -64,21 +64,30 @@ func (s *M3UService) Log() *zerolog.Logger { return &s.log }
 func (s *M3UService) SetXtreamCache(c *xtream.Cache) { s.xtreamCache = c }
 
 func (s *M3UService) ResumeSeriesSync(ctx context.Context) {
+	s.log.Info().Msg("resume series sync: starting")
 	if s.xtreamCache == nil {
+		s.log.Info().Msg("resume series sync: no xtream cache, skipping")
 		return
 	}
 	accounts, err := s.m3uAccountStore.List(ctx)
 	if err != nil {
+		s.log.Warn().Err(err).Msg("resume series sync: failed to list accounts")
 		return
 	}
 	for _, acct := range accounts {
 		if acct.Type != "xtream" || !acct.IsEnabled {
 			continue
 		}
+		s.log.Info().Str("account", acct.Name).Msg("checking series sync status")
 		xtreamTimeout := s.config.Settings.Network.XtreamAPITimeout
+		if xtreamTimeout <= 0 {
+			xtreamTimeout = 30 * time.Second
+		}
 		client := xtream.NewClient(acct.URL, acct.Username, acct.Password, s.config.UserAgent, s.config.BypassHeader, s.config.BypassSecret, xtreamTimeout, s.httpClient.Transport)
 
-		seriesList, err := client.GetSeries(ctx)
+		fetchCtx, fetchCancel := context.WithTimeout(ctx, 60*time.Second)
+		seriesList, err := client.GetSeries(fetchCtx)
+		fetchCancel()
 		if err != nil {
 			s.log.Warn().Err(err).Str("account", acct.Name).Msg("failed to fetch series list for sync resume")
 			continue
