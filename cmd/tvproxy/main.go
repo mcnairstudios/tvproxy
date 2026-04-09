@@ -333,14 +333,14 @@ func main() {
 	}
 
 	syncTMDB := func() {
-		streams, err := streamStore.List(ctx)
+		summaries, err := streamStore.ListSummaries(ctx)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to list streams for TMDB sync")
 			return
 		}
 		var items []tmdb.VODItem
 		seen := make(map[string]bool)
-		for _, s := range streams {
+		for _, s := range summaries {
 			if s.VODType == "" {
 				continue
 			}
