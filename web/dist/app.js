@@ -5655,7 +5655,7 @@
           var wrap = h('div', { style: 'position:relative;display:inline-block;' });
           var styles = pillGroups[group] || pillGroups.genre;
           var trigger = h('button', { style: styles.off }, label + ' \u25BE');
-          var popover = h('div', { style: 'display:none;position:absolute;top:calc(100% + 4px);left:0;background:#1a1d23;border:1px solid var(--border);border-radius:12px;padding:8px;z-index:50;min-width:200px;max-width:360px;display:none;flex-wrap:wrap;gap:6px;box-shadow:0 8px 30px rgba(0,0,0,0.4);' });
+          var popover = h('div', { style: 'position:absolute;top:calc(100% + 4px);left:0;background:#1a1d23;border:1px solid var(--border);border-radius:12px;padding:8px;z-index:50;min-width:200px;max-width:360px;flex-wrap:wrap;gap:6px;box-shadow:0 8px 30px rgba(0,0,0,0.4);display:none;' });
           var activeCount = 0;
           options.forEach(function(opt) {
             var key = keyPrefix + opt;
@@ -6036,6 +6036,7 @@
 
         var tvPillBase = 'padding:5px 14px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:500;transition:all 0.15s;';
         var tvPillGroups = {
+          age:        { off: tvPillBase + 'border:1px solid rgba(168,85,247,0.3);background:rgba(168,85,247,0.08);color:#a855f7;', on: tvPillBase + 'border:1px solid #a855f7;background:#a855f7;color:#fff;' },
           collection: { off: tvPillBase + 'border:1px solid rgba(234,179,8,0.3);background:rgba(234,179,8,0.08);color:#eab308;', on: tvPillBase + 'border:1px solid #eab308;background:#eab308;color:#000;' },
           decade:     { off: tvPillBase + 'border:1px solid rgba(34,197,94,0.3);background:rgba(34,197,94,0.08);color:#22c55e;', on: tvPillBase + 'border:1px solid #22c55e;background:#22c55e;color:#fff;' },
           genre:      { off: tvPillBase + 'border:1px solid rgba(59,130,246,0.3);background:rgba(59,130,246,0.08);color:#3b82f6;', on: tvPillBase + 'border:1px solid #3b82f6;background:#3b82f6;color:#fff;' },
@@ -6059,14 +6060,14 @@
         tvFilterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
 
         makeTvPill('\u2B50 Favorites', 'fav:yes', tvFilterBar, 'collection');
-        makeTvPill('Kids', 'kids', null, 'collection');
-        makeTvPill('15+', 'adult', null, 'collection');
+        makeTvPill('Kids', 'kids', null, 'age');
+        makeTvPill('15+', 'adult', null, 'age');
 
         function makeTvPillDropdown(label, options, keyPrefix, group) {
           var wrap = h('div', { style: 'position:relative;display:inline-block;' });
           var styles = tvPillGroups[group] || tvPillGroups.genre;
           var trigger = h('button', { style: styles.off }, label + ' \u25BE');
-          var popover = h('div', { style: 'display:none;position:absolute;top:calc(100% + 4px);left:0;background:#1a1d23;border:1px solid var(--border);border-radius:12px;padding:8px;z-index:50;min-width:200px;max-width:360px;display:none;flex-wrap:wrap;gap:6px;box-shadow:0 8px 30px rgba(0,0,0,0.4);' });
+          var popover = h('div', { style: 'position:absolute;top:calc(100% + 4px);left:0;background:#1a1d23;border:1px solid var(--border);border-radius:12px;padding:8px;z-index:50;min-width:200px;max-width:360px;flex-wrap:wrap;gap:6px;box-shadow:0 8px 30px rgba(0,0,0,0.4);display:none;' });
           var activeCount = 0;
           options.forEach(function(opt) {
             var key = keyPrefix + opt;
