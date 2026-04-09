@@ -53,14 +53,15 @@ type StartOpts struct {
 }
 
 type Manager struct {
-	sessions    map[string]*Session
-	config      *config.Config
-	httpClient  *http.Client
-	wgClient    *http.Client
-	probeCache  store.ProbeCache
-	onCleanup   func(channelID string)
-	log         zerolog.Logger
-	mu          sync.RWMutex
+	sessions      map[string]*Session
+	config        *config.Config
+	httpClient    *http.Client
+	wgClient      *http.Client
+	wgProxyMgr    *WGProxyManager
+	probeCache    store.ProbeCache
+	onCleanup     func(channelID string)
+	log           zerolog.Logger
+	mu            sync.RWMutex
 }
 
 func (m *Manager) clientForSession(s *Session) *http.Client {
@@ -68,6 +69,10 @@ func (m *Manager) clientForSession(s *Session) *http.Client {
 		return m.wgClient
 	}
 	return m.httpClient
+}
+
+func (m *Manager) WGProxy(profileID string, wgClient *http.Client, cfg *config.Config, log zerolog.Logger) (*WGProxy, error) {
+	return m.wgProxyMgr.GetOrCreate(profileID, wgClient, cfg, log)
 }
 
 func (m *Manager) SetOnCleanup(fn func(channelID string)) {
@@ -79,12 +84,13 @@ func NewManager(cfg *config.Config, httpClient *http.Client, wgClient *http.Clie
 		httpClient = http.DefaultClient
 	}
 	return &Manager{
-		sessions:   make(map[string]*Session),
-		config:     cfg,
-		httpClient: httpClient,
-		wgClient:   wgClient,
-		probeCache: probeCache,
-		log:        log.With().Str("component", "session_manager").Logger(),
+		sessions:    make(map[string]*Session),
+		config:      cfg,
+		httpClient:  httpClient,
+		wgClient:    wgClient,
+		wgProxyMgr:  NewWGProxyManager(),
+		probeCache:  probeCache,
+		log:         log.With().Str("component", "session_manager").Logger(),
 	}
 }
 
@@ -110,6 +116,14 @@ func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string, 
 	pipeInput := ffmpeg.IsHTTPURL(inputURL) && useWireGuard
 
 	if hlsOutputDir != "" {
+		if useWireGuard && m.wgClient != nil && ffmpeg.IsHTTPURL(inputURL) {
+			proxy, err := m.wgProxyMgr.GetOrCreate("default", m.wgClient, m.config, m.log)
+			if err == nil {
+				opts.StreamURL = proxy.ProxyURL(inputURL)
+				pipeInput = false
+				m.log.Info().Str("proxy_url", opts.StreamURL[:60]+"...").Msg("using wg proxy for ffmpeg")
+			}
+		}
 		return m.buildDualOutputArgs(hlsOutputDir, outputPath, pipeInput, opts)
 	}
 
@@ -804,7 +818,7 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 	cmd.WaitDelay = waitDelay
 
 	var httpResp *http.Response
-	if ffmpeg.IsHTTPURL(inputURL) && s.UseWireGuard {
+	if ffmpeg.IsHTTPURL(inputURL) && s.UseWireGuard && s.HLSOutputDir == "" {
 		m.log.Info().Str("session_id", s.ID).Str("url", inputURL).Msg("routing upstream via wireguard")
 		resp, err := httputil.Fetch(ctx, m.clientForSession(s), m.config, inputURL)
 		if err != nil {

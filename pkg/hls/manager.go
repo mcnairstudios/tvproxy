@@ -15,11 +15,12 @@ import (
 
 type Manager struct {
 	mu       sync.RWMutex
-	sessions map[string]*Session
-	baseDir  string
-	log      zerolog.Logger
-	wgClient *http.Client
-	config   *config.Config
+	sessions    map[string]*Session
+	baseDir     string
+	log         zerolog.Logger
+	wgClient    *http.Client
+	config      *config.Config
+	WGProxyFunc func(streamURL string) string
 }
 
 func NewManager(baseDir string, wgClient *http.Client, cfg *config.Config, log zerolog.Logger) *Manager {
@@ -44,6 +45,11 @@ func (m *Manager) GetOrCreateSession(sessionID, streamURL string, segmentLength 
 		sess.Stop()
 		os.RemoveAll(sess.OutputDir)
 		delete(m.sessions, sessionID)
+	}
+
+	if profile.UseWireGuard && m.WGProxyFunc != nil {
+		streamURL = m.WGProxyFunc(streamURL)
+		profile.UseWireGuard = false
 	}
 
 	outputDir := filepath.Join(m.baseDir, sessionID)

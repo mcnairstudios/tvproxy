@@ -234,6 +234,16 @@ func main() {
 	authMW := middleware.NewAuthMiddleware(authService, activityService, cfg.APIKey, adminUserID)
 
 	hlsManager := hls.NewManager(hls.TempDir(), wgMultiClient, cfg, log)
+	if wgMultiClient != nil {
+		hlsManager.WGProxyFunc = func(streamURL string) string {
+			proxy, err := sessionMgr.WGProxy("default", wgMultiClient, cfg, log)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to create wg proxy for hls")
+				return streamURL
+			}
+			return proxy.ProxyURL(streamURL)
+		}
+	}
 	go hlsManager.StartCleanupWorker(ctx)
 
 	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
