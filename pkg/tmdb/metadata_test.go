@@ -15,6 +15,7 @@ func TestMetadataStore_MovieCRUD(t *testing.T) {
 	}
 
 	ms.SetMovie(603, &MovieMeta{TMDBID: 603, PosterPath: "/poster.jpg", Overview: "Neo"})
+	ms.Save()
 
 	m := ms.GetMovie(603)
 	if m == nil {
@@ -99,6 +100,7 @@ func TestMetadataStore_PersistAndReload(t *testing.T) {
 	ms.SetMovie(603, &MovieMeta{TMDBID: 603, Overview: "Matrix"})
 	ms.SetSeries(1396, &SeriesMeta{TMDBID: 1396, Overview: "Breaking Bad"})
 	ms.SetCollection(2344, &CollectionMeta{TMDBID: 2344, PosterPath: "/poster.jpg"})
+	ms.Save()
 
 	ms2 := NewMetadataStore(dir)
 	if m := ms2.GetMovie(603); m == nil || m.Overview != "Matrix" {

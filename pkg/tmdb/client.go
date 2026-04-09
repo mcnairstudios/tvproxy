@@ -331,6 +331,7 @@ func (c *Client) Rematch(tmdbID int, mediaType string) error {
 		c.fetchSeriesEpisodes(tmdbID)
 	}
 
+	c.meta.Save()
 	return nil
 }
 
@@ -371,6 +372,7 @@ func (c *Client) PopulateMetadataFromCache(items []VODItem) {
 		}
 	}
 	if populated > 0 {
+		c.meta.Save()
 		c.log.Info().Int("populated", populated).Msg("populated metadata from cache")
 	}
 }
@@ -549,7 +551,10 @@ func (c *Client) Sync(items []VODItem, onResolved ResolvedFunc) {
 				onResolved(item.StreamID, resolvedID)
 			}
 
-			c.syncDone.Add(1)
+			done := c.syncDone.Add(1)
+			if done%50 == 0 {
+				c.meta.Save()
+			}
 			time.Sleep(250 * time.Millisecond)
 		}
 
@@ -561,6 +566,7 @@ func (c *Client) Sync(items []VODItem, onResolved ResolvedFunc) {
 			c.syncDone.Add(1)
 		}
 
+		c.meta.Save()
 		c.log.Info().
 			Int64("completed", c.syncDone.Load()).
 			Int64("total", c.syncTotal.Load()).

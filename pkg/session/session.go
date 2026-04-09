@@ -35,6 +35,7 @@ type Session struct {
 	AudioTracks     []ffmpeg.AudioTrack
 	startOpts    StartOpts
 	consumers    map[string]*Consumer
+	wasRecording bool
 	cancel       func()
 	done         chan struct{}
 	doneOnce     sync.Once
@@ -52,6 +53,9 @@ type Consumer struct {
 func (s *Session) addConsumer(c *Consumer) {
 	s.mu.Lock()
 	s.consumers[c.ID] = c
+	if c.Type == ConsumerRecording {
+		s.wasRecording = true
+	}
 	s.mu.Unlock()
 }
 

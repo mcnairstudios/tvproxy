@@ -54,6 +54,7 @@ type MetadataStore struct {
 	Collections map[int]*CollectionMeta `json:"collections,omitempty"`
 	mu          sync.RWMutex
 	path        string
+	dirty       bool
 }
 
 func NewMetadataStore(baseDir string) *MetadataStore {
@@ -79,8 +80,8 @@ func (ms *MetadataStore) SetMovie(tmdbID int, m *MovieMeta) {
 	}
 	ms.mu.Lock()
 	ms.Movies[tmdbID] = m
+	ms.dirty = true
 	ms.mu.Unlock()
-	ms.save()
 }
 
 func (ms *MetadataStore) GetSeries(tmdbID int) *SeriesMeta {
@@ -95,8 +96,8 @@ func (ms *MetadataStore) SetSeries(tmdbID int, s *SeriesMeta) {
 	}
 	ms.mu.Lock()
 	ms.Series[tmdbID] = s
+	ms.dirty = true
 	ms.mu.Unlock()
-	ms.save()
 }
 
 func (ms *MetadataStore) GetEpisode(tmdbID int, season, episode int) *EpisodeMeta {
@@ -127,8 +128,8 @@ func (ms *MetadataStore) SetSeasonEpisodes(tmdbID int, seasonNum int, episodes m
 		s.Seasons = make(map[int]*SeasonMeta)
 	}
 	s.Seasons[seasonNum] = &SeasonMeta{Episodes: episodes}
+	ms.dirty = true
 	ms.mu.Unlock()
-	ms.save()
 }
 
 func (ms *MetadataStore) GetCollection(tmdbID int) *CollectionMeta {
@@ -143,8 +144,8 @@ func (ms *MetadataStore) SetCollection(tmdbID int, c *CollectionMeta) {
 	}
 	ms.mu.Lock()
 	ms.Collections[tmdbID] = c
+	ms.dirty = true
 	ms.mu.Unlock()
-	ms.save()
 }
 
 type legacyMetadata struct {
@@ -201,10 +202,15 @@ func (ms *MetadataStore) migrateLegacy(legacy *legacyMetadata) {
 	}
 }
 
-func (ms *MetadataStore) save() {
-	ms.mu.RLock()
+func (ms *MetadataStore) Save() {
+	ms.mu.Lock()
+	if !ms.dirty {
+		ms.mu.Unlock()
+		return
+	}
+	ms.dirty = false
 	data, err := json.MarshalIndent(ms, "", "  ")
-	ms.mu.RUnlock()
+	ms.mu.Unlock()
 	if err != nil {
 		return
 	}

@@ -95,6 +95,9 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 	s.cancel()
 	<-s.done
 	os.RemoveAll(s.TempDir)
+	if s.HLSOutputDir != "" {
+		os.RemoveAll(s.HLSOutputDir)
+	}
 	m.log.Info().Str("channel_id", channelID).Str("session_id", s.ID).Msg("replaced dead session")
 }
 
@@ -198,6 +201,7 @@ func (m *Manager) buildDualOutputArgs(hlsDir, mp4Path string, opts StartOpts) []
 	args = append(args,
 		"-c:v", "copy",
 		"-c:a", "copy",
+		"-bsf:a", "aac_adtstoasc",
 		"-f", "mp4",
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
 		mp4Path,
@@ -244,15 +248,12 @@ func (m *Manager) RemoveConsumer(channelID string, consumerID string) {
 		Msg("consumer removed")
 
 	if remaining == 0 {
-		s.mu.Lock()
-		s.lingerTimer = time.AfterFunc(lingerDuration, func() {
-			if s.consumerCount() == 0 {
-				m.log.Info().Str("channel_id", channelID).Msg("linger expired, cleaning up session")
-				m.stopAndCleanup(channelID, s)
-			}
-		})
-		s.mu.Unlock()
-		m.log.Info().Str("channel_id", channelID).Dur("linger", lingerDuration).Msg("session lingering")
+		if s.HasRecordingConsumer() {
+			m.log.Info().Str("channel_id", channelID).Msg("viewer gone but recording active, keeping session")
+		} else {
+			m.log.Info().Str("channel_id", channelID).Msg("no consumers, cleaning up session")
+			go m.stopAndCleanup(channelID, s)
+		}
 	}
 }
 
@@ -273,8 +274,11 @@ func (m *Manager) stopAndCleanup(channelID string, s *Session) {
 		m.onCleanup(channelID)
 	}
 
-	if !s.HasRecordingConsumer() {
+	if !s.wasRecording {
 		os.RemoveAll(s.TempDir)
+	}
+	if s.HLSOutputDir != "" {
+		os.RemoveAll(s.HLSOutputDir)
 	}
 
 	m.log.Info().

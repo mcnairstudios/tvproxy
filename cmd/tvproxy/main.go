@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -47,6 +48,11 @@ func main() {
 	}
 
 	log.Info().Str("base_url", cfg.BaseURL).Msg("starting tvproxy")
+
+	go func() {
+		log.Info().Msg("pprof listening on :6060")
+		http.ListenAndServe(":6060", nil)
+	}()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
