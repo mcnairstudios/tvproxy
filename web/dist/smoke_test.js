@@ -108,6 +108,7 @@ realSetTimeout(async () => {
     'channel-groups',
     'favorites',
     'epg-sources',
+    'source-profiles',
     'stream-profiles',
     'hdhr-devices',
     'logos',
