@@ -95,33 +95,33 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 	series := r.URL.Query().Get("series")
 
 	type vodItem struct {
-		ID              string   `json:"id"`
-		Name            string   `json:"name"`
-		URL             string   `json:"url"`
-		Logo            string   `json:"logo,omitempty"`
-		PosterURL       string   `json:"poster_url,omitempty"`
-		TMDBID          int      `json:"tmdb_id,omitempty"`
-		Type            string   `json:"type"`
-		Series          string   `json:"series,omitempty"`
-		Collection         string `json:"collection,omitempty"`
-		CollectionPoster   string `json:"collection_poster,omitempty"`
-		CollectionBackdrop string `json:"collection_backdrop,omitempty"`
-		Season          int      `json:"season,omitempty"`
-		SeasonName      string   `json:"vod_season_name,omitempty"`
-		Episode         int      `json:"episode,omitempty"`
-		EpisodeName     string   `json:"episode_name,omitempty"`
-		EpisodeOverview string   `json:"episode_overview,omitempty"`
-		EpisodeStill    string   `json:"episode_still,omitempty"`
-		Overview        string   `json:"overview,omitempty"`
-		Rating          float64  `json:"rating,omitempty"`
-		Year            string   `json:"year,omitempty"`
-		Genres          []string `json:"genres,omitempty"`
-		Certification   string   `json:"certification,omitempty"`
-		VCodec          string   `json:"vcodec,omitempty"`
-		ACodec          string   `json:"acodec,omitempty"`
-		Res             string   `json:"resolution,omitempty"`
-		Audio           string   `json:"audio,omitempty"`
-		Duration        float64  `json:"duration,omitempty"`
+		ID                 string   `json:"id"`
+		Name               string   `json:"name"`
+		URL                string   `json:"url"`
+		Logo               string   `json:"logo,omitempty"`
+		PosterURL          string   `json:"poster_url,omitempty"`
+		TMDBID             int      `json:"tmdb_id,omitempty"`
+		Type               string   `json:"type"`
+		Series             string   `json:"series,omitempty"`
+		Collection         string   `json:"collection,omitempty"`
+		CollectionPoster   string   `json:"collection_poster,omitempty"`
+		CollectionBackdrop string   `json:"collection_backdrop,omitempty"`
+		Season             int      `json:"season,omitempty"`
+		SeasonName         string   `json:"vod_season_name,omitempty"`
+		Episode            int      `json:"episode,omitempty"`
+		EpisodeName        string   `json:"episode_name,omitempty"`
+		EpisodeOverview    string   `json:"episode_overview,omitempty"`
+		EpisodeStill       string   `json:"episode_still,omitempty"`
+		Overview           string   `json:"overview,omitempty"`
+		Rating             float64  `json:"rating,omitempty"`
+		Year               string   `json:"year,omitempty"`
+		Genres             []string `json:"genres,omitempty"`
+		Certification      string   `json:"certification,omitempty"`
+		VCodec             string   `json:"vcodec,omitempty"`
+		ACodec             string   `json:"acodec,omitempty"`
+		Res                string   `json:"resolution,omitempty"`
+		Audio              string   `json:"audio,omitempty"`
+		Duration           float64  `json:"duration,omitempty"`
 	}
 
 	var items []vodItem
@@ -170,11 +170,11 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 			Season:     s.VODSeason,
 			SeasonName: s.VODSeasonName,
 			Episode:    s.VODEpisode,
-			VCodec:    s.VODVCodec,
-			ACodec:    s.VODACodec,
-			Res:       s.VODRes,
-			Audio:     s.VODAudio,
-			Duration:  s.VODDuration,
+			VCodec:     s.VODVCodec,
+			ACodec:     s.VODACodec,
+			Res:        s.VODRes,
+			Audio:      s.VODAudio,
+			Duration:   s.VODDuration,
 		}
 
 		if h.tmdb != nil {
