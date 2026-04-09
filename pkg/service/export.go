@@ -16,6 +16,7 @@ type ExportData struct {
 	ChannelGroups  []models.ChannelGroup  `json:"channel_groups,omitempty"`
 	Channels       []ExportChannel        `json:"channels,omitempty"`
 	StreamProfiles []models.StreamProfile `json:"stream_profiles,omitempty"`
+	SourceProfiles []models.SourceProfile `json:"source_profiles,omitempty"`
 	Clients        []models.Client        `json:"clients,omitempty"`
 	Settings       []models.CoreSetting   `json:"settings,omitempty"`
 	Users          []ExportUser           `json:"users,omitempty"`
@@ -38,20 +39,22 @@ type ExportUser struct {
 }
 
 type ExportService struct {
-	channelStore      store.ChannelStore
-	channelGroupStore store.ChannelGroupStore
-	streamProfileRepo store.ProfileStore
-	clientStore       store.ClientStore
-	m3uAccountStore   store.M3UAccountStore
-	epgSourceStore    store.EPGSourceStore
-	settingsService   *SettingsService
-	authService       *AuthService
+	channelStore       store.ChannelStore
+	channelGroupStore  store.ChannelGroupStore
+	streamProfileRepo  store.ProfileStore
+	sourceProfileStore store.SourceProfileStore
+	clientStore        store.ClientStore
+	m3uAccountStore    store.M3UAccountStore
+	epgSourceStore     store.EPGSourceStore
+	settingsService    *SettingsService
+	authService        *AuthService
 }
 
 func NewExportService(
 	channelStore store.ChannelStore,
 	channelGroupStore store.ChannelGroupStore,
 	streamProfileRepo store.ProfileStore,
+	sourceProfileStore store.SourceProfileStore,
 	clientStore store.ClientStore,
 	m3uAccountStore store.M3UAccountStore,
 	epgSourceStore store.EPGSourceStore,
@@ -59,13 +62,14 @@ func NewExportService(
 	authService *AuthService,
 ) *ExportService {
 	return &ExportService{
-		channelStore:      channelStore,
-		channelGroupStore: channelGroupStore,
-		streamProfileRepo: streamProfileRepo,
-		clientStore:       clientStore,
-		m3uAccountStore:   m3uAccountStore,
-		epgSourceStore:    epgSourceStore,
-		settingsService:   settingsService,
+		channelStore:       channelStore,
+		channelGroupStore:  channelGroupStore,
+		streamProfileRepo:  streamProfileRepo,
+		sourceProfileStore: sourceProfileStore,
+		clientStore:        clientStore,
+		m3uAccountStore:    m3uAccountStore,
+		epgSourceStore:     epgSourceStore,
+		settingsService:    settingsService,
 		authService:       authService,
 	}
 }
@@ -102,6 +106,12 @@ func (s *ExportService) Export(ctx context.Context, scope string) (*ExportData, 
 		data.StreamProfiles = profiles
 		for _, p := range profiles {
 			profileNameMap[p.ID] = p.Name
+		}
+		if s.sourceProfileStore != nil {
+			sourceProfiles, err := s.sourceProfileStore.List(ctx)
+			if err == nil {
+				data.SourceProfiles = sourceProfiles
+			}
 		}
 	}
 

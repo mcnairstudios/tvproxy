@@ -247,7 +247,7 @@ func main() {
 	}
 	go hlsManager.StartCleanupWorker(ctx)
 
-	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
+	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, sourceProfileStore, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
 	dataResetter := service.NewDataResetter(
 		profileStore, settingsStore, clientStore, logoStore, m3uAccountStore,
 		epgSourceStore, hdhrStore, userStore, channelStore, channelGroupStore,

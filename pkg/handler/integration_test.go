@@ -136,7 +136,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	outputHandler := NewOutputHandler(outputService)
 	vodHandler := NewVODHandler(vodService, clientService, nil, log)
 	activityHandler := NewActivityHandler(activityService)
-	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
+	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, nil, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
 	dataResetter := service.NewDataResetter(
 		profileStore, settingsStore, clientStore, logoStore, m3uAccountStore,
 		epgSourceStore, hdhrStore, userStore, channelStore, channelGroupStore,
