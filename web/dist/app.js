@@ -985,6 +985,28 @@
 
     if (seasonKeys.length > 0) renderSeason(seasonKeys[0]);
 
+    var ep0 = show.episodes[0] || {};
+    var xtreamPoster = ''; show.episodes.some(function(ep) { if (ep.poster_url) { xtreamPoster = ep.poster_url; return true; } return false; });
+    if (xtreamPoster) {
+      backdrop.style.backgroundImage = 'url(' + esc(xtreamPoster) + ')';
+      backdrop.style.backgroundSize = 'cover';
+      backdrop.style.backgroundPosition = 'center 20%';
+    }
+    var pills = [];
+    if (ep0.year) pills.push('<span style="color:#9ca3af;font-size:13px">' + ep0.year + '</span>');
+    if (ep0.rating > 0) {
+      var starColor = ep0.rating >= 7 ? '#22c55e' : ep0.rating >= 5 ? '#eab308' : '#ef4444';
+      pills.push('<span style="background:' + starColor + '20;color:' + starColor + ';padding:3px 10px;border-radius:6px;font-weight:700;font-size:13px">\u2605 ' + ep0.rating.toFixed(1) + '</span>');
+    }
+    if (ep0.genres) ep0.genres.slice(0, 3).forEach(function(g) { pills.push('<span style="background:rgba(59,130,246,0.15);color:#60a5fa;padding:3px 10px;border-radius:6px;font-size:12px">' + esc(g) + '</span>'); });
+    if (pills.length) tmdbMeta.innerHTML = pills.join(' ');
+    if (ep0.overview) {
+      var desc = document.createElement('p');
+      desc.style.cssText = 'color:#b0b8c8;font-size:14px;line-height:1.6;margin:0 0 16px 0;';
+      desc.textContent = ep0.overview;
+      body.insertBefore(desc, tabBar);
+    }
+
     api.get('/api/tmdb/search?query=' + encodeURIComponent(show.name) + '&type=tv').then(function(data) {
       if (!data || !data.results || !data.results.length) return;
       var match = data.results[0];
@@ -994,24 +1016,26 @@
         backdrop.style.backgroundSize = 'cover';
         backdrop.style.backgroundPosition = 'center 20%';
       }
-      var pills = [];
+      var tmdbPills = [];
       if (match.vote_average > 0) {
-        var starColor = match.vote_average >= 7 ? '#22c55e' : match.vote_average >= 5 ? '#eab308' : '#ef4444';
-        pills.push('<span style="background:' + starColor + '20;color:' + starColor + ';padding:3px 10px;border-radius:6px;font-weight:700;font-size:13px">\u2605 ' + match.vote_average.toFixed(1) + '</span>');
+        var sc = match.vote_average >= 7 ? '#22c55e' : match.vote_average >= 5 ? '#eab308' : '#ef4444';
+        tmdbPills.push('<span style="background:' + sc + '20;color:' + sc + ';padding:3px 10px;border-radius:6px;font-weight:700;font-size:13px">\u2605 ' + match.vote_average.toFixed(1) + '</span>');
       }
-      if (match.first_air_date) pills.push('<span style="color:#9ca3af;font-size:13px">' + match.first_air_date.substring(0, 4) + '</span>');
+      if (match.first_air_date) tmdbPills.push('<span style="color:#9ca3af;font-size:13px">' + match.first_air_date.substring(0, 4) + '</span>');
       if (match.genre_ids) {
         match.genre_ids.slice(0, 3).forEach(function(gid) {
           var name = TMDB_GENRES[gid];
-          if (name) pills.push('<span style="background:rgba(59,130,246,0.15);color:#60a5fa;padding:3px 10px;border-radius:6px;font-size:12px">' + esc(name) + '</span>');
+          if (name) tmdbPills.push('<span style="background:rgba(59,130,246,0.15);color:#60a5fa;padding:3px 10px;border-radius:6px;font-size:12px">' + esc(name) + '</span>');
         });
       }
-      if (pills.length) tmdbMeta.innerHTML = pills.join('');
+      if (tmdbPills.length) tmdbMeta.innerHTML = tmdbPills.join(' ');
       if (match.overview) {
-        var desc = document.createElement('p');
-        desc.style.cssText = 'color:#b0b8c8;font-size:14px;line-height:1.6;margin:0 0 16px 0;';
-        desc.textContent = match.overview;
-        body.insertBefore(desc, tabBar);
+        var existingDesc = body.querySelector('p');
+        if (existingDesc && existingDesc.nextSibling === tabBar) body.removeChild(existingDesc);
+        var d = document.createElement('p');
+        d.style.cssText = 'color:#b0b8c8;font-size:14px;line-height:1.6;margin:0 0 16px 0;';
+        d.textContent = match.overview;
+        body.insertBefore(d, tabBar);
       }
     }).catch(function() {});
   }
