@@ -109,8 +109,8 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string, useWireGuard bool, hlsOutputDir string, opts StartOpts) []string {
 	pipeInput := ffmpeg.IsHTTPURL(inputURL) && useWireGuard
 
-	if pipeInput && hlsOutputDir != "" {
-		return m.buildDualOutputArgs(hlsOutputDir, outputPath, opts)
+	if hlsOutputDir != "" {
+		return m.buildDualOutputArgs(hlsOutputDir, outputPath, pipeInput, opts)
 	}
 
 	var args []string
@@ -143,7 +143,7 @@ func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string, 
 	return args
 }
 
-func (m *Manager) buildDualOutputArgs(hlsDir, mp4Path string, opts StartOpts) []string {
+func (m *Manager) buildDualOutputArgs(hlsDir, mp4Path string, pipeInput bool, opts StartOpts) []string {
 	videoCodec := opts.OutputVideoCodec
 	if videoCodec == "" || videoCodec == "default" {
 		videoCodec = "copy"
@@ -182,8 +182,13 @@ func (m *Manager) buildDualOutputArgs(hlsDir, mp4Path string, opts StartOpts) []
 			"-fflags", "+genpts+discardcorrupt",
 		)
 	}
+
+	inputArg := opts.StreamURL
+	if pipeInput {
+		inputArg = "pipe:0"
+	}
 	args = append(args,
-		"-i", "pipe:0",
+		"-i", inputArg,
 		"-map", "0:v:0?",
 		"-map", "0:a:0?",
 	)

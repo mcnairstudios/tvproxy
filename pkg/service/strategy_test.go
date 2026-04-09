@@ -208,7 +208,7 @@ func TestResolveSessionStrategy_LiveWithSourceProfile(t *testing.T) {
 		SourceProfile: &models.SourceProfile{
 			VideoCodec:      "mpeg2video",
 			AudioCodec:      "mp2",
-			Interlaced:      true,
+			Deinterlace:     true,
 			AudioResync:     true,
 			FPSMode:         "cfr",
 			AnalyzeDuration: 3000000,

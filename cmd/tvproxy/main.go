@@ -82,6 +82,7 @@ func main() {
 	if err := sourceProfileStore.Load(); err != nil {
 		log.Fatal().Err(err).Msg("failed to load source profile store")
 	}
+	sourceProfileStore.SeedDefaults()
 
 	clientStore := store.NewClientStore(filepath.Join(dataDir, "clients_data.json"))
 	if err := clientStore.Load(); err != nil {

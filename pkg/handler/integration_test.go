@@ -731,7 +731,7 @@ func TestIntegration_StreamProfileCRUD(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		var profiles []map[string]any
 		decodeResponse(t, rec, &profiles)
-		assert.Len(t, profiles, 17)
+		assert.Len(t, profiles, 16)
 	})
 
 	t.Run("get", func(t *testing.T) {
@@ -2158,7 +2158,7 @@ func TestIntegration_ClientCRUD(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		var clients []map[string]any
 		decodeResponse(t, rec, &clients)
-		assert.Len(t, clients, 12)
+		assert.Len(t, clients, 11)
 		assert.Equal(t, "Plex", clients[0]["name"])
 		assert.Equal(t, "VLC", clients[1]["name"])
 		assert.Equal(t, "Skybox", clients[2]["name"])
@@ -2168,9 +2168,8 @@ func TestIntegration_ClientCRUD(t *testing.T) {
 		assert.Equal(t, "Samsung TV", clients[6]["name"])
 		assert.Equal(t, "Panasonic TV", clients[7]["name"])
 		assert.Equal(t, "iPhone", clients[8]["name"])
-		assert.Equal(t, "Safari", clients[9]["name"])
-		assert.Equal(t, "HDHomeRun", clients[10]["name"])
-		assert.Equal(t, "Browser", clients[11]["name"])
+		assert.Equal(t, "HDHomeRun", clients[9]["name"])
+		assert.Equal(t, "Browser", clients[10]["name"])
 	})
 
 	t.Run("get seeded client with rules", func(t *testing.T) {
@@ -2285,7 +2284,7 @@ func TestIntegration_ClientCRUD(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		var clients []map[string]any
 		decodeResponse(t, rec, &clients)
-		assert.Len(t, clients, 12)
+		assert.Len(t, clients, 11)
 	})
 }
 
@@ -2405,7 +2404,7 @@ func TestIntegration_SoftReset(t *testing.T) {
 		rec = doRequest(t, env, "GET", "/api/stream-profiles/", nil, env.adminToken)
 		assert.Equal(t, http.StatusOK, rec.Code)
 		decodeResponse(t, rec, &profiles)
-		assert.Equal(t, 14, len(profiles))
+		assert.Equal(t, 13, len(profiles))
 
 		rec = doRequest(t, env, "GET", "/api/channels/", nil, env.adminToken)
 		assert.Equal(t, http.StatusOK, rec.Code)
@@ -2439,13 +2438,13 @@ func TestIntegration_HardReset(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		var profiles []map[string]any
 		decodeResponse(t, rec, &profiles)
-		assert.Equal(t, 14, len(profiles))
+		assert.Equal(t, 13, len(profiles))
 
 		rec = doRequest(t, env, "GET", "/api/clients/", nil, newToken)
 		assert.Equal(t, http.StatusOK, rec.Code)
 		var clients []map[string]any
 		decodeResponse(t, rec, &clients)
-		assert.Equal(t, 12, len(clients))
+		assert.Equal(t, 11, len(clients))
 
 		rec = doRequest(t, env, "GET", "/api/users/", nil, newToken)
 		assert.Equal(t, http.StatusOK, rec.Code)
@@ -2902,7 +2901,7 @@ func TestIntegration_ClientSyncSurvival(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 		var profiles []map[string]any
 		decodeResponse(t, rec, &profiles)
-		assert.Equal(t, 15, len(profiles))
+		assert.Equal(t, 14, len(profiles))
 
 		var foundCustom bool
 		for _, p := range profiles {
@@ -2916,9 +2915,9 @@ func TestIntegration_ClientSyncSurvival(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 		var clients []map[string]any
 		decodeResponse(t, rec, &clients)
-		assert.Equal(t, 12, len(clients))
+		assert.Equal(t, 11, len(clients))
 		assert.Equal(t, "Plex", clients[0]["name"])
-		assert.Equal(t, "Browser", clients[11]["name"])
+		assert.Equal(t, "Browser", clients[10]["name"])
 	})
 }
 

@@ -128,6 +128,38 @@ func (s *SourceProfileStoreImpl) Delete(_ context.Context, id string) error {
 	return nil
 }
 
+func (s *SourceProfileStoreImpl) SeedDefaults() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.profiles) > 0 {
+		return
+	}
+	s.profiles = []models.SourceProfile{
+		{
+			ID: uuid.New().String(), Name: "IPTV", ProbeMode: "none", Transport: "http",
+			VideoCodec: "h264", AudioCodec: "aac", Container: "mpegts",
+			AnalyzeDuration: 500000, ProbeSize: 500000,
+			ErrDetect: "ignore_err", FFlags: "+genpts+discardcorrupt",
+			InputFormat: "mpegts",
+		},
+		{
+			ID: uuid.New().String(), Name: "SAT>IP", ProbeMode: "declared", Transport: "rtsp",
+			VideoCodec: "mpeg2video", AudioCodec: "mp2", Container: "mpegts",
+			Deinterlace: true, RTSPTransport: "tcp",
+			AnalyzeDuration: 3000000, ProbeSize: 10000000, MaxDelay: 500000,
+			ErrDetect: "ignore_err", FFlags: "+genpts+discardcorrupt",
+			AudioResync: true, FPSMode: "cfr",
+		},
+		{
+			ID: uuid.New().String(), Name: "TVProxy-streams", ProbeMode: "auto", Transport: "http",
+			AnalyzeDuration: 1000000, ProbeSize: 1000000,
+			ErrDetect: "ignore_err", FFlags: "+genpts+discardcorrupt",
+		},
+	}
+	s.saveUnlocked()
+	s.log.Info().Int("count", len(s.profiles)).Msg("seeded default source profiles")
+}
+
 func (s *SourceProfileStoreImpl) saveUnlocked() error {
 	data, err := json.MarshalIndent(s.profiles, "", "  ")
 	if err != nil {

@@ -138,12 +138,12 @@ type Logo struct {
 type SourceProfile struct {
 	ID              string    `json:"id"`
 	Name            string    `json:"name"`
-	SourceType      string    `json:"source_type"`
+	ProbeMode       string    `json:"probe_mode"`
 	Transport       string    `json:"transport"`
 	VideoCodec      string    `json:"video_codec"`
 	AudioCodec      string    `json:"audio_codec"`
 	Container       string    `json:"container"`
-	Interlaced      bool      `json:"interlaced"`
+	Deinterlace     bool      `json:"deinterlace"`
 	AnalyzeDuration int       `json:"analyze_duration"`
 	ProbeSize       int       `json:"probe_size"`
 	MaxDelay        int       `json:"max_delay,omitempty"`

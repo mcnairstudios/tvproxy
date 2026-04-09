@@ -111,7 +111,7 @@ func liveStrategy(in StrategyInput, out StrategyOutput, cat StreamCategory) Sess
 		SourceInputArgs: buildSourceInputArgs(sp),
 	}
 	if sp != nil {
-		s.SourceDeinterlace = sp.Interlaced
+		s.SourceDeinterlace = sp.Deinterlace
 		s.SourceAudioResync = sp.AudioResync
 		s.SourceFPSMode = sp.FPSMode
 	}
@@ -143,7 +143,7 @@ func vodRemoteStrategy(in StrategyInput, out StrategyOutput) SessionStrategy {
 		MetadataOnly:    out.Delivery == "hls",
 	}
 	if sp != nil {
-		s.SourceDeinterlace = sp.Interlaced
+		s.SourceDeinterlace = sp.Deinterlace
 		s.SourceAudioResync = sp.AudioResync
 		s.SourceFPSMode = sp.FPSMode
 	}

@@ -102,18 +102,6 @@
       ]
     },
     {
-      "name": "Safari",
-      "priority": 55,
-      "listen_port": 8080,
-      "auto_detect": true,
-      "hwaccel": "default",
-      "container": "mp4",
-      "match_rules": [
-        {"header_name": "User-Agent", "match_type": "contains", "match_value": "Version/"},
-        {"header_name": "User-Agent", "match_type": "contains", "match_value": "Safari/"}
-      ]
-    },
-    {
       "name": "HDHomeRun",
       "priority": 60,
       "listen_port": 8080,
