@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -106,14 +104,6 @@ func ServeMasterPlaylist(w http.ResponseWriter, sess *Session, playlistURL strin
 func ServeMediaPlaylist(w http.ResponseWriter, sess *Session, segmentPrefix string) {
 	w.Header().Set("Content-Type", "application/x-mpegURL")
 	w.Header().Set("Cache-Control", "no-cache, no-store")
-
-	if sess.IsLive {
-		data, err := os.ReadFile(filepath.Join(sess.OutputDir, "playlist.m3u8"))
-		if err == nil && len(data) > 0 {
-			w.Write(data)
-			return
-		}
-	}
 
 	var playlist string
 	if sess.DurationTicks > 0 && !sess.IsLive {

@@ -3,7 +3,6 @@ package hls
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -42,7 +41,6 @@ type Session struct {
 	mu            sync.Mutex
 	cmd           *exec.Cmd
 	httpResp      *http.Response
-	localFile     *os.File
 	cancel        context.CancelFunc
 	done          chan struct{}
 	startNumber   int
@@ -79,21 +77,6 @@ func (s *Session) StartTranscode(ctx context.Context, startNumber int, startTime
 	s.startNumber = startNumber
 	s.done = make(chan struct{})
 
-	if s.IsLive && isLocalFile(s.StreamURL) {
-		ready := false
-		for i := 0; i < 30; i++ {
-			if info, err := os.Stat(s.StreamURL); err == nil && info.Size() > 10000 {
-				ready = true
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
-		if !ready {
-			cancel()
-			return fmt.Errorf("session file not ready: %s", s.StreamURL)
-		}
-	}
-
 	pipeHTTP := s.shouldPipeHTTP()
 	args := s.buildFFmpegArgs(startNumber, startTimeTicks, pipeHTTP)
 
@@ -111,15 +94,7 @@ func (s *Session) StartTranscode(ctx context.Context, startNumber int, startTime
 	s.cmd.WaitDelay = 5 * time.Second
 	s.cmd.Stderr = os.Stderr
 
-	if pipeHTTP && s.IsLive && isLocalFile(s.StreamURL) {
-		f, err := os.Open(s.StreamURL)
-		if err != nil {
-			cancel()
-			return fmt.Errorf("opening session file: %w", err)
-		}
-		s.localFile = f
-		s.cmd.Stdin = &fileTailReader{file: f, ctx: rctx}
-	} else if pipeHTTP {
+	if pipeHTTP {
 		resp, err := httputil.Fetch(rctx, s.httpClient, s.httpConfig, s.StreamURL)
 		if err != nil {
 			cancel()
@@ -150,21 +125,6 @@ func (s *Session) StartTranscode(ctx context.Context, startNumber int, startTime
 		if s.httpResp != nil {
 			s.httpResp.Body.Close()
 			s.httpResp = nil
-		}
-		if s.localFile != nil {
-			s.localFile.Close()
-			s.localFile = nil
-		}
-
-		if s.IsLive && isLocalFile(s.StreamURL) {
-			s.mu.Lock()
-			nextStart := s.countSegments()
-			s.mu.Unlock()
-			if nextStart > 0 {
-				time.Sleep(time.Second)
-				s.log.Info().Str("session", s.ID).Int("next_start", nextStart).Msg("restarting hls from live file")
-				s.StartTranscode(context.Background(), nextStart, 0)
-			}
 		}
 	}()
 
@@ -233,15 +193,6 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64, pipeHTT
 			"-fflags", "+genpts+discardcorrupt",
 			"-i", s.StreamURL,
 		)
-	} else if s.IsLive && isLocalFile(s.StreamURL) {
-		args = append(args,
-			"-f", "mp4",
-			"-analyzeduration", "3000000",
-			"-probesize", "3000000",
-			"-err_detect", "ignore_err",
-			"-fflags", "+genpts+discardcorrupt+igndts",
-			"-i", s.StreamURL,
-		)
 	} else {
 		args = append(args,
 			"-analyzeduration", "1000000",
@@ -252,20 +203,13 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64, pipeHTT
 		)
 	}
 
-	localLiveFile := s.IsLive && isLocalFile(s.StreamURL)
-
 	videoCodec := mapEncoder(s.Profile.VideoCodec)
 	audioCodec := s.Profile.AudioCodec
 	if audioCodec == "" || audioCodec == "copy" {
 		audioCodec = "copy"
 	}
 
-	if localLiveFile {
-		videoCodec = "copy"
-		audioCodec = "copy"
-	}
-
-	if s.Profile.Deinterlace && videoCodec == "copy" && !localLiveFile {
+	if s.Profile.Deinterlace && videoCodec == "copy" {
 		videoCodec = "libx264"
 	}
 
@@ -400,21 +344,6 @@ func (s *Session) CurrentTranscodeIndex() int {
 	return s.startNumber
 }
 
-func (s *Session) countSegments() int {
-	entries, err := os.ReadDir(s.OutputDir)
-	if err != nil {
-		return 0
-	}
-	count := 0
-	ext := s.segmentExt()
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "seg") && strings.HasSuffix(e.Name(), ext) {
-			count++
-		}
-	}
-	return count
-}
-
 func (s *Session) Touch() {
 	s.mu.Lock()
 	s.lastAccess = time.Now()
@@ -447,10 +376,6 @@ func isHTTPURL(url string) bool {
 	return strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")
 }
 
-func isLocalFile(path string) bool {
-	return strings.HasPrefix(path, "/")
-}
-
 func isRTSP(url string) bool {
 	return strings.HasPrefix(url, "rtsp://") || strings.HasPrefix(url, "rtsps://")
 }
@@ -463,24 +388,3 @@ func isHEVC(codec string) bool {
 	return false
 }
 
-type fileTailReader struct {
-	file *os.File
-	ctx  context.Context
-}
-
-func (r *fileTailReader) Read(p []byte) (int, error) {
-	for {
-		n, err := r.file.Read(p)
-		if n > 0 {
-			return n, nil
-		}
-		if err != io.EOF {
-			return 0, err
-		}
-		select {
-		case <-r.ctx.Done():
-			return 0, r.ctx.Err()
-		case <-time.After(200 * time.Millisecond):
-		}
-	}
-}

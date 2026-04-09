@@ -27,6 +27,7 @@ type M3UAccount struct {
 	RefreshInterval int        `json:"refresh_interval"`
 	LastError       string     `json:"last_error"`
 	UseWireGuard    bool       `json:"use_wireguard"`
+	SourceProfileID string     `json:"source_profile_id,omitempty"`
 	TLSEnrolled     bool       `json:"tls_enrolled"`
 	ETag            string     `json:"etag,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
@@ -43,6 +44,7 @@ type SatIPSource struct {
 	LastScanned      *time.Time `json:"last_scanned,omitempty"`
 	StreamCount      int        `json:"stream_count"`
 	LastError        string     `json:"last_error"`
+	SourceProfileID  string     `json:"source_profile_id,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 }
@@ -131,6 +133,28 @@ type Logo struct {
 	Name           string    `json:"name"`
 	URL       string    `json:"url"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type SourceProfile struct {
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	SourceType      string    `json:"source_type"`
+	Transport       string    `json:"transport"`
+	VideoCodec      string    `json:"video_codec"`
+	AudioCodec      string    `json:"audio_codec"`
+	Container       string    `json:"container"`
+	Interlaced      bool      `json:"interlaced"`
+	AnalyzeDuration int       `json:"analyze_duration"`
+	ProbeSize       int       `json:"probe_size"`
+	MaxDelay        int       `json:"max_delay,omitempty"`
+	FFlags          string    `json:"fflags"`
+	ErrDetect       string    `json:"err_detect"`
+	InputFormat     string    `json:"input_format,omitempty"`
+	RTSPTransport   string    `json:"rtsp_transport,omitempty"`
+	AudioResync     bool      `json:"audio_resync"`
+	FPSMode         string    `json:"fps_mode,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type StreamProfile struct {

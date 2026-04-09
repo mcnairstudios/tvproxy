@@ -45,6 +45,7 @@ type StartOpts struct {
 	Args             string
 	OutputDir        string
 	HLSOutputDir     string
+	SourceInputArgs  string
 	MetadataOnly     bool
 }
 

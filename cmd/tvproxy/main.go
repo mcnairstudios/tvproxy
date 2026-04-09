@@ -78,6 +78,11 @@ func main() {
 	}
 	profileStore.SeedSystemProfiles()
 
+	sourceProfileStore := store.NewSourceProfileStore(filepath.Join(dataDir, "source_profiles.json"), log)
+	if err := sourceProfileStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load source profile store")
+	}
+
 	clientStore := store.NewClientStore(filepath.Join(dataDir, "clients_data.json"))
 	if err := clientStore.Load(); err != nil {
 		log.Fatal().Err(err).Msg("failed to load client store")
@@ -220,7 +225,7 @@ func main() {
 	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, recordingStore, log)
 	wgMultiClient := wgMultiService.HTTPClient()
 	sessionMgr := session.NewManager(cfg, wgHTTPClient, wgMultiClient, recordingStore, log)
-	vodService := service.NewVODService(channelStore, streamStore, profileStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
+	vodService := service.NewVODService(channelStore, streamStore, profileStore, sourceProfileStore, m3uAccountStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
 	vodService.RecoverRecordings(ctx)
 	schedulerService := service.NewSchedulerService(scheduledRecStore, channelStore, vodService, cfg, log)
 	dlnaService := service.NewDLNAService(channelStore, channelGroupStore, userStore, settingsService, logoService, vodService, cfg, log)
@@ -256,6 +261,7 @@ func main() {
 		channelGroup:   handler.NewChannelGroupHandler(channelService),
 		logo:           handler.NewLogoHandler(logoService),
 		profile:        handler.NewStreamProfileHandler(profileStore),
+		sourceProfile:  handler.NewSourceProfileHandler(sourceProfileStore),
 		epgSource:      handler.NewEPGSourceHandler(epgService),
 		epgData:        handler.NewEPGDataHandler(epgStore, epgStore),
 		hdhr:           handler.NewHDHRHandler(hdhrService, proxyService, cfg),

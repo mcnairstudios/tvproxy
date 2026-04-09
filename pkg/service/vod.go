@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -30,15 +29,17 @@ var (
 )
 
 type VODService struct {
-	config            *config.Config
-	channelStore      store.ChannelStore
-	streamStore       store.StreamReader
-	streamProfileRepo store.ProfileStore
-	settingsService   *SettingsService
-	sessionMgr        *session.Manager
-	recordingStore    store.RecordingStore
-	activity          *ActivityService
-	log               zerolog.Logger
+	config             *config.Config
+	channelStore       store.ChannelStore
+	streamStore        store.StreamReader
+	streamProfileRepo  store.ProfileStore
+	sourceProfileStore store.SourceProfileStore
+	m3uAccountStore    store.M3UAccountStore
+	settingsService    *SettingsService
+	sessionMgr         *session.Manager
+	recordingStore     store.RecordingStore
+	activity           *ActivityService
+	log                zerolog.Logger
 
 	mu         sync.RWMutex
 	recordings map[string]*recordingState
@@ -48,6 +49,8 @@ func NewVODService(
 	channelStore store.ChannelStore,
 	streamStore store.StreamReader,
 	streamProfileRepo store.ProfileStore,
+	sourceProfileStore store.SourceProfileStore,
+	m3uAccountStore store.M3UAccountStore,
 	settingsService *SettingsService,
 	sessionMgr *session.Manager,
 	recordingStore store.RecordingStore,
@@ -56,11 +59,13 @@ func NewVODService(
 	log zerolog.Logger,
 ) *VODService {
 	return &VODService{
-		config:            cfg,
-		channelStore:      channelStore,
-		streamStore:       streamStore,
-		streamProfileRepo: streamProfileRepo,
-		settingsService:   settingsService,
+		config:             cfg,
+		channelStore:       channelStore,
+		streamStore:        streamStore,
+		streamProfileRepo:  streamProfileRepo,
+		sourceProfileStore: sourceProfileStore,
+		m3uAccountStore:    m3uAccountStore,
+		settingsService:    settingsService,
 		sessionMgr:        sessionMgr,
 		recordingStore:    recordingStore,
 		activity:          activity,
@@ -92,6 +97,20 @@ func (s *VODService) resolveStreamForChannel(ctx context.Context, channelID stri
 	}
 
 	return "", "", "", "", "", false, fmt.Errorf("no active streams for channel %s", channelID)
+}
+
+func (s *VODService) lookupSourceProfile(ctx context.Context, m3uAccountID, satipSourceID string) *models.SourceProfile {
+	if s.sourceProfileStore == nil {
+		return nil
+	}
+	if m3uAccountID != "" && s.m3uAccountStore != nil {
+		if acct, err := s.m3uAccountStore.GetByID(ctx, m3uAccountID); err == nil && acct.SourceProfileID != "" {
+			if sp, err := s.sourceProfileStore.GetByID(ctx, acct.SourceProfileID); err == nil {
+				return sp
+			}
+		}
+	}
+	return nil
 }
 
 type sessionArgs struct {
@@ -164,11 +183,27 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 	audioOnly := strings.EqualFold(streamGroup, "radio")
 	sa := s.composeSessionArgs(ctx, profileName, streamURL, streamGroup)
 
-	var hlsOutDir string
-	if sa.Delivery == "hls" {
-		hlsOutDir = filepath.Join(os.TempDir(), "tvproxy-hls", streamID)
-		os.MkdirAll(hlsOutDir, 0755)
-	}
+	strategy := resolveSessionStrategy(
+		StrategyInput{
+			StreamURL:     streamURL,
+			VODType:       "",
+			UseWireGuard:  useWG,
+			SatIPSource:   strings.HasPrefix(streamURL, "rtsp://"),
+			StreamGroup:   streamGroup,
+			StreamID:      streamID,
+			SourceProfile: s.lookupSourceProfile(ctx, streamID, ""),
+		},
+		StrategyOutput{
+			Delivery:   sa.Delivery,
+			VideoCodec: sa.OutputVideoCodec,
+			AudioCodec: sa.OutputAudioCodec,
+			HWAccel:    sa.OutputHWAccel,
+			Container:  sa.Container,
+			Command:    sa.Command,
+			Args:       sa.Args,
+		},
+		s.config.VODOutputDir,
+	)
 
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
 		ChannelID:        channelID,
@@ -177,16 +212,17 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		StreamName:       streamName,
 		ChannelName:      channelName,
 		ProfileName:      profileName,
-		OutputVideoCodec: sa.OutputVideoCodec,
-		OutputAudioCodec: sa.OutputAudioCodec,
-		OutputContainer:  sa.Container,
-		OutputHWAccel:    sa.OutputHWAccel,
+		OutputVideoCodec: strategy.VideoCodec,
+		OutputAudioCodec: strategy.AudioCodec,
+		OutputContainer:  strategy.Container,
+		OutputHWAccel:    strategy.HWAccel,
 		UseWireGuard:     useWG,
-		Command:          sa.Command,
-		Args:             sa.Args,
+		Command:          strategy.Command,
+		Args:             strategy.FFmpegArgs,
 		OutputDir:        s.config.VODOutputDir,
-		HLSOutputDir:     hlsOutDir,
-		MetadataOnly:     false,
+		HLSOutputDir:     strategy.HLSOutputDir,
+		SourceInputArgs:  strategy.SourceInputArgs,
+		MetadataOnly:     strategy.MetadataOnly,
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", false, err
@@ -225,11 +261,28 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 
 	sa := s.composeSessionArgs(ctx, profileName, streamURL, stream.Group)
 
-	var hlsOutputDir string
-	if sa.Delivery == "hls" && stream.VODDuration == 0 {
-		hlsOutputDir = filepath.Join(os.TempDir(), "tvproxy-hls", streamID)
-		os.MkdirAll(hlsOutputDir, 0755)
-	}
+	strategy := resolveSessionStrategy(
+		StrategyInput{
+			StreamURL:     streamURL,
+			VODType:       stream.VODType,
+			VODDuration:   stream.VODDuration,
+			UseWireGuard:  stream.UseWireGuard,
+			SatIPSource:   stream.SatIPSourceID != "",
+			StreamGroup:   stream.Group,
+			StreamID:      streamID,
+			SourceProfile: s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID),
+		},
+		StrategyOutput{
+			Delivery:   sa.Delivery,
+			VideoCodec: sa.OutputVideoCodec,
+			AudioCodec: sa.OutputAudioCodec,
+			HWAccel:    sa.OutputHWAccel,
+			Container:  sa.Container,
+			Command:    sa.Command,
+			Args:       sa.Args,
+		},
+		s.config.VODOutputDir,
+	)
 
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
 		ChannelID:        streamID,
@@ -238,17 +291,18 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		StreamName:       stream.Name,
 		ChannelName:      stream.Name,
 		ProfileName:      profileName,
-		OutputVideoCodec: sa.OutputVideoCodec,
-		OutputAudioCodec: sa.OutputAudioCodec,
-		OutputContainer:  sa.Container,
-		OutputHWAccel:    sa.OutputHWAccel,
+		OutputVideoCodec: strategy.VideoCodec,
+		OutputAudioCodec: strategy.AudioCodec,
+		OutputContainer:  strategy.Container,
+		OutputHWAccel:    strategy.HWAccel,
 		UseWireGuard:     stream.UseWireGuard,
-		Command:          sa.Command,
-		Args:             sa.Args,
+		Command:          strategy.Command,
+		Args:             strategy.FFmpegArgs,
 		OutputDir:        s.config.VODOutputDir,
-		HLSOutputDir:     hlsOutputDir,
+		HLSOutputDir:     strategy.HLSOutputDir,
+		SourceInputArgs:  strategy.SourceInputArgs,
 		KnownDuration:    stream.VODDuration,
-		MetadataOnly:     false,
+		MetadataOnly:     strategy.MetadataOnly,
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", err

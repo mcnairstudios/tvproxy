@@ -24,7 +24,8 @@ type routeHandlers struct {
 	channel      *handler.ChannelHandler
 	channelGroup *handler.ChannelGroupHandler
 	logo         *handler.LogoHandler
-	profile      *handler.StreamProfileHandler
+	profile        *handler.StreamProfileHandler
+	sourceProfile  *handler.SourceProfileHandler
 	epgSource    *handler.EPGSourceHandler
 	epgData      *handler.EPGDataHandler
 	hdhr         *handler.HDHRHandler
@@ -179,6 +180,15 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 			r.Get("/{id}", h.profile.Get)
 			r.Put("/{id}", h.profile.Update)
 			r.Delete("/{id}", h.profile.Delete)
+		})
+
+		r.Route("/api/source-profiles", func(r chi.Router) {
+			r.Use(authMW.RequireAdmin)
+			r.Get("/", h.sourceProfile.List)
+			r.Post("/", h.sourceProfile.Create)
+			r.Get("/{id}", h.sourceProfile.Get)
+			r.Put("/{id}", h.sourceProfile.Update)
+			r.Delete("/{id}", h.sourceProfile.Delete)
 		})
 
 		r.Route("/api/epg", func(r chi.Router) {
