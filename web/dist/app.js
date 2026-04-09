@@ -6161,7 +6161,6 @@
 
         if (!_favoriteIds) await loadFavorites();
 
-        var kidsCerts = { 'U': 1, 'PG': 1, 'G': 1, 'PG-13': 1, '12': 1, '12A': 1, 'TV-Y': 1, 'TV-Y7': 1, 'TV-G': 1, 'TV-PG': 1 };
         var tvDecades = {};
         var tvGenreCounts = {};
         seriesList.forEach(function(show) {
@@ -6178,152 +6177,65 @@
         var tvDecadeList = Object.keys(tvDecades).sort();
         var tvGenreNames = Object.keys(tvGenreCounts).sort(function(a, b) { return tvGenreCounts[b] - tvGenreCounts[a]; });
 
-        var tvActiveFilters = {};
-        var tvFilterBar = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;' });
+        var mg = pages._mediaGrid({
+          title: 'TV Series',
+          getName: function(show) { return show.name; },
+          getPoster: function(show) { var p = ''; show.episodes.some(function(ep) { if (ep.poster_url) { p = ep.poster_url; return true; } return false; }); return p; },
+          getBadges: function(show) {
+            var b = [];
+            var sc = Object.keys(show.seasons).length;
+            var ec = show.episodes.length;
+            if (sc > 0) b.push(sc + ' season' + (sc > 1 ? 's' : ''));
+            b.push(ec + ' episode' + (ec > 1 ? 's' : ''));
+            if (show._year) b.push(show._year);
+            if (show._cert) b.push(show._cert);
+            return b;
+          },
+          getGenres: function(show) {
+            var g = [];
+            show.episodes.forEach(function(ep) { (ep.genres || []).forEach(function(genre) { if (g.indexOf(genre) === -1) g.push(genre); }); });
+            return g;
+          },
+          onCardClick: function(show) { showSeriesDetail(show); },
+        });
 
-        var tvPillBase = 'padding:5px 14px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:500;transition:all 0.15s;';
-        var tvPillGroups = {
-          age:        { off: tvPillBase + 'border:1px solid rgba(168,85,247,0.3);background:rgba(168,85,247,0.08);color:#a855f7;', on: tvPillBase + 'border:1px solid #a855f7;background:#a855f7;color:#fff;' },
-          collection: { off: tvPillBase + 'border:1px solid rgba(234,179,8,0.3);background:rgba(234,179,8,0.08);color:#eab308;', on: tvPillBase + 'border:1px solid #eab308;background:#eab308;color:#000;' },
-          decade:     { off: tvPillBase + 'border:1px solid rgba(34,197,94,0.3);background:rgba(34,197,94,0.08);color:#22c55e;', on: tvPillBase + 'border:1px solid #22c55e;background:#22c55e;color:#fff;' },
-          genre:      { off: tvPillBase + 'border:1px solid rgba(59,130,246,0.3);background:rgba(59,130,246,0.08);color:#3b82f6;', on: tvPillBase + 'border:1px solid #3b82f6;background:#3b82f6;color:#fff;' },
-        };
+        var pills = [
+          { label: '\u2B50 Favorites', key: 'fav:yes', group: 'collection' },
+          { label: 'Kids', key: 'kids', group: 'age' },
+          { label: '15+', key: 'adult', group: 'age' },
+        ];
+        var dropdowns = [];
+        if (tvDecadeList.length > 0) dropdowns.push({ label: 'Decades', options: tvDecadeList, keyPrefix: 'decade_', group: 'decade' });
+        if (tvGenreNames.length > 0) dropdowns.push({ label: 'Genres', options: tvGenreNames, keyPrefix: 'genre_', group: 'genre' });
 
-        function makeTvPill(label, key, parent, group) {
-          var styles = tvPillGroups[group] || tvPillGroups.genre;
-          var btn = h('button', { style: styles.off }, label);
-          btn.onclick = function() {
-            if (tvActiveFilters[key]) { delete tvActiveFilters[key]; btn.style.cssText = styles.off; }
-            else { tvActiveFilters[key] = true; btn.style.cssText = styles.on; }
-            renderTvGrid();
-          };
-          (parent || tvFilterBar).appendChild(btn);
-          return btn;
-        }
+        mg.buildFilterBar(container, pills, dropdowns, seriesList.length);
 
-        var tvSearchInput = h('input', { type: 'text', placeholder: '\uD83D\uDD0D Search...', style: 'padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;width:180px;' });
-        tvSearchInput.oninput = function() { renderTvGrid(); };
-        tvFilterBar.appendChild(tvSearchInput);
-        tvFilterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
-
-        makeTvPill('\u2B50 Favorites', 'fav:yes', tvFilterBar, 'collection');
-        makeTvPill('Kids', 'kids', null, 'age');
-        makeTvPill('15+', 'adult', null, 'age');
-
-        function makeTvPillDropdown(label, options, keyPrefix, group) {
-          var wrap = h('div', { style: 'position:relative;display:inline-block;' });
-          var styles = tvPillGroups[group] || tvPillGroups.genre;
-          var trigger = h('button', { style: styles.off }, label + ' \u25BE');
-          var popover = h('div', { style: 'position:absolute;top:calc(100% + 4px);left:0;background:#1a1d23;border:1px solid var(--border);border-radius:12px;padding:8px;z-index:50;min-width:200px;max-width:360px;flex-wrap:wrap;gap:6px;box-shadow:0 8px 30px rgba(0,0,0,0.4);display:none;' });
-          var activeCount = 0;
-          options.forEach(function(opt) {
-            var key = keyPrefix + opt;
-            var pill = h('button', { style: styles.off }, opt);
-            pill.onclick = function(e) {
-              e.stopPropagation();
-              if (tvActiveFilters[key]) { delete tvActiveFilters[key]; pill.style.cssText = styles.off; activeCount--; }
-              else { tvActiveFilters[key] = true; pill.style.cssText = styles.on; activeCount++; }
-              trigger.textContent = activeCount > 0 ? label + ' (' + activeCount + ') \u25BE' : label + ' \u25BE';
-              trigger.style.cssText = activeCount > 0 ? styles.on : styles.off;
-              renderTvGrid();
-            };
-            popover.appendChild(pill);
-          });
-          trigger.onclick = function(e) {
-            e.stopPropagation();
-            var showing = popover.style.display === 'flex';
-            popover.style.display = showing ? 'none' : 'flex';
-          };
-          document.addEventListener('click', function() { popover.style.display = 'none'; });
-          wrap.appendChild(trigger);
-          wrap.appendChild(popover);
-          tvFilterBar.appendChild(wrap);
-        }
-
-        if (tvDecadeList.length > 0) {
-          tvFilterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
-          makeTvPillDropdown('Decades', tvDecadeList, 'decade_', 'decade');
-        }
-
-        if (tvGenreNames.length > 0) {
-          makeTvPillDropdown('Genres', tvGenreNames, 'genre_', 'genre');
-        }
-
-        container.appendChild(tvFilterBar);
-
-        var countSpan2 = headerRight2.querySelector('span:last-child');
-
-        var grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:20px;' });
-
-        function matchesTvFilters(show) {
-          var tvSearch = tvSearchInput.value.trim().toLowerCase();
-          if (tvSearch && show.name.toLowerCase().indexOf(tvSearch) === -1) return false;
-          if (tvActiveFilters['fav:yes']) {
+        mg.buildGrid(container, seriesList, function(show, af) {
+          if (af['fav:yes']) {
             var anyFav = show.episodes.some(function(ep) { return _favoriteIds && _favoriteIds.has(ep.id); });
             if (!anyFav) return false;
           }
-          var hasAge = tvActiveFilters.kids || tvActiveFilters.adult;
+          var hasAge = af.kids || af.adult;
           if (hasAge && show._cert) {
-            var isKid = kidsCerts[show._cert];
-            if (tvActiveFilters.kids && !tvActiveFilters.adult && !isKid) return false;
-            if (tvActiveFilters.adult && !tvActiveFilters.kids && isKid) return false;
+            var isKid = mg.kidsCerts[show._cert];
+            if (af.kids && !af.adult && !isKid) return false;
+            if (af.adult && !af.kids && isKid) return false;
           }
-          var hasDecade = Object.keys(tvActiveFilters).some(function(k) { return k.startsWith('decade_'); });
+          var hasDecade = Object.keys(af).some(function(k) { return k.startsWith('decade_'); });
           if (hasDecade) {
-            var activeDecades = {};
-            Object.keys(tvActiveFilters).forEach(function(k) { if (k.startsWith('decade_')) activeDecades[k.replace('decade_', '')] = true; });
-            if (!show._year || !activeDecades[show._year.substring(0, 3) + '0s']) return false;
+            var ad = {};
+            Object.keys(af).forEach(function(k) { if (k.startsWith('decade_')) ad[k.replace('decade_', '')] = true; });
+            if (!show._year || !ad[show._year.substring(0, 3) + '0s']) return false;
           }
-          var activeGenres = [];
-          Object.keys(tvActiveFilters).forEach(function(k) { if (k.startsWith('genre_')) activeGenres.push(k.replace('genre_', '')); });
-          if (activeGenres.length > 0) {
-            var showGenres = [];
-            show.episodes.forEach(function(ep) { (ep.genres || []).forEach(function(g) { if (showGenres.indexOf(g) === -1) showGenres.push(g); }); });
-            var allMatch = activeGenres.every(function(g) { return showGenres.indexOf(g) >= 0; });
-            if (!allMatch) return false;
+          var ag = [];
+          Object.keys(af).forEach(function(k) { if (k.startsWith('genre_')) ag.push(k.replace('genre_', '')); });
+          if (ag.length > 0) {
+            var sg = [];
+            show.episodes.forEach(function(ep) { (ep.genres || []).forEach(function(g) { if (sg.indexOf(g) === -1) sg.push(g); }); });
+            if (!ag.every(function(g) { return sg.indexOf(g) >= 0; })) return false;
           }
           return true;
-        }
-
-        function renderTvGrid() {
-          grid.innerHTML = '';
-          var filtered = seriesList.filter(matchesTvFilters);
-          filtered.forEach(function(show) {
-            var card = h('div', { style: 'cursor:pointer;border-radius:12px;overflow:hidden;background:var(--bg-card);border:1px solid var(--border);transition:transform 0.2s,box-shadow 0.2s;' });
-            card.dataset.sortName = show.name;
-            card.onmouseenter = function() { card.style.transform = 'scale(1.03)'; card.style.boxShadow = '0 8px 30px rgba(0,0,0,0.3)'; };
-            card.onmouseleave = function() { card.style.transform = ''; card.style.boxShadow = ''; };
-
-            var posterWrap = h('div', { style: 'width:100%;aspect-ratio:2/3;background:linear-gradient(135deg,#1a1a2e,#0f3460);display:flex;align-items:center;justify-content:center;position:relative;' });
-            var showPoster = '';
-            show.episodes.some(function(ep) { if (ep.poster_url) { showPoster = ep.poster_url; return true; } return false; });
-            if (showPoster) {
-              posterWrap.appendChild(h('img', { src: showPoster, style: 'width:100%;height:100%;object-fit:cover;' }));
-            } else {
-              posterWrap.appendChild(h('div', { style: 'padding:12px;text-align:center;color:#fff;font-size:14px;font-weight:600;' }, show.name));
-            }
-            card.appendChild(posterWrap);
-
-            var info = h('div', { style: 'padding:10px 12px;' });
-            info.appendChild(h('div', { style: 'font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, show.name));
-            var seasonCount = Object.keys(show.seasons).length;
-            var epCount = show.episodes.length;
-            info.appendChild(h('div', { style: 'font-size:11px;color:var(--text-muted);margin-top:2px;' },
-              (seasonCount > 0 ? seasonCount + ' season' + (seasonCount > 1 ? 's' : '') + ' \u2022 ' : '') + epCount + ' episode' + (epCount > 1 ? 's' : '')));
-            card.appendChild(info);
-
-            card.onclick = function() {
-              showSeriesDetail(show);
-            };
-
-            grid.appendChild(card);
-          });
-          countSpan2.textContent = filtered.length + ' / ' + seriesList.length + ' series';
-          setupGridKeyJump(grid);
-        }
-
-        container.appendChild(grid);
-        renderTvGrid();
+        });
       } catch(err) {
         container.innerHTML = '';
         container.appendChild(h('p', { style: 'color:var(--danger)' }, 'Failed to load: ' + err.message));
