@@ -5650,10 +5650,41 @@
         makePill('Kids', 'kids', null, 'age');
         makePill('15+', 'adult', null, 'age');
         makePill('Collections', 'collections', null, 'collection');
-        filterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
-        decadeList.forEach(function(dec) { makePill(dec, 'decade_' + dec, null, 'decade'); });
 
-        container.appendChild(filterBar);
+        function makePillDropdown(label, options, keyPrefix, group, parent) {
+          var wrap = h('div', { style: 'position:relative;display:inline-block;' });
+          var styles = pillGroups[group] || pillGroups.genre;
+          var trigger = h('button', { style: styles.off }, label + ' \u25BE');
+          var popover = h('div', { style: 'display:none;position:absolute;top:calc(100% + 4px);left:0;background:#1a1d23;border:1px solid var(--border);border-radius:12px;padding:8px;z-index:50;min-width:200px;max-width:360px;display:none;flex-wrap:wrap;gap:6px;box-shadow:0 8px 30px rgba(0,0,0,0.4);' });
+          var activeCount = 0;
+          options.forEach(function(opt) {
+            var key = keyPrefix + opt;
+            var pill = h('button', { style: styles.off }, opt);
+            pill.onclick = function(e) {
+              e.stopPropagation();
+              if (activeFilters[key]) { delete activeFilters[key]; pill.style.cssText = styles.off; activeCount--; }
+              else { activeFilters[key] = true; pill.style.cssText = styles.on; activeCount++; }
+              trigger.textContent = activeCount > 0 ? label + ' (' + activeCount + ') \u25BE' : label + ' \u25BE';
+              trigger.style.cssText = activeCount > 0 ? styles.on : styles.off;
+              renderGrid();
+            };
+            popover.appendChild(pill);
+          });
+          trigger.onclick = function(e) {
+            e.stopPropagation();
+            var showing = popover.style.display === 'flex';
+            popover.style.display = showing ? 'none' : 'flex';
+          };
+          document.addEventListener('click', function() { popover.style.display = 'none'; });
+          wrap.appendChild(trigger);
+          wrap.appendChild(popover);
+          (parent || filterBar).appendChild(wrap);
+        }
+
+        if (decadeList.length > 0) {
+          filterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
+          makePillDropdown('Decades', decadeList, 'decade_', 'decade');
+        }
 
         var genreCounts = {};
         items.forEach(function(item) {
@@ -5662,10 +5693,10 @@
         var genreNames = Object.keys(genreCounts).sort(function(a, b) { return genreCounts[b] - genreCounts[a]; });
 
         if (genreNames.length > 0) {
-          var genreBar = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;' });
-          genreNames.forEach(function(g) { makePill(g, 'genre_' + g, genreBar, 'genre'); });
-          container.appendChild(genreBar);
+          makePillDropdown('Genres', genreNames, 'genre_', 'genre');
         }
+
+        container.appendChild(filterBar);
 
         var countSpan = headerRight.querySelector('span:last-child');
 
@@ -5983,12 +6014,15 @@
 
         if (!_favoriteIds) await loadFavorites();
 
+        var kidsCerts = { 'U': 1, 'PG': 1, 'G': 1, 'PG-13': 1, '12': 1, '12A': 1, 'TV-Y': 1, 'TV-Y7': 1, 'TV-G': 1, 'TV-PG': 1 };
         var tvDecades = {};
         var tvGenreCounts = {};
         seriesList.forEach(function(show) {
           var yr = show.episodes[0] && show.episodes[0].year;
           if (!yr) show.episodes.some(function(ep) { if (ep.year) { yr = ep.year; return true; } return false; });
           show._year = yr;
+          show._cert = '';
+          show.episodes.some(function(ep) { if (ep.certification) { show._cert = ep.certification; return true; } return false; });
           if (yr && yr.length === 4) tvDecades[yr.substring(0, 3) + '0s'] = true;
           show.episodes.forEach(function(ep) {
             (ep.genres || []).forEach(function(g) { tvGenreCounts[g] = (tvGenreCounts[g] || 0) + 1; });
@@ -6025,18 +6059,49 @@
         tvFilterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
 
         makeTvPill('\u2B50 Favorites', 'fav:yes', tvFilterBar, 'collection');
+        makeTvPill('Kids', 'kids', null, 'collection');
+        makeTvPill('15+', 'adult', null, 'collection');
+
+        function makeTvPillDropdown(label, options, keyPrefix, group) {
+          var wrap = h('div', { style: 'position:relative;display:inline-block;' });
+          var styles = tvPillGroups[group] || tvPillGroups.genre;
+          var trigger = h('button', { style: styles.off }, label + ' \u25BE');
+          var popover = h('div', { style: 'display:none;position:absolute;top:calc(100% + 4px);left:0;background:#1a1d23;border:1px solid var(--border);border-radius:12px;padding:8px;z-index:50;min-width:200px;max-width:360px;display:none;flex-wrap:wrap;gap:6px;box-shadow:0 8px 30px rgba(0,0,0,0.4);' });
+          var activeCount = 0;
+          options.forEach(function(opt) {
+            var key = keyPrefix + opt;
+            var pill = h('button', { style: styles.off }, opt);
+            pill.onclick = function(e) {
+              e.stopPropagation();
+              if (tvActiveFilters[key]) { delete tvActiveFilters[key]; pill.style.cssText = styles.off; activeCount--; }
+              else { tvActiveFilters[key] = true; pill.style.cssText = styles.on; activeCount++; }
+              trigger.textContent = activeCount > 0 ? label + ' (' + activeCount + ') \u25BE' : label + ' \u25BE';
+              trigger.style.cssText = activeCount > 0 ? styles.on : styles.off;
+              renderTvGrid();
+            };
+            popover.appendChild(pill);
+          });
+          trigger.onclick = function(e) {
+            e.stopPropagation();
+            var showing = popover.style.display === 'flex';
+            popover.style.display = showing ? 'none' : 'flex';
+          };
+          document.addEventListener('click', function() { popover.style.display = 'none'; });
+          wrap.appendChild(trigger);
+          wrap.appendChild(popover);
+          tvFilterBar.appendChild(wrap);
+        }
+
         if (tvDecadeList.length > 0) {
           tvFilterBar.appendChild(h('span', { style: 'width:1px;height:20px;background:var(--border);align-self:center;' }));
-          tvDecadeList.forEach(function(dec) { makeTvPill(dec, 'decade_' + dec, null, 'decade'); });
+          makeTvPillDropdown('Decades', tvDecadeList, 'decade_', 'decade');
+        }
+
+        if (tvGenreNames.length > 0) {
+          makeTvPillDropdown('Genres', tvGenreNames, 'genre_', 'genre');
         }
 
         container.appendChild(tvFilterBar);
-
-        if (tvGenreNames.length > 0) {
-          var tvGenreBar = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;' });
-          tvGenreNames.forEach(function(g) { makeTvPill(g, 'genre_' + g, tvGenreBar, 'genre'); });
-          container.appendChild(tvGenreBar);
-        }
 
         var countSpan2 = headerRight2.querySelector('span:last-child');
 
@@ -6048,6 +6113,12 @@
           if (tvActiveFilters['fav:yes']) {
             var anyFav = show.episodes.some(function(ep) { return _favoriteIds && _favoriteIds.has(ep.id); });
             if (!anyFav) return false;
+          }
+          var hasAge = tvActiveFilters.kids || tvActiveFilters.adult;
+          if (hasAge && show._cert) {
+            var isKid = kidsCerts[show._cert];
+            if (tvActiveFilters.kids && !tvActiveFilters.adult && !isKid) return false;
+            if (tvActiveFilters.adult && !tvActiveFilters.kids && isKid) return false;
           }
           var hasDecade = Object.keys(tvActiveFilters).some(function(k) { return k.startsWith('decade_'); });
           if (hasDecade) {
