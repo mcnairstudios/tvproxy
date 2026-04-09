@@ -273,6 +273,8 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 			SatIPSource:   stream.SatIPSourceID != "",
 			StreamGroup:   stream.Group,
 			StreamID:      streamID,
+			StreamVCodec:  stream.VODVCodec,
+			StreamACodec:  stream.VODACodec,
 			SourceProfile: s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID),
 		},
 		StrategyOutput{

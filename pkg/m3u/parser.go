@@ -18,13 +18,16 @@ type Entry struct {
 	TVPCollection string
 	TVPSeason     string
 	TVPEpisode string
-	TVPVCodec  string
-	TVPACodec  string
-	TVPRes     string
-	TVPAudio   string
-	TVPDur        string
-	TVPTags       string
-	TVPSeasonName string
+	TVPVCodec      string
+	TVPACodec      string
+	TVPRes         string
+	TVPAudio       string
+	TVPDur         string
+	TVPContainer   string
+	TVPAudioTracks string
+	TVPID          string
+	TVPTags        string
+	TVPSeasonName  string
 }
 
 func Parse(r io.Reader) ([]Entry, error) {
@@ -65,6 +68,9 @@ func parseExtInf(line string, entry *Entry) {
 	entry.TVPRes = extractAttr(line, "tvp-resolution")
 	entry.TVPAudio = extractAttr(line, "tvp-audio")
 	entry.TVPDur = extractAttr(line, "tvp-duration")
+	entry.TVPContainer = extractAttr(line, "tvp-container")
+	entry.TVPAudioTracks = extractAttr(line, "tvp-audio-tracks")
+	entry.TVPID = extractAttr(line, "tvp-id")
 	entry.TVPTags = extractAttr(line, "tvp-tags")
 	entry.TVPSeasonName = extractAttr(line, "tvp-season-name")
 

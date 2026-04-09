@@ -46,6 +46,8 @@ type StrategyInput struct {
 	SatIPSource   bool
 	StreamGroup   string
 	StreamID      string
+	StreamVCodec  string
+	StreamACodec  string
 	SourceProfile *models.SourceProfile
 }
 
@@ -92,13 +94,15 @@ func liveStrategy(in StrategyInput, out StrategyOutput, cat StreamCategory) Sess
 
 	sourceVideo := "h264"
 	sourceAudio := "aac"
-	if sp != nil {
-		if sp.VideoCodec != "" {
-			sourceVideo = sp.VideoCodec
-		}
-		if sp.AudioCodec != "" {
-			sourceAudio = sp.AudioCodec
-		}
+	if in.StreamVCodec != "" {
+		sourceVideo = strings.ToLower(in.StreamVCodec)
+	} else if sp != nil && sp.VideoCodec != "" {
+		sourceVideo = sp.VideoCodec
+	}
+	if in.StreamACodec != "" {
+		sourceAudio = strings.ToLower(in.StreamACodec)
+	} else if sp != nil && sp.AudioCodec != "" {
+		sourceAudio = sp.AudioCodec
 	}
 
 	s := SessionStrategy{
