@@ -356,17 +356,15 @@ func (s *Server) listEpisodes(w http.ResponseWriter, r *http.Request) {
 		item.IndexNumber = st.VODEpisode
 		item.ParentIndexNumber = st.VODSeason
 
-		{
-			if ep := s.tmdbClient.LookupEpisode(key, st.VODSeason, st.VODEpisode); ep != nil {
-				if ep.Name != "" {
-					item.Name = ep.Name
-				}
-				if ep.Overview != "" {
-					item.Overview = ep.Overview
-				}
-				if ep.StillPath != "" {
-					item.ImageTags["Primary"] = "tmdb_ep"
-				}
+		if ep := s.tmdbClient.LookupEpisode(key, st.VODSeason, st.VODEpisode); ep != nil {
+			if ep.Name != "" {
+				item.Name = ep.Name
+			}
+			if ep.Overview != "" {
+				item.Overview = ep.Overview
+			}
+			if ep.StillPath != "" {
+				item.ImageTags["Primary"] = "tmdb_ep"
 			}
 		}
 
@@ -397,19 +395,17 @@ func (s *Server) listFilters(w http.ResponseWriter, r *http.Request) {
 		if st.VODType != "movie" {
 			continue
 		}
-		{
-			if m := s.tmdbClient.LookupMovie(st.Name); m != nil {
-				for _, g := range m.Genres {
-					genreSet[g] = true
+		if m := s.tmdbClient.LookupMovie(st.Name); m != nil {
+			for _, g := range m.Genres {
+				genreSet[g] = true
+			}
+			if m.Year != "" {
+				if yr, _ := strconv.Atoi(m.Year); yr > 0 {
+					yearSet[yr] = true
 				}
-				if m.Year != "" {
-					if yr, _ := strconv.Atoi(m.Year); yr > 0 {
-						yearSet[yr] = true
-					}
-				}
-				if m.Certification != "" {
-					ratingSet[m.Certification] = true
-				}
+			}
+			if m.Certification != "" {
+				ratingSet[m.Certification] = true
 			}
 		}
 	}
