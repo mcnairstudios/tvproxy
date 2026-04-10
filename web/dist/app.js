@@ -854,9 +854,9 @@
     refreshBtn.onclick = function() {
       refreshBtn.style.opacity = '0.5';
       refreshBtn.disabled = true;
-      api.del('/api/tmdb/cache?query=' + encodeURIComponent(show.name)).then(function() {
+      api.del('/api/tmdb/cache?query=' + encodeURIComponent(show.name) + '&type=tv').then(function() {
         overlay.remove();
-        toast.success('Metadata refreshed for ' + show.name);
+        toast.success('Refreshing metadata for ' + show.name);
       }).catch(function() {
         refreshBtn.style.opacity = '1';
         refreshBtn.disabled = false;

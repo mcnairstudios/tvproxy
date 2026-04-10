@@ -69,8 +69,23 @@ func (h *TMDBHandler) Season(w http.ResponseWriter, r *http.Request) {
 
 func (h *TMDBHandler) InvalidateCache(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("query")
+	mediaType := r.URL.Query().Get("type")
 	if query != "" {
 		h.client.Invalidate(query)
+		if mediaType == "" {
+			mediaType = "tv"
+		}
+		go func() {
+			result, err := h.client.Search(query, mediaType)
+			if err != nil {
+				return
+			}
+			if mediaType == "movie" {
+				h.client.ResolveMovieFromSearch(result)
+			} else {
+				h.client.ResolveSeriesFromSearch(result)
+			}
+		}()
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

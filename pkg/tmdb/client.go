@@ -691,6 +691,14 @@ func (c *Client) resolveMovieFromCache(searchResult map[string]any) int {
 	return tmdbID
 }
 
+func (c *Client) ResolveMovieFromSearch(searchResult map[string]any) int {
+	return c.resolveMovie(searchResult)
+}
+
+func (c *Client) ResolveSeriesFromSearch(searchResult map[string]any) int {
+	return c.resolveSeries(searchResult)
+}
+
 func (c *Client) resolveMovie(searchResult map[string]any) int {
 	first := firstResult(searchResult)
 	if first == nil {
