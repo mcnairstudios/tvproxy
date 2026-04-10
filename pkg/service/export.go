@@ -221,6 +221,24 @@ func (s *ExportService) Import(ctx context.Context, data *ExportData) (int, erro
 		}
 	}
 
+	if len(data.SourceProfiles) > 0 && s.sourceProfileStore != nil {
+		existingSourceProfiles, _ := s.sourceProfileStore.List(ctx)
+		sourceProfileNames := make(map[string]bool)
+		for _, p := range existingSourceProfiles {
+			sourceProfileNames[p.Name] = true
+		}
+		for _, p := range data.SourceProfiles {
+			if sourceProfileNames[p.Name] {
+				continue
+			}
+			np := p
+			np.ID = ""
+			if err := s.sourceProfileStore.Create(ctx, &np); err == nil {
+				imported++
+			}
+		}
+	}
+
 	existingChannels, _ := s.channelStore.List(ctx)
 	channelNameSet := make(map[string]bool, len(existingChannels))
 	for _, c := range existingChannels {

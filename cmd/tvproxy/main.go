@@ -211,7 +211,8 @@ func main() {
 	logoService := service.NewLogoService(logoStore, epgStore, logoCache, log)
 
 	xtreamCache := xtream.NewCache(filepath.Join(dataDir, "cache", "xtream"))
-	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, cfg, dataDir, wgHTTPClient, log)
+	recordingStore := store.NewRecordingStore(cfg.RecordDir, log)
+	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, recordingStore, cfg, dataDir, wgHTTPClient, log)
 	m3uService.SetXtreamCache(xtreamCache)
 	m3uService.CleanupOrphanedStreams(ctx)
 	channelService := service.NewChannelService(channelStore, channelGroupStore, streamStore, log)
@@ -222,7 +223,6 @@ func main() {
 	proxyService := service.NewProxyService(channelStore, streamStore, profileStore, clientService, activityService, cfg, wgHTTPClient, log)
 	hdhrService := service.NewHDHRService(hdhrStore, channelStore, cfg)
 	outputService := service.NewOutputService(channelStore, channelGroupStore, epgStore, logoService, cfg, log)
-	recordingStore := store.NewRecordingStore(cfg.RecordDir, log)
 	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, recordingStore, log)
 	wgMultiClient := wgMultiService.HTTPClient()
 	sessionMgr := session.NewManager(cfg, wgHTTPClient, wgMultiClient, recordingStore, log)

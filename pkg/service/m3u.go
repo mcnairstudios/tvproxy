@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
+	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/m3u"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
@@ -25,6 +26,7 @@ type M3UService struct {
 	streamStore     store.StreamStore
 	channelStore    store.ChannelStore
 	logoService     *LogoService
+	probeCache      store.ProbeCache
 	config          *config.Config
 	configDir       string
 	httpClient      *http.Client
@@ -38,6 +40,7 @@ func NewM3UService(
 	streamStore store.StreamStore,
 	channelStore store.ChannelStore,
 	logoService *LogoService,
+	probeCache store.ProbeCache,
 	cfg *config.Config,
 	configDir string,
 	httpClient *http.Client,
@@ -51,6 +54,7 @@ func NewM3UService(
 		streamStore:     streamStore,
 		channelStore:    channelStore,
 		logoService:     logoService,
+		probeCache:      probeCache,
 		config:          cfg,
 		configDir:       configDir,
 		httpClient:      httpClient,
@@ -396,6 +400,7 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 	s.log.Info().Int("entries", len(entries)).Msg("parsed m3u entries")
 	s.Set(account.ID, RefreshStatus{State: "running", Message: "Processing streams...", Total: len(entries)})
 
+	m3uSvc := s
 	seen := make(map[string]struct{}, len(entries))
 	streams := make([]models.Stream, 0, len(entries))
 	keepIDs := make([]string, 0, len(entries))
@@ -439,6 +444,24 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 		s.VODSeasonName = entry.TVPSeasonName
 		s.VODYear = extractYearFromName(entry.Name)
 		streams = append(streams, s)
+
+		if entry.TVPVCodec != "" && m3uSvc.probeCache != nil {
+			probe := &ffmpeg.ProbeResult{
+				HasVideo: true,
+				Video: &ffmpeg.VideoInfo{
+					Codec: strings.ToLower(entry.TVPVCodec),
+				},
+			}
+			if entry.TVPDur != "" {
+				fmt.Sscanf(entry.TVPDur, "%f", &probe.Duration)
+			}
+			if entry.TVPACodec != "" {
+				probe.AudioTracks = append(probe.AudioTracks, ffmpeg.AudioTrack{
+					Codec: strings.ToLower(entry.TVPACodec),
+				})
+			}
+			m3uSvc.probeCache.SaveProbe(ffmpeg.StreamHash(entry.URL), probe)
+		}
 	}
 
 	return s.upsertAndFinalize(ctx, account, streams, keepIDs)
