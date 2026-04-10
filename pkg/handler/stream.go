@@ -221,7 +221,9 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 		if s.CacheType == "xtream" && h.xtreamCache != nil {
 			if s.VODType == "movie" {
 				if m := h.xtreamCache.GetMovie(s.CacheKey); m != nil {
-					item.PosterURL = h.logoService.Resolve(m.PosterURL)
+					if item.PosterURL == "" {
+						item.PosterURL = h.logoService.Resolve(m.PosterURL)
+					}
 					if m.Plot != "" {
 						item.Overview = m.Plot
 						xtreamEnriched = true
@@ -248,7 +250,9 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 					sr = h.xtreamCache.FindSeriesByName(s.VODSeries)
 				}
 				if sr != nil {
-					item.PosterURL = h.logoService.Resolve(sr.PosterURL)
+					if item.PosterURL == "" {
+						item.PosterURL = h.logoService.Resolve(sr.PosterURL)
+					}
 					item.Overview = sr.Plot
 					if sr.Genre != "" {
 						item.Genres = splitGenres(sr.Genre)
