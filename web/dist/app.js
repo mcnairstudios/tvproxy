@@ -5793,12 +5793,12 @@
 
           container.appendChild(filterBar);
 
-          var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;' });
-          var headerRight = h('div', { style: 'display:flex;align-items:center;gap:16px' });
-          countSpan = h('span', { style: 'color:var(--text-muted);font-size:0.95em' }, totalCount + ' titles');
-          headerRight.appendChild(countSpan);
-          header.appendChild(headerRight);
-          container.insertBefore(header, filterBar);
+          var topbarRight = document.getElementById('topbar-right');
+          if (topbarRight) {
+            countSpan = h('span', { style: 'color:var(--text-muted)' }, totalCount + ' titles');
+            topbarRight.appendChild(countSpan);
+          }
+          var headerRight = h('div', { style: 'display:flex;align-items:center;gap:12px;' });
 
           return headerRight;
         },
@@ -6398,7 +6398,9 @@
               }
             }).catch(function() {});
           }, 3000);
-          headerRight.appendChild(iptvMovieSyncSpan);
+          if (topbarRight) {
+            topbarRight.insertBefore(iptvMovieSyncSpan, topbarRight.firstChild);
+          }
 
           var langSelect = h('select', { style: 'padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;cursor:pointer;' });
           langSelect.appendChild(h('option', { value: '' }, 'All Languages'));
@@ -7653,9 +7655,12 @@
       h('div', { className: 'layout' },
         sidebar,
         h('div', { className: 'main-content' },
-          h('div', { className: 'topbar' },
-            hamburger,
-            h('h1', null, pageTitle ? pageTitle.label : 'Dashboard'),
+          h('div', { className: 'topbar', style: 'display:flex;align-items:center;justify-content:space-between;' },
+            h('div', { style: 'display:flex;align-items:center;gap:8px;' },
+              hamburger,
+              h('h1', { style: 'margin:0;' }, pageTitle ? pageTitle.label : 'Dashboard'),
+            ),
+            h('div', { id: 'topbar-right', style: 'display:flex;align-items:center;gap:12px;font-size:0.85em;' }),
           ),
           contentArea,
         ),
