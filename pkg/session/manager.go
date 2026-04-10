@@ -208,7 +208,7 @@ func (m *Manager) buildDualOutputArgs(hlsDir, mp4Path string, pipeInput bool, op
 		"-map", "0:a:0?",
 	)
 
-	venc := ffmpeg.MapEncoder(videoCodec)
+	venc := ffmpeg.MapEncoderHW(videoCodec, hwaccel)
 	if opts.SourceDeinterlace && venc == "copy" {
 		venc = "libx264"
 	}

@@ -203,7 +203,7 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64, pipeHTT
 		)
 	}
 
-	videoCodec := mapEncoder(s.Profile.VideoCodec)
+	videoCodec := mapEncoderHW(s.Profile.VideoCodec, s.Profile.HWAccel)
 	audioCodec := s.Profile.AudioCodec
 	if audioCodec == "" || audioCodec == "copy" {
 		audioCodec = "copy"
@@ -358,15 +358,50 @@ func (s *Session) IdleSince() time.Duration {
 }
 
 func mapEncoder(codec string) string {
+	return mapEncoderHW(codec, "")
+}
+
+func mapEncoderHW(codec, hwaccel string) string {
 	switch codec {
 	case "", "copy":
 		return "copy"
 	case "h264":
-		return "libx264"
-	case "h265":
-		return "libx265"
+		switch hwaccel {
+		case "qsv":
+			return "h264_qsv"
+		case "nvenc", "cuda":
+			return "h264_nvenc"
+		case "vaapi":
+			return "h264_vaapi"
+		case "videotoolbox":
+			return "h264_videotoolbox"
+		default:
+			return "libx264"
+		}
+	case "h265", "hevc":
+		switch hwaccel {
+		case "qsv":
+			return "hevc_qsv"
+		case "nvenc", "cuda":
+			return "hevc_nvenc"
+		case "vaapi":
+			return "hevc_vaapi"
+		case "videotoolbox":
+			return "hevc_videotoolbox"
+		default:
+			return "libx265"
+		}
 	case "av1":
-		return "libsvtav1"
+		switch hwaccel {
+		case "qsv":
+			return "av1_qsv"
+		case "nvenc", "cuda":
+			return "av1_nvenc"
+		case "vaapi":
+			return "av1_vaapi"
+		default:
+			return "libsvtav1"
+		}
 	default:
 		return codec
 	}
