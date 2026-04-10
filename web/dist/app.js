@@ -854,7 +854,15 @@
     refreshBtn.onclick = function() {
       refreshBtn.style.opacity = '0.5';
       refreshBtn.disabled = true;
-      api.del('/api/tmdb/cache?query=' + encodeURIComponent(show.name) + '&type=tv').then(function() {
+      var ep0 = show.episodes[0];
+      var tmdbId = ep0 && ep0.tmdb_id;
+      var refreshPromise;
+      if (tmdbId) {
+        refreshPromise = api.post('/api/tmdb/rematch', { stream_id: ep0.id, tmdb_id: tmdbId, media_type: 'series' });
+      } else {
+        refreshPromise = api.del('/api/tmdb/cache?query=' + encodeURIComponent(show.name) + '&type=tv');
+      }
+      refreshPromise.then(function() {
         overlay.remove();
         toast.success('Refreshing metadata for ' + show.name);
       }).catch(function() {
@@ -1206,7 +1214,14 @@
     refreshIcon.onclick = function() {
       refreshIcon.style.opacity = '0.5';
       refreshIcon.disabled = true;
-      api.del('/api/tmdb/cache?query=' + encodeURIComponent(opts.title)).then(function() {
+      var rp;
+      if (opts.tmdbID && opts.vodStreamID) {
+        rp = api.post('/api/tmdb/rematch', { stream_id: opts.vodStreamID, tmdb_id: opts.tmdbID, media_type: opts.mediaType || 'movie' });
+      } else {
+        var mt = opts.mediaType === 'series' ? 'tv' : 'movie';
+        rp = api.del('/api/tmdb/cache?query=' + encodeURIComponent(opts.title) + '&type=' + mt);
+      }
+      rp.then(function() {
         overlay.remove();
         showProgrammeModal(opts);
       }).catch(function() {
