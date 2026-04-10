@@ -225,6 +225,7 @@ func main() {
 	outputService := service.NewOutputService(channelStore, channelGroupStore, epgStore, logoService, cfg, log)
 	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, recordingStore, log)
 	wgMultiClient := wgMultiService.HTTPClient()
+	m3uService.SetWGClient(wgMultiClient)
 	sessionMgr := session.NewManager(cfg, wgHTTPClient, wgMultiClient, recordingStore, log)
 	vodService := service.NewVODService(channelStore, streamStore, profileStore, sourceProfileStore, m3uAccountStore, satipSourceStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
 	vodService.RecoverRecordings(ctx)

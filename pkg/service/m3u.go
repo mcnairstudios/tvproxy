@@ -30,6 +30,7 @@ type M3UService struct {
 	config          *config.Config
 	configDir       string
 	httpClient      *http.Client
+	wgClient        *http.Client
 	xtreamCache     *xtream.Cache
 	log             zerolog.Logger
 	StatusTracker
@@ -87,7 +88,7 @@ func (s *M3UService) ResumeSeriesSync(ctx context.Context) {
 		if xtreamTimeout <= 0 {
 			xtreamTimeout = 30 * time.Second
 		}
-		client := xtream.NewClient(acct.URL, acct.Username, acct.Password, s.config.UserAgent, s.config.BypassHeader, s.config.BypassSecret, xtreamTimeout, s.httpClient.Transport)
+		client := xtream.NewClient(acct.URL, acct.Username, acct.Password, s.config.UserAgent, s.config.BypassHeader, s.config.BypassSecret, xtreamTimeout, s.transportForAccount(&acct))
 
 		fetchCtx, fetchCancel := context.WithTimeout(ctx, 60*time.Second)
 		seriesList, err := client.GetSeries(fetchCtx)
@@ -210,7 +211,7 @@ func (s *M3UService) refreshXtreamAccount(ctx context.Context, account *models.M
 	s.log.Info().Str("account_id", account.ID).Str("name", account.Name).Msg("refreshing xtream account")
 
 	xtreamTimeout := s.config.Settings.Network.XtreamAPITimeout
-	client := xtream.NewClient(account.URL, account.Username, account.Password, s.config.UserAgent, s.config.BypassHeader, s.config.BypassSecret, xtreamTimeout, s.httpClient.Transport)
+	client := xtream.NewClient(account.URL, account.Username, account.Password, s.config.UserAgent, s.config.BypassHeader, s.config.BypassSecret, xtreamTimeout, s.transportForAccount(account))
 
 	if _, err := client.Authenticate(ctx); err != nil {
 		return fmt.Errorf("xtream authentication failed: %w", err)
@@ -369,7 +370,19 @@ func (s *M3UService) httpClientForAccount(account *models.M3UAccount) *http.Clie
 			return tlsClient
 		}
 	}
+	if account.UseWireGuard && s.wgClient != nil {
+		return s.wgClient
+	}
 	return s.httpClient
+}
+
+func (s *M3UService) SetWGClient(c *http.Client) { s.wgClient = c }
+
+func (s *M3UService) transportForAccount(account *models.M3UAccount) http.RoundTripper {
+	if account.UseWireGuard && s.wgClient != nil {
+		return s.wgClient.Transport
+	}
+	return s.httpClientForAccount(account).Transport
 }
 
 func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UAccount) error {
@@ -513,7 +526,7 @@ func (s *M3UService) upsertAndFinalize(ctx context.Context, account *models.M3UA
 
 func (s *M3UService) syncXtreamSeries(account *models.M3UAccount, seriesList []xtream.Series) {
 	xtreamTimeout := s.config.Settings.Network.XtreamAPITimeout
-	client := xtream.NewClient(account.URL, account.Username, account.Password, s.config.UserAgent, s.config.BypassHeader, s.config.BypassSecret, xtreamTimeout, s.httpClient.Transport)
+	client := xtream.NewClient(account.URL, account.Username, account.Password, s.config.UserAgent, s.config.BypassHeader, s.config.BypassSecret, xtreamTimeout, s.transportForAccount(account))
 
 	s.log.Info().Int("series", len(seriesList)).Msg("starting background xtream series sync")
 
