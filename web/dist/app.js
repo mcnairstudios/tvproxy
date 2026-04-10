@@ -2293,7 +2293,7 @@
       const m3uStreamCount = accounts.reduce((sum, a) => sum + (a.stream_count || 0), 0);
       const satipStreamCount = satipSources.reduce((sum, s) => sum + (s.stream_count || 0), 0);
       var wgProfiles = wgStatus && wgStatus.profiles ? wgStatus.profiles : [];
-      var wgConnected = wgProfiles.filter(function(p) { return p.state === 'connected' && p.healthy; }).length;
+      var wgConnected = wgProfiles.filter(function(p) { return p.state === 'connected' && (p.healthy === true || p.healthy === null || p.healthy === undefined); }).length;
       var wgTotal = wgProfiles.length;
       var wgLabel = wgTotal > 0 ? wgConnected + '/' + wgTotal : 'Off';
 
