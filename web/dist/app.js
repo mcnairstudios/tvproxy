@@ -6385,6 +6385,22 @@
           if (genreNames.length > 0) dropdowns.push({ label: 'Genres', options: genreNames, keyPrefix: 'genre_', group: 'genre' });
           var headerRight = mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
 
+          var iptvMovieSyncSpan = h('span', { id: 'tmdb-sync-iptv-movies', style: 'display:none;font-size:0.85em;color:var(--accent)' });
+          var iptvMovieSyncPoll = setInterval(function() {
+            if (!document.getElementById('tmdb-sync-iptv-movies')) { clearInterval(iptvMovieSyncPoll); return; }
+            api.get('/api/tmdb/sync').then(function(s) {
+              if (s.syncing && s.total > 0) {
+                var pct = Math.round(s.completed / s.total * 100);
+                iptvMovieSyncSpan.textContent = 'Syncing artwork ' + pct + '% (' + s.completed + '/' + s.total + ')';
+                iptvMovieSyncSpan.style.display = '';
+              } else {
+                iptvMovieSyncSpan.style.display = 'none';
+                if (!s.syncing) clearInterval(iptvMovieSyncPoll);
+              }
+            }).catch(function() {});
+          }, 3000);
+          headerRight.insertBefore(iptvMovieSyncSpan, headerRight.firstChild);
+
           var langSelect = h('select', { style: 'padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;cursor:pointer;' });
           langSelect.appendChild(h('option', { value: '' }, 'All Languages'));
           var knownLangs = {};
