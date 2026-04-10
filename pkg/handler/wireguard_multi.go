@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
+	"github.com/gavinmcnair/tvproxy/pkg/session"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
@@ -21,9 +22,14 @@ type MultiWireGuardProvider interface {
 	IsConnected() bool
 }
 
+type PoolStatusProvider interface {
+	Status() []session.PoolStatus
+}
+
 type MultiWireGuardHandler struct {
 	svc          MultiWireGuardProvider
 	profileStore *store.WireGuardProfileStore
+	pool         PoolStatusProvider
 	log          zerolog.Logger
 }
 
@@ -33,6 +39,18 @@ func NewMultiWireGuardHandler(svc MultiWireGuardProvider, profileStore *store.Wi
 		profileStore: profileStore,
 		log:          log.With().Str("handler", "wireguard_multi").Logger(),
 	}
+}
+
+func (h *MultiWireGuardHandler) SetPool(pool PoolStatusProvider) {
+	h.pool = pool
+}
+
+func (h *MultiWireGuardHandler) PoolStatus(w http.ResponseWriter, r *http.Request) {
+	if h.pool == nil {
+		respondJSON(w, http.StatusOK, []session.PoolStatus{})
+		return
+	}
+	respondJSON(w, http.StatusOK, h.pool.Status())
 }
 
 func (h *MultiWireGuardHandler) Status(w http.ResponseWriter, r *http.Request) {

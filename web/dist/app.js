@@ -7146,7 +7146,7 @@
         return card;
       }
 
-      function renderProfileLine(ps) {
+      function renderProfileLine(ps, poolEntries) {
         var row = h('div', { style: 'display:flex;align-items:center;gap:8px;padding:8px 0;' });
         row.appendChild(h('span', { style: 'font-weight:600;min-width:120px' }, ps.name || 'Unnamed'));
         var enabled = ps.state === 'connected' || ps.state === 'connecting';
@@ -7155,6 +7155,13 @@
           if (ps.healthy === true) row.appendChild(h('span', { style: 'font-size:0.85em;color:var(--success)' }, '\u2705 Passing'));
           else if (ps.healthy === false) row.appendChild(h('span', { style: 'font-size:0.85em;color:var(--danger)' }, '\u274C Failing'));
           else row.appendChild(h('span', { style: 'font-size:0.85em;color:var(--text-muted)' }, '\u23F3 Pending'));
+        }
+        var poolEntry = (poolEntries || []).find(function(pe) { return pe.profile_name === ps.name; });
+        if (poolEntry) {
+          var portLabel = 'Port ' + poolEntry.port;
+          if (poolEntry.fail_count > 0 && !poolEntry.is_direct) portLabel += ' (' + poolEntry.fail_count + ' fails)';
+          if (poolEntry.is_direct) portLabel += ' (fallback)';
+          row.appendChild(h('span', { style: 'font-size:0.8em;color:var(--text-muted);font-family:monospace;' }, portLabel));
         }
         return row;
       }
@@ -7267,9 +7274,10 @@
 
       async function renderPage() {
         try {
-          var [profiles, multiStatus] = await Promise.all([
+          var [profiles, multiStatus, poolStatus] = await Promise.all([
             api.get('/api/wireguard/profiles'),
-            api.get('/api/wireguard/multi/status')
+            api.get('/api/wireguard/multi/status'),
+            api.get('/api/wireguard/pool').catch(function() { return []; })
           ]);
 
           container.innerHTML = '';
@@ -7330,11 +7338,19 @@
           } else if (profiles.length > 0) {
             overviewRef = h('div', { style: 'background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 16px;margin-bottom:16px;' });
             (multiStatus.profiles || []).forEach(function(ps) {
-              var line = renderProfileLine(ps);
+              var line = renderProfileLine(ps, poolStatus);
               line.style.cursor = 'pointer';
               line.onclick = function() { selectedProfileId = ps.id; renderPage(); };
               overviewRef.appendChild(line);
             });
+            var directEntry = (poolStatus || []).find(function(pe) { return pe.is_direct; });
+            if (directEntry) {
+              var directLine = h('div', { style: 'display:flex;align-items:center;gap:8px;padding:8px 0;' });
+              directLine.appendChild(h('span', { style: 'font-weight:600;min-width:120px;color:var(--text-muted)' }, 'Direct'));
+              directLine.appendChild(h('span', { style: 'font-size:0.85em;color:var(--text-muted)' }, 'No VPN (fallback)'));
+              directLine.appendChild(h('span', { style: 'font-size:0.8em;color:var(--text-muted);font-family:monospace;' }, 'Port ' + directEntry.port));
+              overviewRef.appendChild(directLine);
+            }
             contentDiv.appendChild(overviewRef);
           } else {
             contentDiv.appendChild(h('p', { style: 'color:var(--text-muted);text-align:center;padding:32px' }, 'No profiles configured. Click "+ Add Profile" to create one.'));
@@ -7373,7 +7389,7 @@
           if (overviewRef && !selectedProfileId) {
             overviewRef.innerHTML = '';
             (multiStatus.profiles || []).forEach(function(ps) {
-              var line = renderProfileLine(ps);
+              var line = renderProfileLine(ps, poolStatus);
               line.style.cursor = 'pointer';
               line.onclick = function() { selectedProfileId = ps.id; renderPage(); };
               overviewRef.appendChild(line);

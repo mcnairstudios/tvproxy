@@ -126,6 +126,30 @@ func (p *WGPool) AddDirect(profileID, profileName string, cfg *config.Config, lo
 	p.log.Info().Str("profile", profileName).Int("port", proxy.Port()).Msgf("pool direct: curl \"http://127.0.0.1:%d/?url=...\" (lowest priority)", proxy.Port())
 }
 
+type PoolStatus struct {
+	ProfileID   string `json:"profile_id"`
+	ProfileName string `json:"profile_name"`
+	Port        int    `json:"port"`
+	FailCount   int    `json:"fail_count"`
+	IsDirect    bool   `json:"is_direct"`
+}
+
+func (p *WGPool) Status() []PoolStatus {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var result []PoolStatus
+	for _, e := range p.proxies {
+		result = append(result, PoolStatus{
+			ProfileID:   e.profileID,
+			ProfileName: e.profileName,
+			Port:        e.proxy.Port(),
+			FailCount:   e.failCount,
+			IsDirect:    e.failCount >= 1000,
+		})
+	}
+	return result
+}
+
 func (p *WGPool) Count() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

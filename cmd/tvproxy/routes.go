@@ -285,6 +285,7 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 			r.Post("/profiles/{id}/reconnect", h.wireguardMulti.Reconnect)
 			r.Post("/profiles/{id}/activate", h.wireguardMulti.SetActive)
 			r.Get("/multi/status", h.wireguardMulti.Status)
+			r.Get("/pool", h.wireguardMulti.PoolStatus)
 		})
 	})
 

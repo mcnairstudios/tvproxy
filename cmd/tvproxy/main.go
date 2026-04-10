@@ -282,6 +282,8 @@ func main() {
 		log,
 	)
 	tmdbHandler := handler.NewTMDBHandler(tmdbClient, streamStore)
+	wgMultiHandler := handler.NewMultiWireGuardHandler(wgMultiService, wgProfileStore, log)
+	wgMultiHandler.SetPool(wgPool)
 	registerRoutes(r, routeHandlers{
 		auth:           handler.NewAuthHandler(authService),
 		user:           handler.NewUserHandler(authService),
@@ -306,7 +308,7 @@ func main() {
 		scheduler:      handler.NewSchedulerHandler(schedulerService, log),
 		dlna:           handler.NewDLNAHandler(dlnaService, authService, settingsService, cfg, log),
 		wireguard:      handler.NewWireGuardHandler(wgService, log),
-		wireguardMulti: handler.NewMultiWireGuardHandler(wgMultiService, wgProfileStore, log),
+		wireguardMulti: wgMultiHandler,
 		tmdb:           tmdbHandler,
 		logoCache:      logoCache,
 		log:            log,
