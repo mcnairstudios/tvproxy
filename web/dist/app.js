@@ -5795,10 +5795,13 @@
 
           var topbarRight = document.getElementById('topbar-right');
           if (topbarRight) {
+            topbarRight.innerHTML = '';
             countSpan = h('span', { style: 'color:var(--text-muted)' }, totalCount + ' titles');
             topbarRight.appendChild(countSpan);
           }
-          var headerRight = h('div', { style: 'display:flex;align-items:center;gap:12px;' });
+
+          var headerRight = h('div', { style: 'display:flex;align-items:center;gap:12px;margin-bottom:8px;' });
+          container.insertBefore(headerRight, filterBar);
 
           return headerRight;
         },
