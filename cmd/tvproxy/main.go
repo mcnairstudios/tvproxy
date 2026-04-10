@@ -230,7 +230,7 @@ func main() {
 	vodService := service.NewVODService(channelStore, streamStore, profileStore, sourceProfileStore, m3uAccountStore, satipSourceStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
 	vodService.RecoverRecordings(ctx)
 	schedulerService := service.NewSchedulerService(scheduledRecStore, channelStore, vodService, cfg, log)
-	dlnaService := service.NewDLNAService(channelStore, channelGroupStore, userStore, settingsService, logoService, vodService, cfg, log)
+	dlnaService := service.NewDLNAService(channelStore, channelGroupStore, userStore, favoriteStore, streamStore, settingsService, logoService, vodService, cfg, log)
 
 	authMW := middleware.NewAuthMiddleware(authService, activityService, cfg.APIKey, adminUserID)
 

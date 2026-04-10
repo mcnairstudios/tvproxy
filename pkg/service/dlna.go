@@ -27,6 +27,8 @@ type DLNAService struct {
 	channelStore      store.ChannelStore
 	channelGroupStore store.ChannelGroupStore
 	userStore         store.UserStore
+	favoriteStore     store.FavoriteStore
+	streamStore       store.StreamReader
 	settingsService   *SettingsService
 	logoService       *LogoService
 	vodService        *VODService
@@ -38,6 +40,8 @@ func NewDLNAService(
 	channelStore store.ChannelStore,
 	channelGroupStore store.ChannelGroupStore,
 	userStore store.UserStore,
+	favoriteStore store.FavoriteStore,
+	streamStore store.StreamReader,
 	settingsService *SettingsService,
 	logoService *LogoService,
 	vodService *VODService,
@@ -48,10 +52,12 @@ func NewDLNAService(
 		channelStore:      channelStore,
 		channelGroupStore: channelGroupStore,
 		userStore:         userStore,
-		settingsService:  settingsService,
-		logoService:      logoService,
-		vodService:       vodService,
-		config:           cfg,
+		favoriteStore:     favoriteStore,
+		streamStore:       streamStore,
+		settingsService:   settingsService,
+		logoService:       logoService,
+		vodService:        vodService,
+		config:            cfg,
 		log:              log.With().Str("service", "dlna").Logger(),
 	}
 }
@@ -273,6 +279,8 @@ func (s *DLNAService) handleBrowse(ctx context.Context, baseURL string, body []b
 	switch {
 	case req.ObjectID == "0":
 		return s.browseRoot(ctx, req.BrowseFlag, groupFilter)
+	case req.ObjectID == "favorites":
+		return s.browseFavorites(ctx, baseURL, req.BrowseFlag, req.StartingIndex, req.RequestedCount, user)
 	case req.ObjectID == "recordings":
 		return s.browseRecordings(ctx, baseURL, req.BrowseFlag, req.StartingIndex, req.RequestedCount, user)
 	case strings.HasPrefix(req.ObjectID, "rec-"):
@@ -299,6 +307,9 @@ func (s *DLNAService) browseRoot(ctx context.Context, browseFlag string, groupFi
 	if s.vodService != nil {
 		childCount++
 	}
+	if s.favoriteStore != nil {
+		childCount++
+	}
 
 	if browseFlag == "BrowseMetadata" {
 		didl := `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">` +
@@ -320,6 +331,10 @@ func (s *DLNAService) browseRoot(ctx context.Context, browseFlag string, groupFi
 		b.WriteString(fmt.Sprintf(`<container id="grp-ungrouped" parentID="0" childCount="%d" restricted="1">`,
 			ungroupedCount))
 		b.WriteString(`<dc:title>Ungrouped</dc:title><upnp:class>object.container</upnp:class></container>`)
+	}
+	if s.favoriteStore != nil {
+		b.WriteString(`<container id="favorites" parentID="0" restricted="1">`)
+		b.WriteString(`<dc:title>Favorites</dc:title><upnp:class>object.container</upnp:class></container>`)
 	}
 	if s.vodService != nil {
 		b.WriteString(`<container id="recordings" parentID="0" restricted="1">`)
@@ -433,6 +448,73 @@ func (s *DLNAService) browseChannelItem(ctx context.Context, baseURL, objectID, 
 		xmlutil.XmlEscape(baseURL), xmlutil.XmlEscape(ch.ID)))
 	b.WriteString(`</item></DIDL-Lite>`)
 	return soapBrowseResponse(xmlutil.XmlEscape(b.String()), 1, 1), nil
+}
+
+func (s *DLNAService) browseFavorites(ctx context.Context, baseURL, browseFlag string, startIdx, reqCount int, user *models.User) (string, error) {
+	if browseFlag == "BrowseMetadata" {
+		didl := didlHeader + `<container id="favorites" parentID="0" restricted="1">` +
+			`<dc:title>Favorites</dc:title><upnp:class>object.container</upnp:class>` +
+			`</container></DIDL-Lite>`
+		return soapBrowseResponse(xmlutil.XmlEscape(didl), 1, 1), nil
+	}
+
+	userID := ""
+	if user != nil {
+		userID = user.ID
+	}
+	if userID == "" || s.favoriteStore == nil {
+		return soapBrowseResponse(xmlutil.XmlEscape(emptyDIDL), 0, 0), nil
+	}
+
+	favIDs, _ := s.favoriteStore.ListByUser(ctx, userID)
+
+	type favItem struct {
+		id, name, logo, resURL string
+	}
+	var items []favItem
+
+	for _, fid := range favIDs {
+		if ch, err := s.channelStore.GetByID(ctx, fid); err == nil && ch != nil && ch.IsEnabled {
+			logo := s.logoService.ResolveChannel(*ch)
+			items = append(items, favItem{id: "ch-" + ch.ID, name: ch.Name, logo: logo, resURL: baseURL + "/channel/" + ch.ID + ".mp4"})
+			continue
+		}
+		if s.streamStore != nil {
+			if st, err := s.streamStore.GetByID(ctx, fid); err == nil && st != nil {
+				items = append(items, favItem{id: "ch-" + st.ID, name: st.Name, logo: s.logoService.Resolve(st.Logo), resURL: baseURL + "/stream/" + st.ID + ".mp4"})
+			}
+		}
+	}
+
+	total := len(items)
+	if reqCount <= 0 {
+		reqCount = total
+	}
+	end := startIdx + reqCount
+	if end > total {
+		end = total
+	}
+	if startIdx > total {
+		startIdx = total
+	}
+	page := items[startIdx:end]
+
+	var b strings.Builder
+	b.WriteString(didlHeader)
+	for _, item := range page {
+		b.WriteString(fmt.Sprintf(`<item id="%s" parentID="favorites" restricted="1">`, xmlutil.XmlEscape(item.id)))
+		b.WriteString(fmt.Sprintf(`<dc:title>%s</dc:title>`, xmlutil.XmlEscape(item.name)))
+		b.WriteString(`<upnp:class>object.item.videoItem.videoBroadcast</upnp:class>`)
+		if item.logo != "" && strings.HasPrefix(item.logo, "http") {
+			profile, _ := dlnaLogoMeta(item.logo)
+			b.WriteString(fmt.Sprintf(`<upnp:albumArtURI dlna:profileID="%s">%s</upnp:albumArtURI>`, profile, xmlutil.XmlEscape(item.logo)))
+		}
+		b.WriteString(fmt.Sprintf(`<res protocolInfo="http-get:*:video/mp2t:DLNA.ORG_PN=MPEG_TS_SD_EU;DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=89000000000000000000000000000000">%s</res>`,
+			xmlutil.XmlEscape(item.resURL)))
+		b.WriteString(`</item>`)
+	}
+	b.WriteString(`</DIDL-Lite>`)
+	return soapBrowseResponse(xmlutil.XmlEscape(b.String()), len(page), total), nil
 }
 
 func (s *DLNAService) browseRecordings(ctx context.Context, baseURL, browseFlag string, startIdx, reqCount int, user *models.User) (string, error) {

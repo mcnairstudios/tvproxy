@@ -147,7 +147,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	settingsHandler := NewSettingsHandler(settingsService, exportService, dataResetter, authService, streamStore, epgStore)
 	clientHandler := NewClientHandler(clientService)
 	schedulerHandler := NewSchedulerHandler(schedulerService, log)
-	dlnaService := service.NewDLNAService(channelStore, channelGroupStore, userStore, settingsService, logoService, vodService, cfg, log)
+	dlnaService := service.NewDLNAService(channelStore, channelGroupStore, userStore, nil, nil, settingsService, logoService, vodService, cfg, log)
 	dlnaHandler := NewDLNAHandler(dlnaService, authService, settingsService, cfg, log)
 
 	r := chi.NewRouter()
