@@ -173,7 +173,7 @@ func (m *Manager) StartCleanupWorker(ctx context.Context) {
 			m.StopAll()
 			return
 		case <-ticker.C:
-			m.CleanupIdle(5 * time.Minute)
+			m.CleanupIdle(30 * time.Second)
 		}
 	}
 }

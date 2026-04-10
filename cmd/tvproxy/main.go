@@ -246,6 +246,9 @@ func main() {
 		}
 	}
 	go hlsManager.StartCleanupWorker(ctx)
+	sessionMgr.SetOnCleanup(func(channelID string) {
+		hlsManager.StopSession(channelID)
+	})
 
 	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, sourceProfileStore, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
 	dataResetter := service.NewDataResetter(
