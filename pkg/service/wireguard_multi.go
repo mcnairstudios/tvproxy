@@ -383,6 +383,27 @@ func (s *MultiWireGuardService) AllStatus(ctx context.Context) map[string]any {
 	}
 }
 
+func (s *MultiWireGuardService) ConnectedTransports() map[string]*http.Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]*http.Client)
+	for id, ts := range s.tunnels {
+		if ts.transport != nil && ts.state == "connected" {
+			result[id] = &http.Client{Transport: ts.transport}
+		}
+	}
+	return result
+}
+
+func (s *MultiWireGuardService) ProfileName(profileID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if ts, ok := s.tunnels[profileID]; ok {
+		return ts.profileName
+	}
+	return profileID
+}
+
 func (s *MultiWireGuardService) SetActiveProfile(ctx context.Context, profileID string) error {
 	s.mu.Lock()
 	ts, ok := s.tunnels[profileID]
