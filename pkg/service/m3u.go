@@ -324,8 +324,12 @@ func (s *M3UService) httpClientForAccount(account *models.M3UAccount) *http.Clie
 func (s *M3UService) SetWGClient(c *http.Client) { s.wgClient = c }
 
 func (s *M3UService) transportForAccount(account *models.M3UAccount) http.RoundTripper {
-	if account.UseWireGuard && s.wgClient != nil {
-		return s.wgClient.Transport
+	if account.UseWireGuard {
+		if s.wgClient != nil {
+			s.log.Info().Str("account", account.Name).Msg("routing refresh via wireguard")
+			return s.wgClient.Transport
+		}
+		s.log.Warn().Str("account", account.Name).Msg("wireguard requested but wgClient is nil")
 	}
 	return s.httpClientForAccount(account).Transport
 }
