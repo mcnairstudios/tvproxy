@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -108,8 +109,8 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if source != "" || lang != "" {
-		var filtered []models.Stream
+	if source != "" {
+		var sourceFiltered []models.Stream
 		for _, s := range streams {
 			if source == "xtream" && s.CacheType != "xtream" {
 				continue
@@ -117,7 +118,32 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 			if source == "local" && s.CacheType == "xtream" {
 				continue
 			}
-			if lang != "" && s.Language != lang {
+			sourceFiltered = append(sourceFiltered, s)
+		}
+		streams = sourceFiltered
+	}
+
+	langCounts := make(map[string]int)
+	for _, s := range streams {
+		if s.Language == "" {
+			continue
+		}
+		if s.VODType == "" {
+			continue
+		}
+		if vodType != "" && s.VODType != vodType {
+			continue
+		}
+		if s.VODType == "series" && s.VODSeason == 0 && s.VODEpisode == 0 {
+			continue
+		}
+		langCounts[s.Language]++
+	}
+
+	if lang != "" {
+		var filtered []models.Stream
+		for _, s := range streams {
+			if s.Language != lang {
 				continue
 			}
 			filtered = append(filtered, s)
@@ -317,6 +343,11 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 
 	if items == nil {
 		items = []vodItem{}
+	}
+	if len(langCounts) > 0 {
+		if lj, err := json.Marshal(langCounts); err == nil {
+			w.Header().Set("X-Language-Counts", string(lj))
+		}
 	}
 	respondJSON(w, http.StatusOK, items)
 }

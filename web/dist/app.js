@@ -107,6 +107,14 @@
     },
 
     get(path, fetchOpts) { return this.request('GET', path, null, fetchOpts); },
+    async getWithHeaders(path) {
+      var headers = { 'Content-Type': 'application/json' };
+      if (state.accessToken) headers['Authorization'] = 'Bearer ' + state.accessToken;
+      var resp = await fetch(path, { method: 'GET', headers: headers });
+      if (!resp.ok) { var err = await resp.json().catch(function() { return {}; }); throw new Error(err.error || 'Request failed'); }
+      var data = await resp.json();
+      return { data: data, headers: resp.headers };
+    },
     post(path, body) { return this.request('POST', path, body); },
     put(path, body) { return this.request('PUT', path, body); },
     del(path) { return this.request('DELETE', path); },
@@ -5818,7 +5826,7 @@
           var headerRight = h('div', { style: 'display:flex;align-items:center;gap:12px;margin-bottom:8px;' });
           container.insertBefore(headerRight, filterBar);
 
-          return headerRight;
+          return { headerRight: headerRight, filterBar: filterBar };
         },
 
         buildGrid: function(container, items, matchFn) {
@@ -5978,7 +5986,8 @@
         if (decadeList.length > 0) dropdowns.push({ label: 'Decades', options: decadeList, keyPrefix: 'decade_', group: 'decade' });
         if (genreNames.length > 0) dropdowns.push({ label: 'Genres', options: genreNames, keyPrefix: 'genre_', group: 'genre' });
 
-        var movieHeaderRight = mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
+        var movieBars = mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
+        var movieHeaderRight = movieBars.headerRight;
         movieHeaderRight.insertBefore(syncSpan, movieHeaderRight.firstChild);
 
         mg.buildGrid(container, displayItems, function(di, af) {
@@ -6302,7 +6311,8 @@
         if (tvDecadeList.length > 0) dropdowns.push({ label: 'Decades', options: tvDecadeList, keyPrefix: 'decade_', group: 'decade' });
         if (tvGenreNames.length > 0) dropdowns.push({ label: 'Genres', options: tvGenreNames, keyPrefix: 'genre_', group: 'genre' });
 
-        var tvHeaderRight = mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
+        var tvBars = mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
+        var tvHeaderRight = tvBars.headerRight;
         tvHeaderRight.insertBefore(syncSpan2, tvHeaderRight.firstChild);
 
         mg.buildGrid(container, displayItems, function(di, af) {
@@ -6351,12 +6361,34 @@
         async function loadMovies() {
           var url = '/api/vod/library?type=movie&source=xtream';
           if (currentLang) url += '&lang=' + encodeURIComponent(currentLang);
-          var items = await api.get(url);
+          var resp = await api.getWithHeaders(url);
+          var items = resp.data;
+          var langHeader = resp.headers.get('X-Language-Counts');
+          var allLangs = langHeader ? JSON.parse(langHeader) : {};
           container.innerHTML = '';
+
+          var topbarRight = document.getElementById('topbar-right');
+          if (topbarRight) {
+            topbarRight.innerHTML = '';
+            var countSpan = h('span', { style: 'color:var(--text-muted)' }, items.length + ' titles');
+            topbarRight.appendChild(countSpan);
+          }
+
           if (items.length === 0) {
+            var emptyBar = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;' });
+            emptyBar.appendChild(h('div', { style: 'flex:1' }));
+            var emptyLangSelect = h('select', { style: 'padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;cursor:pointer;' });
+            Object.keys(allLangs).sort(function(a, b) { return allLangs[b] - allLangs[a]; }).forEach(function(l) {
+              var opt = h('option', { value: l }, l + ' (' + allLangs[l] + ')');
+              if (l === currentLang) opt.selected = true;
+              emptyLangSelect.appendChild(opt);
+            });
+            emptyLangSelect.onchange = function() { currentLang = emptyLangSelect.value; container.innerHTML = ''; container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...')); loadMovies(); };
+            emptyBar.appendChild(emptyLangSelect);
+            container.appendChild(emptyBar);
             container.appendChild(h('div', { style: 'text-align:center;padding:48px;color:var(--text-muted)' },
               h('div', { style: 'font-size:3em;margin-bottom:12px;opacity:0.4' }, '\uD83C\uDF1F'),
-              h('p', { style: 'font-size:1.1em' }, currentLang ? 'No movies for ' + currentLang : 'No IPTV movies found.')
+              h('p', { style: 'font-size:1.1em' }, 'No movies for ' + currentLang)
             ));
             return;
           }
@@ -6400,24 +6432,16 @@
           var dropdowns = [];
           if (decadeList.length > 0) dropdowns.push({ label: 'Decades', options: decadeList, keyPrefix: 'decade_', group: 'decade' });
           if (genreNames.length > 0) dropdowns.push({ label: 'Genres', options: genreNames, keyPrefix: 'genre_', group: 'genre' });
-          var headerRight = mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
-
+          var bars = mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
+          bars.filterBar.appendChild(h('div', { style: 'flex:1' }));
           var langSelect = h('select', { style: 'padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;cursor:pointer;' });
-          langSelect.appendChild(h('option', { value: '' }, 'All Languages'));
-          var knownLangs = {};
-          items.forEach(function(item) { if (item.language) knownLangs[item.language] = (knownLangs[item.language] || 0) + 1; });
-          Object.keys(knownLangs).sort(function(a, b) { return knownLangs[b] - knownLangs[a]; }).forEach(function(l) {
-            var opt = h('option', { value: l }, l + ' (' + knownLangs[l] + ')');
+          Object.keys(allLangs).sort(function(a, b) { return allLangs[b] - allLangs[a]; }).forEach(function(l) {
+            var opt = h('option', { value: l }, l + ' (' + allLangs[l] + ')');
             if (l === currentLang) opt.selected = true;
             langSelect.appendChild(opt);
           });
-          langSelect.onchange = function() {
-            currentLang = langSelect.value;
-            container.innerHTML = '';
-            container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...'));
-            loadMovies();
-          };
-          headerRight.insertBefore(langSelect, headerRight.firstChild);
+          langSelect.onchange = function() { currentLang = langSelect.value; container.innerHTML = ''; container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...')); loadMovies(); };
+          bars.filterBar.appendChild(langSelect);
 
           mg.buildGrid(container, displayItems, function(di, af) {
             if (af['fav:yes'] && (!_favoriteIds || !_favoriteIds.has(di.item.id))) return false;
@@ -6443,12 +6467,34 @@
         async function loadSeries() {
           var url = '/api/vod/library?type=series&source=xtream';
           if (currentLang) url += '&lang=' + encodeURIComponent(currentLang);
-          var items = await api.get(url);
+          var resp = await api.getWithHeaders(url);
+          var items = resp.data;
+          var langHeader = resp.headers.get('X-Language-Counts');
+          var allLangs = langHeader ? JSON.parse(langHeader) : {};
           container.innerHTML = '';
+
+          var topbarRight = document.getElementById('topbar-right');
+          if (topbarRight) {
+            topbarRight.innerHTML = '';
+            var countSpan = h('span', { style: 'color:var(--text-muted)' }, items.length + ' titles');
+            topbarRight.appendChild(countSpan);
+          }
+
           if (items.length === 0) {
+            var emptyBar = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;' });
+            emptyBar.appendChild(h('div', { style: 'flex:1' }));
+            var emptyLangSelect = h('select', { style: 'padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;cursor:pointer;' });
+            Object.keys(allLangs).sort(function(a, b) { return allLangs[b] - allLangs[a]; }).forEach(function(l) {
+              var opt = h('option', { value: l }, l + ' (' + allLangs[l] + ')');
+              if (l === currentLang) opt.selected = true;
+              emptyLangSelect.appendChild(opt);
+            });
+            emptyLangSelect.onchange = function() { currentLang = emptyLangSelect.value; container.innerHTML = ''; container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...')); loadSeries(); };
+            emptyBar.appendChild(emptyLangSelect);
+            container.appendChild(emptyBar);
             container.appendChild(h('div', { style: 'text-align:center;padding:48px;color:var(--text-muted)' },
               h('div', { style: 'font-size:3em;margin-bottom:12px;opacity:0.4' }, '\uD83D\uDCE1'),
-              h('p', { style: 'font-size:1.1em' }, currentLang ? 'No series for ' + currentLang : 'No IPTV series found.')
+              h('p', { style: 'font-size:1.1em' }, 'No series for ' + currentLang)
             ));
             return;
           }
@@ -6495,24 +6541,16 @@
           var pills = [{ label: '\u2B50 Favorites', key: 'fav:yes', group: 'collection' }];
           var dropdowns = [];
           if (genreNames.length > 0) dropdowns.push({ label: 'Genres', options: genreNames, keyPrefix: 'genre_', group: 'genre' });
-          var headerRight = mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
-
+          var seriesBars = mg.buildFilterBar(container, pills, dropdowns, displayItems.length);
+          seriesBars.filterBar.appendChild(h('div', { style: 'flex:1' }));
           var langSelect = h('select', { style: 'padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:12px;cursor:pointer;' });
-          langSelect.appendChild(h('option', { value: '' }, 'All Languages'));
-          var knownLangs = {};
-          items.forEach(function(item) { if (item.language) knownLangs[item.language] = (knownLangs[item.language] || 0) + 1; });
-          Object.keys(knownLangs).sort(function(a, b) { return knownLangs[b] - knownLangs[a]; }).forEach(function(l) {
-            var opt = h('option', { value: l }, l + ' (' + knownLangs[l] + ')');
+          Object.keys(allLangs).sort(function(a, b) { return allLangs[b] - allLangs[a]; }).forEach(function(l) {
+            var opt = h('option', { value: l }, l + ' (' + allLangs[l] + ')');
             if (l === currentLang) opt.selected = true;
             langSelect.appendChild(opt);
           });
-          langSelect.onchange = function() {
-            currentLang = langSelect.value;
-            container.innerHTML = '';
-            container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...'));
-            loadSeries();
-          };
-          headerRight.insertBefore(langSelect, headerRight.firstChild);
+          langSelect.onchange = function() { currentLang = langSelect.value; container.innerHTML = ''; container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...')); loadSeries(); };
+          seriesBars.filterBar.appendChild(langSelect);
 
           mg.buildGrid(container, displayItems, function(di, af) {
             if (af['fav:yes']) { var anyFav = di.show.episodes.some(function(ep) { return _favoriteIds && _favoriteIds.has(ep.id); }); if (!anyFav) return false; }

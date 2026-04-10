@@ -469,7 +469,7 @@ func setupRouter(cfg *config.Config, log zerolog.Logger, settingsService *servic
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-API-Key"},
-		ExposedHeaders:   []string{"Link", "ETag"},
+		ExposedHeaders:   []string{"Link", "ETag", "X-Language-Counts"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	})
