@@ -5793,8 +5793,7 @@
 
           container.appendChild(filterBar);
 
-          var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;' });
-          header.appendChild(h('h2', { style: 'margin:0' }, cfg.title));
+          var header = h('div', { style: 'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;' });
           var headerRight = h('div', { style: 'display:flex;align-items:center;gap:16px' });
           countSpan = h('span', { style: 'color:var(--text-muted);font-size:0.95em' }, totalCount + ' titles');
           headerRight.appendChild(countSpan);
