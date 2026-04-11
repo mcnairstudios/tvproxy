@@ -62,10 +62,10 @@ func BuildPipeline(opts PipelineOpts) *Pipeline {
 	if opts.DualOutput {
 		elements = append(elements, buildDualOutput(opts)...)
 	} else {
-		elements = append(elements, buildVideoChain(opts)...)
-		elements = append(elements, buildAudioChain(opts)...)
 		elements = append(elements, buildMux(opts)...)
 		elements = append(elements, buildSink(opts)...)
+		elements = append(elements, buildVideoChain(opts)...)
+		elements = append(elements, buildAudioChain(opts)...)
 	}
 
 	pipeline := strings.Join(elements, " ")
@@ -123,6 +123,7 @@ func buildDemux(opts PipelineOpts) []string {
 
 func buildVideoChain(opts PipelineOpts) []string {
 	var elements []string
+	elements = append(elements, "demux.", "!", "queue")
 
 	vcodec := normalizeCodec(opts.VideoCodec)
 	outCodec := opts.OutputVideoCodec
@@ -133,19 +134,17 @@ func buildVideoChain(opts PipelineOpts) []string {
 	if outCodec == "copy" {
 		switch vcodec {
 		case "h264":
-			elements = append(elements, "!", "queue", "!", "h264parse")
+			elements = append(elements, "!", "h264parse")
 		case "h265", "hevc":
-			elements = append(elements, "!", "queue", "!", "h265parse")
+			elements = append(elements, "!", "h265parse")
 		case "mpeg2video":
-			elements = append(elements, "!", "queue", "!", "mpegvideoparse")
-		default:
-			elements = append(elements, "!", "queue")
+			elements = append(elements, "!", "mpegvideoparse")
 		}
 	} else {
-		elements = append(elements, "!", "queue")
 		elements = append(elements, buildDecoder(vcodec, opts.HWAccel)...)
 		elements = append(elements, buildEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)...)
 	}
+	elements = append(elements, "!", "mux.")
 	return elements
 }
 
@@ -253,8 +252,8 @@ func buildAudioChain(opts PipelineOpts) []string {
 	}
 
 	return []string{
-		"!", "queue", "!", dec, "!", "audioconvert",
-		"!", "faac", "!", "aacparse",
+		"demux.", "!", "queue", "!", dec, "!", "audioconvert",
+		"!", "faac", "!", "aacparse", "!", "mux.",
 	}
 }
 
@@ -273,9 +272,9 @@ func buildMux(opts PipelineOpts) []string {
 			"!", fmt.Sprintf("hlssink3 target-duration=%d playlist-location=%s/playlist.m3u8 location=%s/seg%%05d.ts", seg, dir, dir),
 		}
 	case OutputMP4:
-		return []string{"!", "isofmp4mux", "fragment-duration=1000"}
+		return []string{"!", "isofmp4mux", "name=mux", "fragment-duration=1000"}
 	default:
-		return []string{"!", "mpegtsmux"}
+		return []string{"!", "mpegtsmux", "name=mux"}
 	}
 }
 
