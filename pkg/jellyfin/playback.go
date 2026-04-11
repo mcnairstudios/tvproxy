@@ -11,6 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
+
 	"github.com/gavinmcnair/tvproxy/pkg/hls"
 )
 
@@ -217,9 +219,20 @@ func (s *Server) videoStream(w http.ResponseWriter, r *http.Request) {
 		"pipe:1",
 	)
 
-	s.log.Info().Str("stream", streamID).Str("url", stream.URL).Msg("starting jellyfin video stream")
+	command := "ffmpeg"
+	if gstreamer.Available() && seekTicks == "" {
+		pipelineStr := fmt.Sprintf(
+			"souphttpsrc location=%s do-timestamp=true is-live=true ! tsparse set-timestamps=true ! tsdemux ! h264parse ! isofmp4mux fragment-duration=1000 ! fdsink fd=1",
+			stream.URL,
+		)
+		command = "gst-launch-1.0"
+		args = []string{"-q", "-e", pipelineStr}
+		s.log.Info().Str("stream", streamID).Msg("using gstreamer for jellyfin playback")
+	} else {
+		s.log.Info().Str("stream", streamID).Str("url", stream.URL).Msg("starting jellyfin video stream")
+	}
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Stdout = w
 
 	if err := cmd.Run(); err != nil {
