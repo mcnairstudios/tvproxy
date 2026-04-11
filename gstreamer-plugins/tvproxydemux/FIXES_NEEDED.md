@@ -1,6 +1,6 @@
 # Fixes Needed
 
-Review completed 2026-04-11. All three plugins build and register as a single .so — good decision. Two plugins need functionality fixes.
+Review completed 2026-04-11, updated after integration testing. All three plugins build and register as a single .so — good decision. All three need fixes.
 
 ## tvproxysrc — Missing RTSP and file support
 
@@ -154,12 +154,86 @@ gst-launch-1.0 -e \
 
 ---
 
-## tvproxydemux — Looks good
+## tvproxymux — Missing AV1 caps on video pad
 
-No issues found. Audio chain with aacparse works, video auto-detection works, static pads work. The 3s benchmark is meeting the spec.
+The video sink pad template only accepts `video/x-h264`, `video/x-h265`, `video/mpeg`. It needs `video/x-av1` added.
+
+### Error observed
+```
+gstreamer pipeline creation failed: could not link av1enc0 to m
+```
+
+This happens when the pipeline is:
+```
+tvproxydemux name=d d.video ! av1enc ! m.video tvproxymux name=m ! filesink
+```
+
+### Fix
+
+In `gsttvproxymux.c`, add `video/x-av1` to the video sink pad template:
+
+```c
+static GstStaticPadTemplate video_sink_template = GST_STATIC_PAD_TEMPLATE ("video",
+    GST_PAD_SINK,
+    GST_PAD_REQUEST,
+    GST_STATIC_CAPS ("video/x-h264; video/x-h265; video/mpeg; video/x-av1")
+    );
+```
+
+Currently using `GST_STATIC_CAPS_ANY` which should accept anything — so the issue might be deeper. Check if the internal muxer (`mp4mux`) can accept AV1. If `mp4mux` can't mux AV1, need to detect AV1 input and use a different mux (e.g., `matroskamux` or `webmmux`).
+
+Check:
+```bash
+gst-launch-1.0 -e videotestsrc num-buffers=30 ! av1enc ! mp4mux ! filesink location=/tmp/av1test.mp4
+# If this fails, mp4mux can't handle AV1 and you need a fallback muxer
+```
+
+### Parser for AV1
+
+When AV1 is detected on the video pad, insert `av1parse config-interval=-1` (same pattern as h264parse/h265parse).
+
+---
+
+## tvproxydemux — Video pad needs AV1 output caps
+
+If tvproxydemux encounters an AV1 source stream (rare but possible with newer broadcasts), the video pad template should include `video/x-av1` in its caps:
+
+```c
+static GstStaticPadTemplate video_src_template = GST_STATIC_PAD_TEMPLATE ("video",
+    GST_PAD_SRC,
+    GST_PAD_ALWAYS,
+    GST_STATIC_CAPS ("video/x-h264; video/x-h265; video/mpeg, mpegversion=(int)2; video/x-av1")
+    );
+```
+
+Also add `av1parse` as a video parser option in the pad-added handler for AV1 sources.
 
 ---
 
 ## Build note
 
-All three in one .so is the right call. The Dockerfile in tvproxy can be simplified to build just this one meson project instead of three separate builds. The plugin.c registers all three elements.
+All three in one .so is the right call. The Dockerfile in tvproxy has been simplified to build just this one meson project. The plugin.c registers all three elements.
+
+## Test: Full pipeline with all three plugins
+
+This is the integration test that must pass:
+
+```bash
+# h264 copy (HDHR):
+gst-launch-1.0 -e tvproxysrc location=http://192.168.1.186:5004/auto/v101 ! tvproxydemux name=d d.video ! m.video d.audio ! m.audio tvproxymux name=m ! filesink location=/tmp/full_test.mp4
+
+# h265 transcode (VideoToolbox):
+gst-launch-1.0 -e tvproxysrc location=http://192.168.1.186:5004/auto/v101 ! tvproxydemux name=d d.video ! vtdec ! vtenc_h265 bitrate=4000 realtime=true allow-frame-reordering=false ! m.video d.audio ! m.audio tvproxymux name=m output-format=mpegts ! filesink location=/tmp/full_h265.ts
+
+# SAT>IP (RTSP) — requires tvproxysrc RTSP fix:
+gst-launch-1.0 -e tvproxysrc location="rtsp://192.168.1.149/?freq=545.833&msys=dvbt2&mtype=256qam&pids=0,6650,6601,6602,6606,6605&bw=8&plp=0" ! tvproxydemux name=d d.video ! m.video d.audio ! m.audio tvproxymux name=m ! filesink location=/tmp/full_satip.mp4
+
+# AV1 transcode — requires tvproxymux AV1 fix:
+gst-launch-1.0 -e tvproxysrc location=http://192.168.1.186:5004/auto/v101 ! tvproxydemux name=d d.video ! vtdec ! av1enc target-bitrate=4000000 usage-profile=realtime cpu-used=8 ! m.video d.audio ! m.audio tvproxymux name=m ! filesink location=/tmp/full_av1.mp4
+
+# Verify all:
+for f in full_test.mp4 full_h265.ts full_satip.mp4 full_av1.mp4; do
+  echo "=== $f ==="
+  ffprobe -v quiet -show_entries stream=codec_name,codec_type,channels -of compact /tmp/$f
+done
+```

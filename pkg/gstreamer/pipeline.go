@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/go-gst/go-gst/gst"
+
 	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
@@ -83,7 +85,11 @@ func BuildFromProbe(probe *media.ProbeResult, inputURL string, opts PipelineOpts
 }
 
 func buildPipelineStr(opts PipelineOpts) string {
-	if PluginsAvailable() {
+	outCodec := normalizeCodec(opts.OutputVideoCodec)
+	srcCodec := normalizeCodec(opts.VideoCodec)
+	isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy" || outCodec == srcCodec
+
+	if PluginsAvailable() && isCopy {
 		return buildPluginPipelineStr(opts)
 	}
 	return buildManualPipelineStr(opts)
@@ -229,7 +235,7 @@ func videoParser(outCodec, sourceCodec string) (string, string) {
 	case "h265":
 		return "h265parse", "config-interval=-1"
 	case "av1":
-		return "av1parse", "config-interval=-1"
+		return "av1parse", ""
 	case "mpeg2video":
 		return "mpegvideoparse", ""
 	default:
@@ -312,7 +318,10 @@ func hwEncoder(codec string, hw HWAccel, bitrate int) string {
 		case "h265":
 			return fmt.Sprintf("vtenc_h265 bitrate=%d realtime=true allow-frame-reordering=false", br)
 		case "av1":
-			return fmt.Sprintf("vtenc_av1 bitrate=%d realtime=true allow-frame-reordering=false", br)
+			if gst.Find("vtenc_av1") != nil {
+				return fmt.Sprintf("vtenc_av1 bitrate=%d realtime=true allow-frame-reordering=false", br)
+			}
+			return fmt.Sprintf("videoconvert ! av1enc target-bitrate=%d usage-profile=realtime cpu-used=8", br*1000)
 		default:
 			return fmt.Sprintf("vtenc_h264 bitrate=%d realtime=true allow-frame-reordering=false", br)
 		}

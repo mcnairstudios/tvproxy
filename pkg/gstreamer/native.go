@@ -265,11 +265,12 @@ func createOutputParser(codec string) []*gst.Element {
 	switch codec {
 	case "h265":
 		parser, _ = gst.NewElement("h265parse")
+		parser.SetProperty("config-interval", -1)
 	case "av1":
 		parser, _ = gst.NewElement("av1parse")
 	default:
 		parser, _ = gst.NewElement("h264parse")
+		parser.SetProperty("config-interval", -1)
 	}
-	parser.SetProperty("config-interval", -1)
 	return []*gst.Element{parser}
 }

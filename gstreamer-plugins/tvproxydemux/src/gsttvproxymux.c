@@ -138,6 +138,8 @@ create_video_parser (GstTvproxyMux *self, const GstCaps *caps)
       parser_factory = "h265parse";
     else if (g_str_equal (self->video_codec, "mpeg2"))
       parser_factory = "mpegvideoparse";
+    else if (g_str_equal (self->video_codec, "av1"))
+      parser_factory = "av1parse";
   }
 
   /* 2. Try caps hint from pad request */
@@ -149,6 +151,8 @@ create_video_parser (GstTvproxyMux *self, const GstCaps *caps)
       parser_factory = "h265parse";
     else if (g_str_equal (name, "video/mpeg"))
       parser_factory = "mpegvideoparse";
+    else if (g_str_equal (name, "video/x-av1"))
+      parser_factory = "av1parse";
     else
       parser_factory = "h264parse";
   }
@@ -160,7 +164,8 @@ create_video_parser (GstTvproxyMux *self, const GstCaps *caps)
   GST_INFO_OBJECT (self, "Creating %s (config-interval=-1)", parser_factory);
 
   GstElement *parser = gst_element_factory_make (parser_factory, "vparse");
-  if (parser && !g_str_equal (parser_factory, "mpegvideoparse"))
+  if (parser && !g_str_equal (parser_factory, "mpegvideoparse") &&
+      !g_str_equal (parser_factory, "av1parse"))
     g_object_set (parser, "config-interval", (gint) -1, NULL);
 
   return parser;

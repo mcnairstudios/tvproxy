@@ -25,7 +25,7 @@ static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE ("sink",
 static GstStaticPadTemplate video_src_template = GST_STATIC_PAD_TEMPLATE ("video",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS ("video/x-h264; video/x-h265; video/mpeg, mpegversion=(int)2")
+    GST_STATIC_CAPS ("video/x-h264; video/x-h265; video/mpeg, mpegversion=(int)2; video/x-av1")
     );
 
 static GstStaticPadTemplate audio_src_template = GST_STATIC_PAD_TEMPLATE ("audio",
@@ -156,6 +156,8 @@ build_video_chain (GstTvproxyDemux *self, GstPad *demux_pad, GstStructure *s)
       parser_factory = "h265parse";
     else if (g_str_equal (self->video_codec_hint, "mpeg2"))
       parser_factory = "mpegvideoparse";
+    else if (g_str_equal (self->video_codec_hint, "av1"))
+      parser_factory = "av1parse";
     else
       GST_WARNING_OBJECT (self, "Unknown video-codec-hint '%s', falling back to auto",
           self->video_codec_hint);
@@ -169,6 +171,8 @@ build_video_chain (GstTvproxyDemux *self, GstPad *demux_pad, GstStructure *s)
       parser_factory = "h265parse";
     } else if (g_str_equal (name, "video/mpeg")) {
       parser_factory = "mpegvideoparse";
+    } else if (g_str_equal (name, "video/x-av1")) {
+      parser_factory = "av1parse";
     } else {
       GST_WARNING_OBJECT (self, "Unknown video caps: %s", name);
       return;

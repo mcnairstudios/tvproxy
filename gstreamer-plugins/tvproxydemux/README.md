@@ -358,22 +358,27 @@ if interlaced.(bool) {
 
 ## Tested Configurations
 
-| Source | Video | Audio | Output | Result |
-|--------|-------|-------|--------|--------|
-| HDHomeRun v101 (BBC ONE) | h264 | AAC-LATM | mp4mux | 3.1s first byte |
-| HDHomeRun v101 (BBC ONE) | h264 | AAC-LATM | mpegtsmux | 3.1s first byte |
+| Pipeline | Video | Audio | Output | Result |
+|----------|-------|-------|--------|--------|
+| `tvproxysrc ! tvproxydemux ! tvproxymux` | h264 | AAC-LATM | mp4 | 3.1s first byte |
+| `tvproxysrc ! tvproxydemux ! tvproxymux output-format=mpegts` | h264 | AAC-LATM | mpegts | Working |
+| `tvproxysrc ! tvproxydemux ! vtdec ! vtenc_h265 ! tvproxymux video-codec=h265 output-format=mpegts` | h265 transcode | AAC-LATM | mpegts | Working |
 | HDHomeRun v38 (Channel 5+1) | mpeg2 | MP2 | mpegtsmux | Working |
-| HDHomeRun v101 | h264->h265 (vtdec/vtenc) | AAC-LATM | mpegtsmux | Working |
 | HDHomeRun v101-v105 | various | various | fakesink | 5 channels, no hangs |
+| `tvproxydemux audio-codec=copy` (AAC-LATM) | h264 | AAC-LATM | mpegts | Falls back to transcode (correct) |
+| `tvproxydemux video-codec-hint=h264` | h264 | AAC-LATM | mpegts | Working |
+
+**Not yet tested** (no hardware available): RTSP/SAT>IP source, file source, AC3/EAC3 audio, audio-language selection, AD track filtering.
 
 ## Architecture
 
 ### File structure
 ```
 src/
-  gsttvproxydemux.h    # Type declarations, struct definition
-  gsttvproxydemux.c    # All logic: init, pad-added, chain building
-  plugin.c             # GST_PLUGIN_DEFINE registration
+  gsttvproxysrc.h/.c   # Source element (HTTP/RTSP/file)
+  gsttvproxydemux.h/.c # Demuxer (tsdemux + audio transcode)
+  gsttvproxymux.h/.c   # Muxer (mp4mux/mpegtsmux + auto-parsers)
+  plugin.c             # GST_PLUGIN_DEFINE — registers all three elements
 meson.build            # Build configuration
 ```
 

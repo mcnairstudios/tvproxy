@@ -24,11 +24,9 @@ var (
 
 func PluginsAvailable() bool {
 	pluginsOnce.Do(func() {
-		reg := gst.GetRegistry()
-		demux, _ := reg.FindPlugin("tvproxydemux")
-		mux, _ := reg.FindPlugin("tvproxymux")
-		src, _ := reg.FindPlugin("tvproxysrc")
-		pluginsPresent = demux != nil && mux != nil && src != nil
+		pluginsPresent = gst.Find("tvproxydemux") != nil &&
+			gst.Find("tvproxymux") != nil &&
+			gst.Find("tvproxysrc") != nil
 	})
 	return pluginsPresent
 }
