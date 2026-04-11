@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
-	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/session"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
@@ -60,18 +58,8 @@ func (s *VODService) startRecordingInternal(ctx context.Context, sessionKey, tit
 
 	defaultHWAccel, defaultCodec := s.settingsService.ResolveGlobalDefaults(ctx)
 
-	var probe *media.ProbeResult
-	if streamURL != "" {
-		probe, _ = s.recordingStore.GetProbe(media.StreamHash(streamURL))
-	}
-
-	command, args := ffmpeg.Build(ffmpeg.BuildOptions{
-		StreamURL:  streamURL,
-		Probe:      probe,
-		Container:  "mp4",
-		HWAccel:    defaultHWAccel,
-		VideoCodec: defaultCodec,
-	})
+	_ = defaultHWAccel
+	_ = defaultCodec
 
 	newSess, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
 		ChannelID:   sessionKey,
@@ -81,9 +69,8 @@ func (s *VODService) startRecordingInternal(ctx context.Context, sessionKey, tit
 		ChannelName: channelName,
 		ProfileName:  session.ConsumerRecording,
 		UseWireGuard: useWG,
-		Command:      command,
-		Args:         args,
 		OutputDir:    s.config.VODOutputDir,
+		Transcoder:   s.transcoderPreference(ctx),
 	}, session.ConsumerRecording)
 	if err != nil {
 		return err

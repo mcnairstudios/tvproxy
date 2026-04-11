@@ -21,7 +21,6 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/database"
 	"github.com/gavinmcnair/tvproxy/pkg/defaults"
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/handler"
 	"github.com/gavinmcnair/tvproxy/pkg/hls"
 	"github.com/gavinmcnair/tvproxy/pkg/jellyfin"
@@ -70,7 +69,6 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to load settings")
 	}
 	cfg.Settings = tuningSettings
-	ffmpeg.SetSettings(&tuningSettings.FFmpeg)
 
 	profileStore := store.NewProfileStore(filepath.Join(dataDir, "profiles.json"), log)
 	if err := profileStore.Load(); err != nil {

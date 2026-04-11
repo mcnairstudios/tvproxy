@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
 func TestBuildPipeline_HDHRCopy(t *testing.T) {
@@ -124,10 +124,10 @@ func TestBuildPipeline_DualOutput(t *testing.T) {
 }
 
 func TestBuildFromProbe(t *testing.T) {
-	probe := &ffmpeg.ProbeResult{
+	probe := &media.ProbeResult{
 		HasVideo:   true,
-		Video:      &ffmpeg.VideoInfo{Codec: "h264"},
-		AudioTracks: []ffmpeg.AudioTrack{{Codec: "aac_latm"}},
+		Video:      &media.VideoInfo{Codec: "h264"},
+		AudioTracks: []media.AudioTrack{{Codec: "aac_latm"}},
 		FormatName: "mpegts",
 	}
 

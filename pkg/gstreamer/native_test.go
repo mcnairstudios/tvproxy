@@ -3,14 +3,14 @@ package gstreamer
 import (
 	"testing"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
 func TestBuildNativePipeline_HDHR(t *testing.T) {
-	probe := &ffmpeg.ProbeResult{
+	probe := &media.ProbeResult{
 		HasVideo:    true,
-		Video:       &ffmpeg.VideoInfo{Codec: "h264"},
-		AudioTracks: []ffmpeg.AudioTrack{{Codec: "aac_latm"}},
+		Video:       &media.VideoInfo{Codec: "h264"},
+		AudioTracks: []media.AudioTrack{{Codec: "aac_latm"}},
 		FormatName:  "mpegts",
 	}
 
@@ -33,10 +33,10 @@ func TestBuildNativePipeline_HDHR(t *testing.T) {
 }
 
 func TestBuildNativePipeline_Transcode(t *testing.T) {
-	probe := &ffmpeg.ProbeResult{
+	probe := &media.ProbeResult{
 		HasVideo:    true,
-		Video:       &ffmpeg.VideoInfo{Codec: "h264"},
-		AudioTracks: []ffmpeg.AudioTrack{{Codec: "aac_latm"}},
+		Video:       &media.VideoInfo{Codec: "h264"},
+		AudioTracks: []media.AudioTrack{{Codec: "aac_latm"}},
 		FormatName:  "mpegts",
 	}
 

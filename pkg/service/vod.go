@@ -15,7 +15,6 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
 	"github.com/gavinmcnair/tvproxy/pkg/config"
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/session"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
@@ -168,28 +167,9 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 		audioCodec = "aac"
 	}
 
-	var probe *media.ProbeResult
-	if streamURL != "" {
-		if s.probeCache != nil {
-			probe, _ = s.probeCache.GetProbe(media.StreamHash(streamURL))
-		}
-	}
-
-	audioOnly := strings.EqualFold(streamGroup, "radio")
-	command, args := ffmpeg.Build(ffmpeg.BuildOptions{
-		StreamURL:     streamURL,
-		Probe:         probe,
-		Container:     sp.Container,
-		Delivery:      sp.Delivery,
-		HWAccel:       hwaccel,
-		VideoCodec:    videoCodec,
-		AudioCodec:    sp.AudioCodec,
-		AudioOnly:     audioOnly,
-		CustomCommand: sp.Args,
-	})
 	return sessionArgs{
-		Command:          command,
-		Args:             args,
+		Command:          "gst-launch-1.0",
+		Args:             "",
 		Container:        sp.Container,
 		Delivery:         sp.Delivery,
 		OutputVideoCodec: videoCodec,

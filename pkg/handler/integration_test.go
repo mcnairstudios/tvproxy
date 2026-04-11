@@ -19,7 +19,6 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/database"
 	"github.com/gavinmcnair/tvproxy/pkg/defaults"
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
 	"github.com/gavinmcnair/tvproxy/pkg/logocache"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
@@ -62,8 +61,6 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 
 	tuningSettings, err := defaults.LoadSettings(filepath.Join(dir, "settings.json"))
 	require.NoError(t, err)
-	ffmpeg.SetSettings(&tuningSettings.FFmpeg)
-
 	cfg := &config.Config{
 		Host:               "localhost",
 		Port:               8080,
