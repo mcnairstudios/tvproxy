@@ -705,7 +705,7 @@ func (m *Manager) resolveTranscoder(opts StartOpts, filePath string) (string, []
 			OutputVideoCodec: opts.OutputVideoCodec,
 			OutputAudioCodec: opts.OutputAudioCodec,
 			OutputBitrate:    0,
-			OutputFormat:     gstreamer.OutputMP4,
+			OutputFormat:     gstreamer.OutputMPEGTS,
 			HWAccel:          hwAccel,
 			RecordingPath:    filePath,
 		}
