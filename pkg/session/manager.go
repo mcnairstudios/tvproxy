@@ -20,6 +20,7 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/tvsatipscan"
@@ -636,11 +637,7 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 	}
 
 	if !opts.MetadataOnly {
-		args := m.buildArgs(opts.Args, opts.StreamURL, filePath, opts.UseWireGuard, opts.HLSOutputDir, opts)
-		command := opts.Command
-		if command == "" {
-			command = "ffmpeg"
-		}
+		command, args := m.resolveTranscoder(opts, filePath)
 
 		go m.run(sessionCtx, s, command, args, opts.StreamURL)
 		if strings.HasPrefix(opts.StreamURL, "rtsp://") || strings.HasPrefix(opts.StreamURL, "rtsps://") {
@@ -657,6 +654,71 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 		Msg("session created with consumer")
 
 	return s, c.ID, nil
+}
+
+func (m *Manager) resolveTranscoder(opts StartOpts, filePath string) (string, []string) {
+	hwAccel := gstreamer.HWNone
+	switch opts.OutputHWAccel {
+	case "vaapi":
+		hwAccel = gstreamer.HWVAAPI
+	case "qsv":
+		hwAccel = gstreamer.HWQSV
+	case "videotoolbox":
+		hwAccel = gstreamer.HWVideoToolbox
+	}
+
+	choice := gstreamer.ShouldUseGStreamer(m.probeCache, opts.StreamURL, hwAccel)
+	if choice.UseGStreamer {
+		probe, _ := m.probeCache.GetProbe(ffmpeg.StreamHash(opts.StreamURL))
+		if probe == nil {
+			probe, _ = m.probeCache.GetProbeByStreamID(opts.StreamID)
+		}
+
+		inputType := "http"
+		if strings.HasPrefix(opts.StreamURL, "rtsp://") {
+			inputType = "rtsp"
+		}
+
+		pipeOpts := gstreamer.PipelineOpts{
+			InputURL:         opts.StreamURL,
+			InputType:        inputType,
+			IsLive:           true,
+			OutputVideoCodec: opts.OutputVideoCodec,
+			OutputAudioCodec: opts.OutputAudioCodec,
+			OutputBitrate:    0,
+			OutputFormat:     gstreamer.OutputMPEGTS,
+			HWAccel:          hwAccel,
+			RecordingPath:    filePath,
+		}
+
+		if opts.HLSOutputDir != "" {
+			pipeOpts.OutputFormat = gstreamer.OutputHLS
+			pipeOpts.HLSDir = opts.HLSOutputDir
+			pipeOpts.HLSSegmentTime = 6
+			if filePath != "" {
+				pipeOpts.DualOutput = true
+			}
+		}
+
+		pipeline := gstreamer.BuildFromProbe(probe, opts.StreamURL, pipeOpts)
+		m.log.Info().
+			Str("channel_id", opts.ChannelID).
+			Str("reason", choice.Reason).
+			Msg("using gstreamer")
+		return pipeline.Cmd, pipeline.Args
+	}
+
+	m.log.Info().
+		Str("channel_id", opts.ChannelID).
+		Str("reason", choice.Reason).
+		Msg("using ffmpeg (gstreamer unavailable)")
+
+	args := m.buildArgs(opts.Args, opts.StreamURL, filePath, opts.UseWireGuard, opts.HLSOutputDir, opts)
+	command := opts.Command
+	if command == "" {
+		command = "ffmpeg"
+	}
+	return command, args
 }
 
 func (m *Manager) Shutdown() {
