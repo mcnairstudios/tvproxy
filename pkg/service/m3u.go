@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/m3u"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
@@ -422,9 +422,9 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 		streams = append(streams, s)
 
 		if entry.TVPVCodec != "" && m3uSvc.probeCache != nil {
-			probe := &ffmpeg.ProbeResult{
+			probe := &media.ProbeResult{
 				HasVideo: true,
-				Video: &ffmpeg.VideoInfo{
+				Video: &media.VideoInfo{
 					Codec: strings.ToLower(entry.TVPVCodec),
 				},
 			}
@@ -432,11 +432,11 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 				fmt.Sscanf(entry.TVPDur, "%f", &probe.Duration)
 			}
 			if entry.TVPACodec != "" {
-				probe.AudioTracks = append(probe.AudioTracks, ffmpeg.AudioTrack{
+				probe.AudioTracks = append(probe.AudioTracks, media.AudioTrack{
 					Codec: strings.ToLower(entry.TVPACodec),
 				})
 			}
-			m3uSvc.probeCache.SaveProbe(ffmpeg.StreamHash(entry.URL), probe)
+			m3uSvc.probeCache.SaveProbe(media.StreamHash(entry.URL), probe)
 		}
 	}
 

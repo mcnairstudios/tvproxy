@@ -13,7 +13,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
 const (
@@ -99,7 +99,7 @@ func (s *RecordingStoreImpl) rebuildIndex() {
 	}
 }
 
-func (s *RecordingStoreImpl) GetProbe(streamHash string) (*ffmpeg.ProbeResult, error) {
+func (s *RecordingStoreImpl) GetProbe(streamHash string) (*media.ProbeResult, error) {
 	if err := validatePathComponent(streamHash); err != nil {
 		return nil, fmt.Errorf("invalid stream hash: %w", err)
 	}
@@ -111,7 +111,7 @@ func (s *RecordingStoreImpl) GetProbe(streamHash string) (*ffmpeg.ProbeResult, e
 		}
 		return nil, err
 	}
-	var result ffmpeg.ProbeResult
+	var result media.ProbeResult
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (s *RecordingStoreImpl) GetProbe(streamHash string) (*ffmpeg.ProbeResult, e
 	return &result, nil
 }
 
-func (s *RecordingStoreImpl) SaveProbeByStreamID(streamID string, result *ffmpeg.ProbeResult) error {
+func (s *RecordingStoreImpl) SaveProbeByStreamID(streamID string, result *media.ProbeResult) error {
 	if err := validatePathComponent(streamID); err != nil {
 		return fmt.Errorf("invalid stream ID: %w", err)
 	}
@@ -136,7 +136,7 @@ func (s *RecordingStoreImpl) SaveProbeByStreamID(streamID string, result *ffmpeg
 	return os.WriteFile(filepath.Join(dir, "probe.json"), data, 0644)
 }
 
-func (s *RecordingStoreImpl) GetProbeByStreamID(streamID string) (*ffmpeg.ProbeResult, error) {
+func (s *RecordingStoreImpl) GetProbeByStreamID(streamID string) (*media.ProbeResult, error) {
 	if err := validatePathComponent(streamID); err != nil {
 		return nil, err
 	}
@@ -145,14 +145,14 @@ func (s *RecordingStoreImpl) GetProbeByStreamID(streamID string) (*ffmpeg.ProbeR
 	if err != nil {
 		return nil, err
 	}
-	var result ffmpeg.ProbeResult
+	var result media.ProbeResult
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (s *RecordingStoreImpl) SaveProbe(streamHash string, result *ffmpeg.ProbeResult) error {
+func (s *RecordingStoreImpl) SaveProbe(streamHash string, result *media.ProbeResult) error {
 	if err := validatePathComponent(streamHash); err != nil {
 		return fmt.Errorf("invalid stream hash: %w", err)
 	}
@@ -188,7 +188,7 @@ func (s *RecordingStoreImpl) InvalidateProbe(streamHash string) error {
 func (s *RecordingStoreImpl) SaveTSHeader(streamHash string, header []byte) error { return nil }
 func (s *RecordingStoreImpl) GetTSHeader(streamHash string) ([]byte, error)     { return nil, nil }
 
-func isUsefulProbe(result *ffmpeg.ProbeResult) bool {
+func isUsefulProbe(result *media.ProbeResult) bool {
 	if result == nil {
 		return false
 	}
@@ -264,7 +264,7 @@ func (s *RecordingStoreImpl) CompleteRecording(streamID string, meta SessionMeta
 	}
 
 	srcPath := filepath.Join(activeDir, meta.FileName)
-	baseName := ffmpeg.SanitizeFilename(meta.ProgramTitle, meta.StoppedAt)
+	baseName := media.SanitizeFilename(meta.ProgramTitle, meta.StoppedAt)
 	mp4Name := baseName + ".mp4"
 	destPath := filepath.Join(recordedDir, mp4Name)
 

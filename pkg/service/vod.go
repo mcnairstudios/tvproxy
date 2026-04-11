@@ -13,8 +13,10 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/session"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
@@ -166,10 +168,10 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 		audioCodec = "aac"
 	}
 
-	var probe *ffmpeg.ProbeResult
+	var probe *media.ProbeResult
 	if streamURL != "" {
 		if s.probeCache != nil {
-			probe, _ = s.probeCache.GetProbe(ffmpeg.StreamHash(streamURL))
+			probe, _ = s.probeCache.GetProbe(media.StreamHash(streamURL))
 		}
 	}
 
@@ -387,7 +389,7 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 
 	var duration float64
 	var audioOnly bool
-	probe, _ := ffmpeg.Probe(ctx, filePath, "")
+	probe, _ := avprobe.Probe(ctx, filePath, "")
 	if probe != nil {
 		duration = probe.Duration
 		audioOnly = probe.Video == nil && len(probe.AudioTracks) > 0
@@ -453,7 +455,7 @@ func (s *VODService) GetError(channelID string) error {
 	return s.sessionMgr.GetError(channelID)
 }
 
-func (s *VODService) GetProbeInfo(channelID string) (*ffmpeg.VideoInfo, []ffmpeg.AudioTrack, float64) {
+func (s *VODService) GetProbeInfo(channelID string) (*media.VideoInfo, []media.AudioTrack, float64) {
 	sess := s.sessionMgr.Get(channelID)
 	if sess == nil {
 		return nil, nil, 0

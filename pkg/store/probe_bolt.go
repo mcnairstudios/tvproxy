@@ -8,7 +8,7 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
 var (
@@ -44,8 +44,8 @@ func (c *BoltProbeCache) Close() error {
 	return nil
 }
 
-func (c *BoltProbeCache) GetProbe(streamHash string) (*ffmpeg.ProbeResult, error) {
-	var result ffmpeg.ProbeResult
+func (c *BoltProbeCache) GetProbe(streamHash string) (*media.ProbeResult, error) {
+	var result media.ProbeResult
 	var found bool
 	c.db.View(func(tx *bolt.Tx) error {
 		v := tx.Bucket(bucketProbeHash).Get([]byte(streamHash))
@@ -63,7 +63,7 @@ func (c *BoltProbeCache) GetProbe(streamHash string) (*ffmpeg.ProbeResult, error
 	return &result, nil
 }
 
-func (c *BoltProbeCache) SaveProbe(streamHash string, result *ffmpeg.ProbeResult) error {
+func (c *BoltProbeCache) SaveProbe(streamHash string, result *media.ProbeResult) error {
 	if result == nil {
 		return nil
 	}
@@ -82,8 +82,8 @@ func (c *BoltProbeCache) InvalidateProbe(streamHash string) error {
 	})
 }
 
-func (c *BoltProbeCache) GetProbeByStreamID(streamID string) (*ffmpeg.ProbeResult, error) {
-	var result ffmpeg.ProbeResult
+func (c *BoltProbeCache) GetProbeByStreamID(streamID string) (*media.ProbeResult, error) {
+	var result media.ProbeResult
 	var found bool
 	c.db.View(func(tx *bolt.Tx) error {
 		v := tx.Bucket(bucketProbeID).Get([]byte(streamID))
@@ -101,7 +101,7 @@ func (c *BoltProbeCache) GetProbeByStreamID(streamID string) (*ffmpeg.ProbeResul
 	return &result, nil
 }
 
-func (c *BoltProbeCache) SaveProbeByStreamID(streamID string, result *ffmpeg.ProbeResult) error {
+func (c *BoltProbeCache) SaveProbeByStreamID(streamID string, result *media.ProbeResult) error {
 	if result == nil {
 		return nil
 	}

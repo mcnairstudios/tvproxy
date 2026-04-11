@@ -19,7 +19,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
@@ -119,14 +120,14 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string, useWireGuard bool, hlsOutputDir string, opts StartOpts) []string {
 	hasTSHeader := false
 	if m.probeCache != nil {
-		if h, _ := m.probeCache.GetTSHeader(ffmpeg.StreamHash(inputURL)); h != nil {
+		if h, _ := m.probeCache.GetTSHeader(media.StreamHash(inputURL)); h != nil {
 			hasTSHeader = true
 		}
 	}
-	pipeInput := ffmpeg.IsHTTPURL(inputURL) && (useWireGuard || hasTSHeader)
+	pipeInput := media.IsHTTPURL(inputURL) && (useWireGuard || hasTSHeader)
 
 	if hlsOutputDir != "" {
-		if useWireGuard && m.wgClient != nil && ffmpeg.IsHTTPURL(inputURL) {
+		if useWireGuard && m.wgClient != nil && media.IsHTTPURL(inputURL) {
 			proxy, err := m.wgProxyMgr.GetOrCreate("default", m.wgClient, m.config, m.log)
 			if err == nil {
 				opts.StreamURL = proxy.ProxyURL(inputURL)
@@ -140,12 +141,12 @@ func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string, 
 	var args []string
 	if argsStr == "" {
 		if pipeInput {
-			args = ffmpeg.ShellSplit("-hide_banner -loglevel warning -nostdin -f mpegts -analyzeduration 1000000 -probesize 1000000 -err_detect ignore_err -fflags +genpts+discardcorrupt -i pipe:0 -map 0:v:0? -map 0:a:0? -c:v copy -c:a aac -ac 2 -b:a 192k -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof {output}")
+			args = media.ShellSplit("-hide_banner -loglevel warning -nostdin -f mpegts -analyzeduration 1000000 -probesize 1000000 -err_detect ignore_err -fflags +genpts+discardcorrupt -i pipe:0 -map 0:v:0? -map 0:a:0? -c:v copy -c:a aac -ac 2 -b:a 192k -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof {output}")
 		} else {
-			args = ffmpeg.ShellSplit("-hide_banner -loglevel warning -i {input} -c copy -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof {output}")
+			args = media.ShellSplit("-hide_banner -loglevel warning -i {input} -c copy -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof {output}")
 		}
 	} else {
-		args = ffmpeg.ShellSplit(argsStr)
+		args = media.ShellSplit(argsStr)
 	}
 
 	for i, arg := range args {
@@ -195,7 +196,7 @@ func (m *Manager) buildDualOutputArgs(hlsDir, mp4Path string, pipeInput bool, op
 	}
 
 	if opts.SourceInputArgs != "" {
-		inputParts := ffmpeg.ShellSplit(opts.SourceInputArgs)
+		inputParts := media.ShellSplit(opts.SourceInputArgs)
 		args = append(args, inputParts...)
 	} else {
 		args = append(args,
@@ -217,7 +218,7 @@ func (m *Manager) buildDualOutputArgs(hlsDir, mp4Path string, pipeInput bool, op
 		"-map", "0:a:0?",
 	)
 
-	venc := ffmpeg.MapEncoderHW(videoCodec, hwaccel)
+	venc := media.MapEncoderHW(videoCodec, hwaccel)
 	if opts.SourceDeinterlace && venc == "copy" {
 		venc = "libx264"
 	}
@@ -561,7 +562,7 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 		return nil, "", fmt.Errorf("creating session dir: %w", err)
 	}
 
-	fileName := ffmpeg.SanitizeFilename(opts.StreamName, time.Now()) + ".mp4"
+	fileName := media.SanitizeFilename(opts.StreamName, time.Now()) + ".mp4"
 	filePath := filepath.Join(tempDir, fileName)
 
 	sessionCtx, cancel := context.WithCancel(context.Background())
@@ -618,12 +619,12 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 	s.addConsumer(c)
 
 	if m.probeCache != nil {
-		var cached *ffmpeg.ProbeResult
+		var cached *media.ProbeResult
 		if opts.StreamID != "" {
 			cached, _ = m.probeCache.GetProbeByStreamID(opts.StreamID)
 		}
 		if cached == nil && opts.StreamURL != "" {
-			cached, _ = m.probeCache.GetProbe(ffmpeg.StreamHash(opts.StreamURL))
+			cached, _ = m.probeCache.GetProbe(media.StreamHash(opts.StreamURL))
 		}
 		if cached != nil {
 			s.SetProbeInfo(cached.Video, cached.AudioTracks, cached.Duration)
@@ -688,7 +689,7 @@ func (m *Manager) resolveTranscoder(opts StartOpts, filePath string) (string, []
 		choice.Reason = "forced by setting (no probe data)"
 	}
 	if choice.UseGStreamer {
-		probe, _ := m.probeCache.GetProbe(ffmpeg.StreamHash(opts.StreamURL))
+		probe, _ := m.probeCache.GetProbe(media.StreamHash(opts.StreamURL))
 		if probe == nil {
 			probe, _ = m.probeCache.GetProbeByStreamID(opts.StreamID)
 		}
@@ -766,7 +767,7 @@ func (m *Manager) Shutdown() {
 	m.log.Info().Int("sessions", len(sessions)).Msg("session manager shutdown complete")
 }
 
-func (m *Manager) probeViaClient(ctx context.Context, client *http.Client, url string) (*ffmpeg.ProbeResult, error) {
+func (m *Manager) probeViaClient(ctx context.Context, client *http.Client, url string) (*media.ProbeResult, error) {
 	resp, err := httputil.Fetch(ctx, client, m.config, url)
 	if err != nil {
 		return nil, fmt.Errorf("probe upstream: %w", err)
@@ -775,10 +776,10 @@ func (m *Manager) probeViaClient(ctx context.Context, client *http.Client, url s
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("probe upstream returned %d", resp.StatusCode)
 	}
-	return ffmpeg.ProbeReader(ctx, resp.Body)
+	return avprobe.ProbeReader(ctx, resp.Body)
 }
 
-func (m *Manager) ProbeURL(ctx context.Context, url string) (*ffmpeg.ProbeResult, error) {
+func (m *Manager) ProbeURL(ctx context.Context, url string) (*media.ProbeResult, error) {
 	resp, err := httputil.Fetch(ctx, m.httpClient, m.config, url)
 	if err != nil {
 		return nil, fmt.Errorf("probe upstream: %w", err)
@@ -789,19 +790,19 @@ func (m *Manager) ProbeURL(ctx context.Context, url string) (*ffmpeg.ProbeResult
 		return nil, fmt.Errorf("probe upstream returned %d", resp.StatusCode)
 	}
 
-	return ffmpeg.ProbeReader(ctx, resp.Body)
+	return avprobe.ProbeReader(ctx, resp.Body)
 }
 
 func (m *Manager) probeAsync(s *Session, streamURL string) {
 	if m.probeCache != nil {
-		var cached *ffmpeg.ProbeResult
+		var cached *media.ProbeResult
 		if s.StreamID != "" {
 			cached, _ = m.probeCache.GetProbeByStreamID(s.StreamID)
 		}
 		if cached == nil && streamURL != "" {
-			cached, _ = m.probeCache.GetProbe(ffmpeg.StreamHash(streamURL))
+			cached, _ = m.probeCache.GetProbe(media.StreamHash(streamURL))
 		}
-		if cached != nil && (cached.Duration > 0 || !ffmpeg.IsHTTPURL(streamURL)) {
+		if cached != nil && (cached.Duration > 0 || !media.IsHTTPURL(streamURL)) {
 			s.SetProbeInfo(cached.Video, cached.AudioTracks, cached.Duration)
 			m.log.Debug().Str("session_id", s.ID).Float64("duration", cached.Duration).Msg("probe cache hit")
 			return
@@ -811,7 +812,7 @@ func (m *Manager) probeAsync(s *Session, streamURL string) {
 	probeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var result *ffmpeg.ProbeResult
+	var result *media.ProbeResult
 	var err error
 	client := m.clientForSession(s)
 
@@ -819,8 +820,8 @@ func (m *Manager) probeAsync(s *Session, streamURL string) {
 	if m.config.BypassHeader != "" && m.config.BypassSecret != "" {
 		extraHeaders = append(extraHeaders, m.config.BypassHeader+": "+m.config.BypassSecret)
 	}
-	result, err = ffmpeg.Probe(probeCtx, streamURL, m.config.UserAgent, extraHeaders...)
-	if (err != nil || result == nil || result.Duration == 0) && ffmpeg.IsHTTPURL(streamURL) {
+	result, err = avprobe.Probe(probeCtx, streamURL, m.config.UserAgent)
+	if (err != nil || result == nil || result.Duration == 0) && media.IsHTTPURL(streamURL) {
 		m.log.Debug().Str("session_id", s.ID).Msg("direct probe incomplete, trying HTTP pipe probe")
 		pipeResult, pipeErr := m.probeViaClient(probeCtx, client, streamURL)
 		if pipeErr == nil && pipeResult != nil {
@@ -848,14 +849,14 @@ func (m *Manager) probeAsync(s *Session, streamURL string) {
 			m.probeCache.SaveProbeByStreamID(s.StreamID, result)
 		}
 		if streamURL != "" {
-			m.probeCache.SaveProbe(ffmpeg.StreamHash(streamURL), result)
+			m.probeCache.SaveProbe(media.StreamHash(streamURL), result)
 		}
 	}
 
 	m.log.Debug().Str("session_id", s.ID).Bool("is_vod", result.IsVOD).Int("audio_tracks", len(result.AudioTracks)).Msg("async probe complete")
 }
 
-func (m *Manager) probeOutputFile(s *Session) *ffmpeg.ProbeResult {
+func (m *Manager) probeOutputFile(s *Session) *media.ProbeResult {
 	for i := 0; i < 60; i++ {
 		if s.isDone() {
 			return nil
@@ -874,7 +875,7 @@ func (m *Manager) probeOutputFile(s *Session) *ffmpeg.ProbeResult {
 	probeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	result, err := ffmpeg.Probe(probeCtx, s.FilePath, "")
+	result, err := avprobe.Probe(probeCtx, s.FilePath, "")
 	if err != nil {
 		m.log.Warn().Err(err).Str("session_id", s.ID).Msg("output file probe failed")
 		return nil
@@ -932,11 +933,11 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 
 	var tsHeader []byte
 	if !isGStreamer && m.probeCache != nil {
-		tsHeader, _ = m.probeCache.GetTSHeader(ffmpeg.StreamHash(inputURL))
+		tsHeader, _ = m.probeCache.GetTSHeader(media.StreamHash(inputURL))
 	}
 
 	var httpResp *http.Response
-	if !isGStreamer && tsHeader != nil && ffmpeg.IsHTTPURL(inputURL) && s.HLSOutputDir == "" {
+	if !isGStreamer && tsHeader != nil && media.IsHTTPURL(inputURL) && s.HLSOutputDir == "" {
 		m.log.Info().Str("session_id", s.ID).Int("header_size", len(tsHeader)).Msg("injecting cached TS header for fast startup")
 		resp, err := httputil.Fetch(ctx, m.clientForSession(s), m.config, inputURL)
 		if err != nil {
@@ -957,7 +958,7 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 			io.Copy(pw, resp.Body)
 			pw.Close()
 		}()
-	} else if !isGStreamer && ffmpeg.IsHTTPURL(inputURL) && s.UseWireGuard && s.HLSOutputDir == "" {
+	} else if !isGStreamer && media.IsHTTPURL(inputURL) && s.UseWireGuard && s.HLSOutputDir == "" {
 		m.log.Info().Str("session_id", s.ID).Str("url", inputURL).Msg("routing upstream via wireguard")
 		resp, err := httputil.Fetch(ctx, m.clientForSession(s), m.config, inputURL)
 		if err != nil {
@@ -1016,7 +1017,7 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 	if waitErr != nil && ctx.Err() == nil {
 		s.setError(fmt.Errorf("ffmpeg failed: %w", waitErr))
 		if m.probeCache != nil && inputURL != "" {
-			_ = m.probeCache.InvalidateProbe(ffmpeg.StreamHash(inputURL))
+			_ = m.probeCache.InvalidateProbe(media.StreamHash(inputURL))
 		}
 	}
 }
@@ -1053,7 +1054,7 @@ func isProgressNoise(line string) bool {
 			return true
 		}
 	}
-	return ffmpeg.IsFFmpegNoise(line)
+	return media.IsFFmpegNoise(line)
 }
 
 func (m *Manager) PreserveTempDir(channelID string) string {

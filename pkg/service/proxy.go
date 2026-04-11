@@ -15,7 +15,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
@@ -341,7 +341,7 @@ func (s *ProxyService) startHTTPPassthrough(ctx context.Context, channelID strin
 }
 
 func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream *models.Stream, profile *models.StreamProfile) (io.ReadCloser, error) {
-	useDirectInput := !ffmpeg.IsHTTPURL(stream.URL)
+	useDirectInput := !media.IsHTTPURL(stream.URL)
 
 	var inputToken string
 	if useDirectInput {
@@ -350,7 +350,7 @@ func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream
 		inputToken = "pipe:0"
 	}
 	argsStr := strings.Replace(profile.Args, "{input}", inputToken, 1)
-	args := ffmpeg.ShellSplit(argsStr)
+	args := media.ShellSplit(argsStr)
 
 	s.log.Info().
 		Str("channel_id", channelID).
@@ -433,7 +433,7 @@ func (s *ProxyService) logFFmpegStderr(channelID string, stderr io.ReadCloser) {
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if ffmpeg.IsFFmpegNoise(line) {
+		if media.IsFFmpegNoise(line) {
 			continue
 		}
 		s.log.Warn().Str("channel_id", channelID).Str("ffmpeg", line).Msg("ffmpeg output")

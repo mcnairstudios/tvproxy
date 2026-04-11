@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
 const (
@@ -31,8 +31,8 @@ type Session struct {
 	BufferedSecs    float64
 	Duration        float64
 	SeekOffset      float64
-	Video           *ffmpeg.VideoInfo
-	AudioTracks     []ffmpeg.AudioTrack
+	Video           *media.VideoInfo
+	AudioTracks     []media.AudioTrack
 	startOpts    StartOpts
 	consumers    map[string]*Consumer
 	wasRecording bool
@@ -104,7 +104,7 @@ func (s *Session) getError() error {
 	return err
 }
 
-func (s *Session) SetProbeInfo(video *ffmpeg.VideoInfo, audio []ffmpeg.AudioTrack, duration float64) {
+func (s *Session) SetProbeInfo(video *media.VideoInfo, audio []media.AudioTrack, duration float64) {
 	s.mu.Lock()
 	if video != nil {
 		s.Video = video
@@ -118,7 +118,7 @@ func (s *Session) SetProbeInfo(video *ffmpeg.VideoInfo, audio []ffmpeg.AudioTrac
 	s.mu.Unlock()
 }
 
-func (s *Session) GetProbeInfo() (*ffmpeg.VideoInfo, []ffmpeg.AudioTrack, float64) {
+func (s *Session) GetProbeInfo() (*media.VideoInfo, []media.AudioTrack, float64) {
 	s.mu.RLock()
 	v := s.Video
 	a := s.AudioTracks

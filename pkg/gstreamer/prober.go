@@ -7,7 +7,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
@@ -47,7 +48,7 @@ func (s *ProbeScheduler) QueueStreams(jobs []ProbeJob) {
 		if existing[j.StreamID] {
 			continue
 		}
-		cached, _ := s.probeCache.GetProbe(ffmpeg.StreamHash(j.StreamURL))
+		cached, _ := s.probeCache.GetProbe(media.StreamHash(j.StreamURL))
 		if cached != nil {
 			continue
 		}
@@ -123,7 +124,7 @@ func (s *ProbeScheduler) probeOne(ctx context.Context, job ProbeJob) {
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	result, err := ffmpeg.Probe(probeCtx, job.StreamURL, "")
+	result, err := avprobe.Probe(probeCtx, job.StreamURL, "")
 	if err != nil {
 		s.log.Debug().Err(err).Str("stream", job.StreamID).Msg("probe failed")
 		return
@@ -133,13 +134,13 @@ func (s *ProbeScheduler) probeOne(ctx context.Context, job ProbeJob) {
 		return
 	}
 
-	hash := ffmpeg.StreamHash(job.StreamURL)
+	hash := media.StreamHash(job.StreamURL)
 	s.probeCache.SaveProbe(hash, result)
 	s.probeCache.SaveProbeByStreamID(job.StreamID, result)
 
 	var headerSize int
-	if ffmpeg.IsHTTPURL(job.StreamURL) {
-		header, err := ffmpeg.CaptureTPSHeader(probeCtx, job.StreamURL, 5*time.Second)
+	if media.IsHTTPURL(job.StreamURL) {
+		header, err := media.CaptureTPSHeader(probeCtx, job.StreamURL, 5*time.Second)
 		if err == nil && len(header) > 0 {
 			s.probeCache.SaveTSHeader(hash, header)
 			headerSize = len(header)

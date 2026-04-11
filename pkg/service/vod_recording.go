@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/session"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
@@ -59,9 +60,9 @@ func (s *VODService) startRecordingInternal(ctx context.Context, sessionKey, tit
 
 	defaultHWAccel, defaultCodec := s.settingsService.ResolveGlobalDefaults(ctx)
 
-	var probe *ffmpeg.ProbeResult
+	var probe *media.ProbeResult
 	if streamURL != "" {
-		probe, _ = s.recordingStore.GetProbe(ffmpeg.StreamHash(streamURL))
+		probe, _ = s.recordingStore.GetProbe(media.StreamHash(streamURL))
 	}
 
 	command, args := ffmpeg.Build(ffmpeg.BuildOptions{

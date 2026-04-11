@@ -6,14 +6,14 @@ import (
 
 	"github.com/go-gst/go-gst/gst"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
 func init() {
 	gst.Init(nil)
 }
 
-func BuildNativePipeline(name string, probe *ffmpeg.ProbeResult, opts PipelineOpts) (*gst.Pipeline, error) {
+func BuildNativePipeline(name string, probe *media.ProbeResult, opts PipelineOpts) (*gst.Pipeline, error) {
 	if probe != nil {
 		if probe.Video != nil {
 			opts.VideoCodec = probe.Video.Codec

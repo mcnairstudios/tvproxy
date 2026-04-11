@@ -1,7 +1,7 @@
 package gstreamer
 
 import (
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
 
@@ -24,7 +24,7 @@ func ShouldUseGStreamer(
 		return TranscoderChoice{UseGStreamer: false, Reason: "no probe cache"}
 	}
 
-	hash := ffmpeg.StreamHash(streamURL)
+	hash := media.StreamHash(streamURL)
 	probe, err := probeCache.GetProbe(hash)
 	if err != nil || probe == nil {
 		probe, err = probeCache.GetProbeByStreamID(hash)

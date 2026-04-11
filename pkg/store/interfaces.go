@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 )
 
@@ -92,11 +92,11 @@ type EPGStore interface {
 }
 
 type ProbeCache interface {
-	GetProbe(streamHash string) (*ffmpeg.ProbeResult, error)
-	SaveProbe(streamHash string, result *ffmpeg.ProbeResult) error
+	GetProbe(streamHash string) (*media.ProbeResult, error)
+	SaveProbe(streamHash string, result *media.ProbeResult) error
 	InvalidateProbe(streamHash string) error
-	GetProbeByStreamID(streamID string) (*ffmpeg.ProbeResult, error)
-	SaveProbeByStreamID(streamID string, result *ffmpeg.ProbeResult) error
+	GetProbeByStreamID(streamID string) (*media.ProbeResult, error)
+	SaveProbeByStreamID(streamID string, result *media.ProbeResult) error
 	SaveTSHeader(streamHash string, header []byte) error
 	GetTSHeader(streamHash string) ([]byte, error)
 }

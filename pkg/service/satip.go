@@ -10,7 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/tvsatipscan"
@@ -196,20 +196,20 @@ func (s *SatIPService) scanSource(ctx context.Context, source *models.SatIPSourc
 
 		if s.probeCache != nil {
 			hasVideo := group != "Radio"
-			probe := &ffmpeg.ProbeResult{
+			probe := &media.ProbeResult{
 				HasVideo: hasVideo,
 			}
 			if hasVideo {
 				for _, t := range tracks {
 					if t.Category == "video" {
-						probe.Video = &ffmpeg.VideoInfo{Codec: t.Type}
+						probe.Video = &media.VideoInfo{Codec: t.Type}
 						break
 					}
 				}
 			}
 			for _, t := range tracks {
 				if t.Category == "audio" {
-					probe.AudioTracks = append(probe.AudioTracks, ffmpeg.AudioTrack{
+					probe.AudioTracks = append(probe.AudioTracks, media.AudioTrack{
 						Language: t.Language,
 						Codec:    t.Type,
 					})

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
 type OutputFormat string
@@ -76,7 +76,7 @@ func BuildPipeline(opts PipelineOpts) *Pipeline {
 	}
 }
 
-func BuildFromProbe(probe *ffmpeg.ProbeResult, inputURL string, opts PipelineOpts) *Pipeline {
+func BuildFromProbe(probe *media.ProbeResult, inputURL string, opts PipelineOpts) *Pipeline {
 	if probe != nil {
 		if probe.Video != nil {
 			opts.VideoCodec = probe.Video.Codec

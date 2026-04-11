@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
@@ -131,7 +131,7 @@ func (h *StreamProfileHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.VideoCodec = "copy"
 	}
 	if req.Container == "" {
-		req.Container = ffmpeg.DefaultContainer(req.VideoCodec)
+		req.Container = media.DefaultContainer(req.VideoCodec)
 	}
 	if req.Delivery == "" {
 		req.Delivery = "stream"
@@ -258,7 +258,7 @@ func (h *StreamProfileHandler) Update(w http.ResponseWriter, r *http.Request) {
 		req.Container = profile.Container
 	}
 	if req.Container == "" {
-		req.Container = ffmpeg.DefaultContainer(req.VideoCodec)
+		req.Container = media.DefaultContainer(req.VideoCodec)
 	}
 	if req.Delivery == "" {
 		req.Delivery = profile.Delivery

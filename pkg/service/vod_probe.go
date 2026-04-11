@@ -7,32 +7,33 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
-func (s *VODService) ProbeFile(ctx context.Context, streamURL, filePath string) (*ffmpeg.ProbeResult, error) {
+func (s *VODService) ProbeFile(ctx context.Context, streamURL, filePath string) (*media.ProbeResult, error) {
 	if streamURL != "" {
-		cached, _ := s.probeCache.GetProbe(ffmpeg.StreamHash(streamURL))
+		cached, _ := s.probeCache.GetProbe(media.StreamHash(streamURL))
 		if cached != nil {
 			return cached, nil
 		}
 	}
-	result, err := ffmpeg.Probe(ctx, filePath, "")
+	result, err := avprobe.Probe(ctx, filePath, "")
 	if err != nil {
 		return nil, err
 	}
 	if streamURL != "" && result != nil {
-		s.probeCache.SaveProbe(ffmpeg.StreamHash(streamURL), result)
+		s.probeCache.SaveProbe(media.StreamHash(streamURL), result)
 	}
 	return result, nil
 }
 
-func (s *VODService) ProbeStream(ctx context.Context, streamID string) (*ffmpeg.ProbeResult, error) {
+func (s *VODService) ProbeStream(ctx context.Context, streamID string) (*media.ProbeResult, error) {
 	stream, err := s.streamStore.GetByID(ctx, streamID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStreamNotFound, err)
 	}
-	return ffmpeg.Probe(ctx, stream.URL, s.config.UserAgent)
+	return avprobe.Probe(ctx, stream.URL, s.config.UserAgent)
 }
 
 func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName string) (io.ReadCloser, string, error) {
@@ -51,8 +52,8 @@ func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName st
 
 	probe, probeErr := s.cachedOrFreshProbe(ctx, filePath)
 	if probeErr == nil && probe != nil && probe.Video != nil {
-		fileCodec := ffmpeg.NormalizeVideoCodec(probe.Video.Codec)
-		fileContainer := ffmpeg.NormalizeContainer(probe.FormatName)
+		fileCodec := media.NormalizeVideoCodec(probe.Video.Codec)
+		fileContainer := media.NormalizeContainer(probe.FormatName)
 		videoMatch := sp.VideoCodec == "copy" || sp.VideoCodec == fileCodec
 		containerMatch := sp.Container == "" || sp.Container == fileContainer
 		if videoMatch && containerMatch {
@@ -64,7 +65,7 @@ func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName st
 		}
 	}
 
-	args := ffmpeg.ShellSplit(sp.Args)
+	args := media.ShellSplit(sp.Args)
 	for i, arg := range args {
 		if arg == "{input}" {
 			args[i] = filePath
@@ -87,12 +88,12 @@ func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName st
 	return &cmdReadCloser{ReadCloser: stdout, cmd: cmd}, contentType, nil
 }
 
-func (s *VODService) cachedOrFreshProbe(ctx context.Context, filePath string) (*ffmpeg.ProbeResult, error) {
-	hash := ffmpeg.StreamHash(filePath)
+func (s *VODService) cachedOrFreshProbe(ctx context.Context, filePath string) (*media.ProbeResult, error) {
+	hash := media.StreamHash(filePath)
 	if cached, err := s.probeCache.GetProbe(hash); err == nil && cached != nil {
 		return cached, nil
 	}
-	result, err := ffmpeg.Probe(ctx, filePath, "")
+	result, err := avprobe.Probe(ctx, filePath, "")
 	if err == nil && result != nil {
 		s.probeCache.SaveProbe(hash, result)
 	}

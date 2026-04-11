@@ -11,7 +11,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/gavinmcnair/tvproxy/pkg/ffmpeg"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
@@ -175,7 +175,7 @@ func (s *HDHRSourceService) ScanSource(ctx context.Context, sourceID string) err
 
 		if s.probeCache != nil {
 			probe := hdhrProbeFromLineup(entry)
-			s.probeCache.SaveProbe(ffmpeg.StreamHash(entry.URL), probe)
+			s.probeCache.SaveProbe(media.StreamHash(entry.URL), probe)
 			s.probeCache.SaveProbeByStreamID(id, probe)
 		}
 
@@ -202,12 +202,12 @@ func (s *HDHRSourceService) ScanSource(ctx context.Context, sourceID string) err
 		}
 		if captureURL != "" {
 			s.Set(sourceID, RefreshStatus{State: "running", Message: "Capturing stream header for fast startup..."})
-			header, err := ffmpeg.CaptureTPSHeader(ctx, captureURL, 10*time.Second)
+			header, err := media.CaptureTPSHeader(ctx, captureURL, 10*time.Second)
 			if err != nil {
 				s.log.Warn().Err(err).Msg("failed to capture TS header")
 			} else {
 				for _, st := range streams {
-					s.probeCache.SaveTSHeader(ffmpeg.StreamHash(st.URL), header)
+					s.probeCache.SaveTSHeader(media.StreamHash(st.URL), header)
 				}
 				s.log.Info().Int("size", len(header)).Int("channels", len(streams)).Msg("captured TS header for fast startup")
 			}
@@ -414,8 +414,8 @@ func udpDiscoverHDHR(log zerolog.Logger) ([]string, error) {
 	return ips, nil
 }
 
-func hdhrProbeFromLineup(entry hdhrLineupEntry) *ffmpeg.ProbeResult {
-	probe := &ffmpeg.ProbeResult{
+func hdhrProbeFromLineup(entry hdhrLineupEntry) *media.ProbeResult {
+	probe := &media.ProbeResult{
 		FormatName: "mpegts",
 	}
 
@@ -426,26 +426,26 @@ func hdhrProbeFromLineup(entry hdhrLineupEntry) *ffmpeg.ProbeResult {
 		probe.HasVideo = true
 		switch vcodec {
 		case "mpeg2":
-			probe.Video = &ffmpeg.VideoInfo{Codec: "mpeg2video"}
+			probe.Video = &media.VideoInfo{Codec: "mpeg2video"}
 		case "h264":
-			probe.Video = &ffmpeg.VideoInfo{Codec: "h264"}
+			probe.Video = &media.VideoInfo{Codec: "h264"}
 		case "hevc", "h265":
-			probe.Video = &ffmpeg.VideoInfo{Codec: "hevc"}
+			probe.Video = &media.VideoInfo{Codec: "hevc"}
 		default:
-			probe.Video = &ffmpeg.VideoInfo{Codec: "h264"}
+			probe.Video = &media.VideoInfo{Codec: "h264"}
 		}
 	}
 
 	acodec := strings.ToLower(entry.AudioCodec)
 	switch acodec {
 	case "aac":
-		probe.AudioTracks = []ffmpeg.AudioTrack{{Codec: "aac_latm", Language: "eng"}}
+		probe.AudioTracks = []media.AudioTrack{{Codec: "aac_latm", Language: "eng"}}
 	case "mpeg", "mp2":
-		probe.AudioTracks = []ffmpeg.AudioTrack{{Codec: "mp2", Language: "eng"}}
+		probe.AudioTracks = []media.AudioTrack{{Codec: "mp2", Language: "eng"}}
 	case "ac3":
-		probe.AudioTracks = []ffmpeg.AudioTrack{{Codec: "ac3", Language: "eng"}}
+		probe.AudioTracks = []media.AudioTrack{{Codec: "ac3", Language: "eng"}}
 	default:
-		probe.AudioTracks = []ffmpeg.AudioTrack{{Codec: "aac_latm", Language: "eng"}}
+		probe.AudioTracks = []media.AudioTrack{{Codec: "aac_latm", Language: "eng"}}
 	}
 
 	return probe
