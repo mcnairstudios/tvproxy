@@ -2,8 +2,6 @@ package service
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
@@ -124,15 +122,8 @@ func liveStrategy(in StrategyInput, out StrategyOutput, cat StreamCategory) Sess
 		}
 	}
 
-	if out.Delivery == "hls" {
-		s.HLSOutputDir = filepath.Join(os.TempDir(), "tvproxy-hls", in.StreamID)
-		os.MkdirAll(s.HLSOutputDir, 0755)
-		s.MetadataOnly = false
-		s.FFmpegArgs = ""
-	} else {
-		s.MetadataOnly = false
-		s.FFmpegArgs = out.Args
-	}
+	s.MetadataOnly = false
+	s.FFmpegArgs = out.Args
 
 	return s
 }

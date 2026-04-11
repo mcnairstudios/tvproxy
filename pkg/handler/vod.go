@@ -138,11 +138,17 @@ func (h *VODHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	delivery := "stream"
+	if sess := h.vodService.GetSession(sessionID); sess != nil && sess.HLSOutputDir != "" {
+		delivery = "hls"
+	}
+
 	resp := map[string]any{
 		"session_id":      sessionID,
 		"consumer_id":     consumerID,
 		"channel_id":      streamID,
 		"container":       container,
+		"delivery":        delivery,
 		"request_headers": clientHeaders(r),
 	}
 	_, _, duration := h.vodService.GetProbeInfo(sessionID)
@@ -168,11 +174,17 @@ func (h *VODHandler) CreateChannelSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	delivery := "stream"
+	if sess := h.vodService.GetSession(sessionID); sess != nil && sess.HLSOutputDir != "" {
+		delivery = "hls"
+	}
+
 	resp := map[string]any{
 		"session_id":      sessionID,
 		"consumer_id":     consumerID,
 		"channel_id":      channelID,
 		"container":       container,
+		"delivery":        delivery,
 		"audio_only":      audioOnly,
 		"request_headers": clientHeaders(r),
 	}
@@ -579,8 +591,17 @@ func (h *VODHandler) HLSPlaylist(w http.ResponseWriter, r *http.Request) {
 
 	sess := h.vodService.GetSession(channelID)
 	if sess != nil && sess.HLSOutputDir != "" {
-		data, err := os.ReadFile(filepath.Join(sess.HLSOutputDir, "playlist.m3u8"))
-		if err != nil {
+		playlistPath := filepath.Join(sess.HLSOutputDir, "playlist.m3u8")
+		var data []byte
+		var err error
+		for i := 0; i < 30; i++ {
+			data, err = os.ReadFile(playlistPath)
+			if err == nil && len(data) > 20 {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		if err != nil || len(data) < 20 {
 			respondError(w, http.StatusNotFound, "playlist not ready")
 			return
 		}

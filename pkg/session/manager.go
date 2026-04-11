@@ -15,14 +15,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-gst/go-gst/gst"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
-	"github.com/gavinmcnair/tvproxy/pkg/media"
+	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/tvsatipscan"
 )
@@ -107,6 +108,7 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 	}
 	s.mu.Unlock()
 	delete(m.sessions, channelID)
+	s.StopPipeline()
 	s.cancel()
 	<-s.done
 	os.RemoveAll(s.TempDir)
@@ -343,6 +345,7 @@ func (m *Manager) stopAndCleanup(channelID string, s *Session) {
 	delete(m.sessions, channelID)
 	m.mu.Unlock()
 
+	s.StopPipeline()
 	s.cancel()
 
 	<-s.done
@@ -394,7 +397,7 @@ func (m *Manager) tailSession(ctx context.Context, s *Session) (io.ReadCloser, e
 			if procErr := s.getError(); procErr != nil {
 				return nil, procErr
 			}
-			return nil, fmt.Errorf("ffmpeg exited before creating file")
+			return nil, fmt.Errorf("transcoder exited before creating file")
 		}
 		select {
 		case <-ctx.Done():
@@ -404,7 +407,7 @@ func (m *Manager) tailSession(ctx context.Context, s *Session) (io.ReadCloser, e
 	}
 	if f == nil {
 		if procErr := s.getError(); procErr != nil {
-			return nil, fmt.Errorf("ffmpeg failed: %w", procErr)
+			return nil, fmt.Errorf("transcoder failed: %w", procErr)
 		}
 		return nil, fmt.Errorf("timed out waiting for session file after %d retries", retryCount)
 	}
@@ -683,10 +686,11 @@ func (m *Manager) resolveTranscoder(opts StartOpts, filePath string) (string, []
 		return command, args
 	}
 
-	choice := gstreamer.ShouldUseGStreamer(m.probeCache, opts.StreamURL, hwAccel)
-	if transcoder == "gstreamer" && !choice.UseGStreamer {
-		choice.UseGStreamer = gstreamer.Available()
-		choice.Reason = "forced by setting (no probe data)"
+	m.log.Info().Str("stream_url", opts.StreamURL).Str("stream_id", opts.StreamID).Str("channel_id", opts.ChannelID).Msg("resolveTranscoder lookup")
+	choice := gstreamer.ShouldUseGStreamer(m.probeCache, opts.StreamURL, opts.StreamID, hwAccel)
+	if !choice.UseGStreamer && gstreamer.Available() {
+		choice.UseGStreamer = true
+		choice.Reason = "gstreamer available (no probe data, using defaults)"
 	}
 	if choice.UseGStreamer {
 		probe, _ := m.probeCache.GetProbe(media.StreamHash(opts.StreamURL))
@@ -706,7 +710,7 @@ func (m *Manager) resolveTranscoder(opts StartOpts, filePath string) (string, []
 			OutputVideoCodec: opts.OutputVideoCodec,
 			OutputAudioCodec: opts.OutputAudioCodec,
 			OutputBitrate:    0,
-			OutputFormat:     gstreamer.OutputMPEGTS,
+			OutputFormat:     gstreamer.OutputMP4,
 			HWAccel:          hwAccel,
 			RecordingPath:    filePath,
 		}
@@ -715,17 +719,16 @@ func (m *Manager) resolveTranscoder(opts StartOpts, filePath string) (string, []
 			pipeOpts.OutputFormat = gstreamer.OutputHLS
 			pipeOpts.HLSDir = opts.HLSOutputDir
 			pipeOpts.HLSSegmentTime = 6
-			if filePath != "" {
-				pipeOpts.DualOutput = true
-			}
+			pipeOpts.RecordingPath = ""
 		}
 
 		pipeline := gstreamer.BuildFromProbe(probe, opts.StreamURL, pipeOpts)
 		m.log.Info().
 			Str("channel_id", opts.ChannelID).
 			Str("reason", choice.Reason).
+			Str("pipeline", pipeline.PipelineStr).
 			Msg("using gstreamer")
-		return pipeline.Cmd, pipeline.Args
+		return "gstreamer-native", []string{pipeline.PipelineStr}
 	}
 
 	m.log.Info().
@@ -757,6 +760,7 @@ func (m *Manager) Shutdown() {
 			s.lingerTimer = nil
 		}
 		s.mu.Unlock()
+		s.StopPipeline()
 		s.cancel()
 		<-s.done
 		if !s.HasRecordingConsumer() {
@@ -918,6 +922,11 @@ func (m *Manager) logSignalAsync(sessionID, channelID, streamURL string) {
 func (m *Manager) run(ctx context.Context, s *Session, command string, args []string, inputURL string) {
 	defer s.markDone()
 
+	if command == "gstreamer-native" && len(args) > 0 {
+		m.runGStreamerNative(ctx, s, args[0], inputURL)
+		return
+	}
+
 	isGStreamer := strings.Contains(command, "gst-launch")
 	m.log.Info().Str("session_id", s.ID).Str("command", command).Msg("starting transcoder")
 
@@ -996,13 +1005,17 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 
 	go m.parseProgress(s, stderr)
 
+	if isGStreamer {
+		go m.pollFileProgress(ctx, s)
+	}
+
 	startupDur := 30 * time.Second
 	if m.config.Settings != nil {
 		startupDur = m.config.Settings.FFmpeg.StartupTimeout
 	}
 	startupTimeout := time.AfterFunc(startupDur, func() {
 		if s.getBuffered() == 0 {
-			m.log.Warn().Str("session_id", s.ID).Dur("timeout", startupDur).Msg("ffmpeg startup timeout, no data received")
+			m.log.Warn().Str("session_id", s.ID).Dur("timeout", startupDur).Msg("transcoder startup timeout, no data received")
 			s.cancel()
 		}
 	})
@@ -1015,15 +1028,85 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 	}
 
 	if waitErr != nil && ctx.Err() == nil {
-		s.setError(fmt.Errorf("ffmpeg failed: %w", waitErr))
+		stderr := s.LastStderr()
+		if stderr != "" {
+			s.setError(fmt.Errorf("transcoder failed: %w\n%s", waitErr, stderr))
+		} else {
+			s.setError(fmt.Errorf("transcoder failed: %w", waitErr))
+		}
 		if m.probeCache != nil && inputURL != "" {
 			_ = m.probeCache.InvalidateProbe(media.StreamHash(inputURL))
 		}
 	}
 }
 
+func (m *Manager) runGStreamerNative(ctx context.Context, s *Session, pipelineStr string, inputURL string) {
+	m.log.Info().Str("session_id", s.ID).Str("pipeline", pipelineStr).Msg("starting native gstreamer pipeline")
+
+	pipeline, err := gst.NewPipelineFromString(pipelineStr)
+	if err != nil {
+		s.setError(fmt.Errorf("gstreamer pipeline creation failed: %w", err))
+		return
+	}
+
+	s.SetStopPipeline(func() {
+		pipeline.SetState(gst.StateNull)
+	})
+
+	pipeline.SetState(gst.StatePlaying)
+
+	go m.pollFileProgress(ctx, s)
+
+	bus := pipeline.GetBus()
+	for {
+		msg := bus.TimedPop(gst.ClockTime(500000000))
+		if ctx.Err() != nil {
+			break
+		}
+		if msg == nil {
+			continue
+		}
+		switch msg.Type() {
+		case gst.MessageEOS:
+			m.log.Info().Str("session_id", s.ID).Msg("gstreamer EOS")
+			break
+		case gst.MessageError:
+			gstErr := msg.ParseError()
+			m.log.Error().Str("session_id", s.ID).Err(gstErr).Msg("gstreamer error")
+			s.setError(fmt.Errorf("gstreamer: %w", gstErr))
+			s.setLastStderr(gstErr.Error())
+			break
+		default:
+			continue
+		}
+		break
+	}
+
+	pipeline.SetState(gst.StateNull)
+	s.SetStopPipeline(nil)
+	m.log.Info().Str("session_id", s.ID).Msg("gstreamer pipeline stopped")
+}
+
+func (m *Manager) pollFileProgress(ctx context.Context, s *Session) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			info, err := os.Stat(s.FilePath)
+			if err == nil && info.Size() > 0 {
+				secs := float64(info.Size()) / 500000.0
+				s.setBuffered(secs)
+			}
+		}
+	}
+}
+
 func (m *Manager) parseProgress(s *Session, r io.Reader) {
 	scanner := bufio.NewScanner(r)
+	var lastErrors []string
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "out_time_us=") {
@@ -1032,14 +1115,21 @@ func (m *Manager) parseProgress(s *Session, r io.Reader) {
 			if err == nil && us > 0 {
 				secs := float64(us) / 1_000_000.0
 				if secs > maxBufferedSecs {
-					m.log.Warn().Str("session_id", s.ID).Float64("secs", secs).Msg("ffmpeg progress exceeds 48h cap")
+					m.log.Warn().Str("session_id", s.ID).Float64("secs", secs).Msg("transcoder progress exceeds 48h cap")
 					secs = maxBufferedSecs
 				}
 				s.setBuffered(secs)
 			}
 		} else if !isProgressNoise(line) && line != "" {
-			m.log.Warn().Str("session_id", s.ID).Str("ffmpeg", line).Msg("ffmpeg output")
+			m.log.Warn().Str("session_id", s.ID).Str("stderr", line).Msg("transcoder output")
+			lastErrors = append(lastErrors, line)
+			if len(lastErrors) > 10 {
+				lastErrors = lastErrors[1:]
+			}
 		}
+	}
+	if len(lastErrors) > 0 {
+		s.setLastStderr(strings.Join(lastErrors, "\n"))
 	}
 }
 

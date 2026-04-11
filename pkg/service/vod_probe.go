@@ -8,6 +8,7 @@ import (
 	"os/exec"
 
 	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
+	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
@@ -65,15 +66,43 @@ func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName st
 		}
 	}
 
-	args := media.ShellSplit(sp.Args)
-	for i, arg := range args {
-		if arg == "{input}" {
-			args[i] = filePath
+	var command string
+	var args []string
+
+	if gstreamer.Available() {
+		outFormat := gstreamer.OutputMP4
+		if sp.Container == "mpegts" {
+			outFormat = gstreamer.OutputMPEGTS
+		}
+		outVideo := sp.VideoCodec
+		if outVideo == "" {
+			outVideo = "copy"
+		}
+		pipeline := gstreamer.BuildFromProbe(probe, filePath, gstreamer.PipelineOpts{
+			InputType:        "file",
+			IsLive:           false,
+			OutputVideoCodec: outVideo,
+			OutputAudioCodec: "aac",
+			OutputFormat:     outFormat,
+			HWAccel:          gstreamer.HWAccel(sp.HWAccel),
+		})
+		command = pipeline.Cmd
+		args = pipeline.Args
+	} else {
+		args = media.ShellSplit(sp.Args)
+		for i, arg := range args {
+			if arg == "{input}" {
+				args[i] = filePath
+			}
+		}
+		args = append([]string{"-y"}, args...)
+		command = sp.Command
+		if command == "" {
+			command = "ffmpeg"
 		}
 	}
-	args = append([]string{"-y"}, args...)
 
-	cmd := exec.CommandContext(ctx, sp.Command, args...)
+	cmd := exec.CommandContext(ctx, command, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, "", fmt.Errorf("creating stdout pipe: %w", err)
@@ -81,7 +110,7 @@ func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName st
 	cmd.Stderr = nil
 
 	if err := cmd.Start(); err != nil {
-		return nil, "", fmt.Errorf("starting ffmpeg transcode: %w", err)
+		return nil, "", fmt.Errorf("starting transcode: %w", err)
 	}
 
 	contentType := containerContentType(sp.Container)

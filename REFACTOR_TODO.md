@@ -43,23 +43,30 @@ All files still import `pkg/ffmpeg` via the compat layer. Each should be migrate
 ## Phase 4 shortcuts: GStreamer not wired into all paths
 
 ### HLS session (pkg/hls/session.go)
-- [ ] `StartTranscode()` still hardcodes `exec.CommandContext(rctx, "ffmpeg", args...)`
-- [ ] Should build GStreamer pipeline with `OutputFormat: OutputHLS` when gstreamer.Available()
+- [x] `StartTranscode()` now uses GStreamer hlssink3 when gstreamer.Available()
+- [x] Falls back to ffmpeg when GStreamer unavailable
 - [ ] Local duplicate helpers (`mapEncoderHW`, `isHTTPURL`, `isRTSP`, `isHEVC`) should be deleted, replaced with `media.*`
 
 ### Proxy transcode (pkg/service/proxy.go)
+- [x] `startFFmpeg()` now delegates to `startGStreamerProxy()` when gstreamer.Available()
 - [ ] `startFFmpeg()` should be renamed `startTranscoder()`
-- [ ] Should build GStreamer pipeline when `gstreamer.Available()` and profile supports it
-- [ ] Currently only handles ffmpeg-style profile.Args with `{input}` substitution
+- [ ] ffmpeg fallback still uses profile.Args with `{input}` substitution
+
+### VOD file transcode (pkg/service/vod_probe.go)
+- [x] `TranscodeFile()` now uses GStreamer BuildFromProbe when available
+- [x] Falls back to ffmpeg when GStreamer unavailable
 
 ### VOD args composition (pkg/service/vod.go)
-- [ ] `composeSessionArgs()` still calls `ffmpeg.Build(ffmpeg.BuildOptions{...})`
-- [ ] Should use `gstreamer.BuildFromProbe()` when transcoder preference is gstreamer
-- [ ] The `sessionArgs` struct has `Command: "ffmpeg"` as default
+- [x] `composeSessionArgs()` already returns `gst-launch-1.0` command
+- [x] Session manager's `resolveTranscoder` handles GStreamer pipeline building
+- [ ] Fallback paths still return `Command: "ffmpeg"` (only used when GStreamer unavailable)
 
 ### VOD recording (pkg/service/vod_recording.go)
-- [ ] Still calls `ffmpeg.Build()` for recording args
-- [ ] Should use GStreamer pipeline for recording output
+- [x] Recording goes through session manager which uses GStreamer via `resolveTranscoder`
+
+### Jellyfin playback (pkg/jellyfin/playback.go)
+- [x] Uses GStreamer for non-seek playback
+- [ ] Seek (StartTimeTicks) still falls back to ffmpeg — GStreamer souphttpsrc doesn't support -ss
 
 ### Database migrations (pkg/database/migrations.go)
 - [ ] Migration code calls `ffmpeg.Build()` to seed default profile args
@@ -100,6 +107,14 @@ After all Phase 3 + Phase 4 items are done:
 - [ ] GStreamer pipeline always uses global defaults instead of copy-when-codecs-match
 - [ ] Need: if source codec == output codec → OutputVideoCodec = "copy"
 - [ ] Need: audio codec compatibility check (AAC-LATM needs transcode, plain AAC can copy)
+
+## Proactive probing of all sources
+- [ ] HDHR scan should trigger avprobe.Probe() on each channel sequentially (uses idle tuner)
+- [ ] 173 channels × 102ms avg = ~18 seconds total probe time
+- [ ] Store results by BOTH stream hash AND stream ID in BBolt
+- [ ] Same for SAT>IP channels after scan
+- [ ] IPTV streams probed during M3U refresh (one at a time, respect connection limits)
+- [ ] No hacks — everything probed properly, GStreamer always has data
 
 ## CustomPipeline override
 - [ ] Add `CustomPipeline string` to `gstreamer.PipelineOpts`

@@ -14,6 +14,7 @@ type TranscoderChoice struct {
 func ShouldUseGStreamer(
 	probeCache store.ProbeCache,
 	streamURL string,
+	streamID string,
 	hwAccel HWAccel,
 ) TranscoderChoice {
 	if !Available() {
@@ -27,7 +28,9 @@ func ShouldUseGStreamer(
 	hash := media.StreamHash(streamURL)
 	probe, err := probeCache.GetProbe(hash)
 	if err != nil || probe == nil {
-		probe, err = probeCache.GetProbeByStreamID(hash)
+		if streamID != "" {
+			probe, err = probeCache.GetProbeByStreamID(streamID)
+		}
 		if err != nil || probe == nil {
 			return TranscoderChoice{UseGStreamer: false, Reason: "no cached probe data"}
 		}

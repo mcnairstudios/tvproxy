@@ -44,35 +44,27 @@ type PipelineOpts struct {
 	HLSSegmentTime  int
 	RecordingPath   string
 
-	DualOutput bool // HLS + recording simultaneously
+	DualOutput bool
 }
 
 type Pipeline struct {
-	Elements []string
-	Cmd      string
-	Args     []string
+	Elements    []string
+	PipelineStr string
+	Cmd         string
+	Args        []string
 }
 
 func BuildPipeline(opts PipelineOpts) *Pipeline {
-	var elements []string
+	pstr := buildPipelineStr(opts)
 
-	elements = append(elements, buildSource(opts)...)
-	elements = append(elements, buildDemux(opts)...)
+	var args []string
+	args = append(args, "-q", "-e")
+	args = append(args, strings.Fields(pstr)...)
 
-	if opts.DualOutput {
-		elements = append(elements, buildDualOutput(opts)...)
-	} else {
-		elements = append(elements, buildMux(opts)...)
-		elements = append(elements, buildSink(opts)...)
-		elements = append(elements, buildVideoChain(opts)...)
-		elements = append(elements, buildAudioChain(opts)...)
-	}
-
-	pipeline := strings.Join(elements, " ")
 	return &Pipeline{
-		Elements: elements,
-		Cmd:      "gst-launch-1.0",
-		Args:     []string{"-q", "-e", pipeline},
+		PipelineStr: pstr,
+		Cmd:         "gst-launch-1.0",
+		Args:        args,
 	}
 }
 
@@ -90,100 +82,166 @@ func BuildFromProbe(probe *media.ProbeResult, inputURL string, opts PipelineOpts
 	return BuildPipeline(opts)
 }
 
-func buildSource(opts PipelineOpts) []string {
+func buildPipelineStr(opts PipelineOpts) string {
+	var parts []string
+
+	parts = append(parts, buildSource(opts))
+	parts = append(parts, "! parsebin name=demux")
+	parts = append(parts, buildVideoStr(opts))
+	parts = append(parts, buildSinkStr(opts))
+	parts = append(parts, buildAudioStr(opts))
+
+	return strings.Join(parts, " ")
+}
+
+func buildSource(opts PipelineOpts) string {
 	switch opts.InputType {
 	case "rtsp":
-		return []string{
-			fmt.Sprintf("rtspsrc location=%q latency=0 protocols=tcp", opts.InputURL),
-			"!", "rtpmp2tdepay",
-		}
+		return fmt.Sprintf("rtspsrc location=%s latency=0 protocols=tcp ! rtpmp2tdepay", opts.InputURL)
 	case "file":
-		return []string{
-			fmt.Sprintf("filesrc location=%q", opts.InputURL),
-		}
+		return fmt.Sprintf("filesrc location=%s", opts.InputURL)
 	default:
-		src := fmt.Sprintf("souphttpsrc location=%q", opts.InputURL)
+		src := fmt.Sprintf("souphttpsrc location=%s", opts.InputURL)
 		if opts.IsLive {
 			src += " do-timestamp=true is-live=true"
 		}
-		return []string{src}
+		return src
 	}
 }
 
-func buildDemux(opts PipelineOpts) []string {
-	elements := []string{"!", "tsparse", "set-timestamps=true"}
-
-	if opts.DualOutput {
-		elements = append(elements, "!", "tsdemux", "name=demux")
-	} else {
-		elements = append(elements, "!", "tsdemux")
-	}
-	return elements
-}
-
-func buildVideoChain(opts PipelineOpts) []string {
-	var elements []string
-	elements = append(elements, "demux.", "!", "queue")
-
+func buildVideoStr(opts PipelineOpts) string {
 	vcodec := normalizeCodec(opts.VideoCodec)
-	outCodec := opts.OutputVideoCodec
+	outCodec := normalizeCodec(opts.OutputVideoCodec)
 	if outCodec == "" || outCodec == "default" {
 		outCodec = "copy"
 	}
 
-	if outCodec == "copy" {
-		switch vcodec {
-		case "h264":
-			elements = append(elements, "!", "h264parse")
-		case "h265", "hevc":
-			elements = append(elements, "!", "h265parse")
-		case "mpeg2video":
-			elements = append(elements, "!", "mpegvideoparse")
-		}
-	} else {
-		elements = append(elements, buildDecoder(vcodec, opts.HWAccel)...)
-		elements = append(elements, buildEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)...)
+	videoCaps := videoCapsFilter(vcodec)
+
+	if outCodec == "copy" || outCodec == vcodec {
+		parser, configInterval := videoParser(outCodec, vcodec)
+		return fmt.Sprintf("demux. ! %s ! queue ! %s %s ! mux.", videoCaps, parser, configInterval)
 	}
-	elements = append(elements, "!", "mux.")
-	return elements
+
+	dec := hwDecoder(vcodec, opts.HWAccel)
+	enc := hwEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)
+	parser, configInterval := videoParser(outCodec, "")
+
+	return fmt.Sprintf("demux. ! %s ! queue ! %s ! %s ! %s %s ! mux.", videoCaps, dec, enc, parser, configInterval)
 }
 
-func buildDecoder(codec string, hw HWAccel) []string {
+func buildSinkStr(opts PipelineOpts) string {
+	switch opts.OutputFormat {
+	case OutputMP4:
+		if opts.RecordingPath != "" {
+			return fmt.Sprintf("isofmp4mux name=mux fragment-duration=1000 ! filesink location=%s", opts.RecordingPath)
+		}
+		return "isofmp4mux name=mux fragment-duration=1000 ! fdsink fd=1"
+	default:
+		if opts.RecordingPath != "" {
+			return fmt.Sprintf("mpegtsmux name=mux ! filesink location=%s", opts.RecordingPath)
+		}
+		return "mpegtsmux name=mux ! fdsink fd=1"
+	}
+}
+
+func buildAudioStr(opts PipelineOpts) string {
+	acodec := normalizeCodec(opts.AudioCodec)
+	outAudio := normalizeCodec(opts.OutputAudioCodec)
+	if outAudio == "" || outAudio == "default" {
+		outAudio = "aac"
+	}
+
+	audioCaps := audioCapsFilter(acodec)
+
+	if outAudio == "copy" && canCopyAudio(acodec, opts.OutputFormat) {
+		parser := audioParser(acodec)
+		return fmt.Sprintf("demux. ! %s ! queue ! %s ! mux.", audioCaps, parser)
+	}
+
+	dec := audioDecoder(acodec)
+	return fmt.Sprintf("demux. ! %s ! queue ! %s ! audioconvert ! audioresample ! audio/x-raw,channels=2 ! faac ! aacparse ! mux.", audioCaps, dec)
+}
+
+func videoCapsFilter(codec string) string {
+	switch codec {
+	case "h264":
+		return "video/x-h264"
+	case "h265":
+		return "video/x-h265"
+	case "mpeg2video":
+		return "video/mpeg"
+	default:
+		return "video/x-h264"
+	}
+}
+
+func audioCapsFilter(codec string) string {
+	switch codec {
+	case "ac3":
+		return "audio/x-ac3"
+	case "eac3":
+		return "audio/x-eac3"
+	case "mp2", "mp3":
+		return "audio/mpeg,mpegversion=1"
+	default:
+		return "audio/mpeg"
+	}
+}
+
+func videoParser(outCodec, sourceCodec string) (string, string) {
+	codec := outCodec
+	if codec == "copy" {
+		codec = sourceCodec
+	}
+	switch codec {
+	case "h265":
+		return "h265parse", "config-interval=-1"
+	case "mpeg2video":
+		return "mpegvideoparse", ""
+	default:
+		return "h264parse", "config-interval=-1"
+	}
+}
+
+func hwDecoder(codec string, hw HWAccel) string {
 	switch hw {
 	case HWVAAPI:
 		switch codec {
 		case "h264":
-			return []string{"!", "h264parse", "!", "vaapih264dec"}
-		case "h265", "hevc":
-			return []string{"!", "h265parse", "!", "vaapih265dec"}
+			return "h264parse ! vaapih264dec"
+		case "h265":
+			return "h265parse ! vaapih265dec"
 		case "mpeg2video":
-			return []string{"!", "mpegvideoparse", "!", "vaapidecode"}
+			return "mpegvideoparse ! vaapidecode"
 		}
 	case HWQSV:
 		switch codec {
 		case "h264":
-			return []string{"!", "h264parse", "!", "qsvh264dec"}
-		case "h265", "hevc":
-			return []string{"!", "h265parse", "!", "qsvh265dec"}
+			return "h264parse ! qsvh264dec"
+		case "h265":
+			return "h265parse ! qsvh265dec"
 		}
 	case HWVideoToolbox:
 		switch codec {
 		case "h264":
-			return []string{"!", "h264parse", "!", "vtdec"}
+			return "h264parse ! vtdec"
+		case "h265":
+			return "h265parse ! vtdec"
 		}
 	}
 	switch codec {
 	case "h264":
-		return []string{"!", "h264parse", "!", "avdec_h264"}
-	case "h265", "hevc":
-		return []string{"!", "h265parse", "!", "avdec_h265"}
+		return "h264parse ! avdec_h264"
+	case "h265":
+		return "h265parse ! avdec_h265"
 	case "mpeg2video":
-		return []string{"!", "mpegvideoparse", "!", "avdec_mpeg2video"}
+		return "mpegvideoparse ! avdec_mpeg2video"
 	}
-	return []string{"!", "decodebin"}
+	return "decodebin"
 }
 
-func buildEncoder(codec string, hw HWAccel, bitrate int) []string {
+func hwEncoder(codec string, hw HWAccel, bitrate int) string {
 	br := bitrate
 	if br <= 0 {
 		br = 4000
@@ -191,162 +249,65 @@ func buildEncoder(codec string, hw HWAccel, bitrate int) []string {
 
 	switch hw {
 	case HWVAAPI:
-		var enc string
 		switch codec {
 		case "h264":
-			enc = fmt.Sprintf("vaapih264enc bitrate=%d tune=low-latency", br)
-		case "h265", "hevc":
-			enc = fmt.Sprintf("vaapih265enc bitrate=%d", br)
+			return fmt.Sprintf("vaapih264enc bitrate=%d tune=low-latency", br)
+		case "h265":
+			return fmt.Sprintf("vaapih265enc bitrate=%d", br)
 		case "av1":
-			enc = fmt.Sprintf("vaapiav1enc bitrate=%d", br)
-		default:
-			enc = fmt.Sprintf("vaapih264enc bitrate=%d tune=low-latency", br)
+			return fmt.Sprintf("vaapiav1enc bitrate=%d", br)
 		}
-		return []string{"!", "videoconvert", "!", enc}
 	case HWQSV:
-		var enc string
 		switch codec {
 		case "h264":
-			enc = fmt.Sprintf("qsvh264enc bitrate=%d target-usage=1", br)
-		case "h265", "hevc":
-			enc = fmt.Sprintf("qsvh265enc bitrate=%d", br)
-		default:
-			enc = fmt.Sprintf("qsvh264enc bitrate=%d target-usage=1", br)
+			return fmt.Sprintf("qsvh264enc bitrate=%d target-usage=1", br)
+		case "h265":
+			return fmt.Sprintf("qsvh265enc bitrate=%d", br)
 		}
-		return []string{"!", enc}
 	case HWVideoToolbox:
-		return []string{
-			"!", "videoconvert",
-			"!", fmt.Sprintf("vtenc_h264 bitrate=%d realtime=true allow-frame-reordering=false", br),
+		switch codec {
+		case "h265":
+			return fmt.Sprintf("vtenc_h265 bitrate=%d realtime=true allow-frame-reordering=false", br)
+		default:
+			return fmt.Sprintf("vtenc_h264 bitrate=%d realtime=true allow-frame-reordering=false", br)
 		}
 	}
-	return []string{
-		"!", "videoconvert",
-		"!", fmt.Sprintf("x264enc bitrate=%d speed-preset=ultrafast tune=zerolatency", br),
+	switch codec {
+	case "h265":
+		return fmt.Sprintf("videoconvert ! x265enc bitrate=%d speed-preset=ultrafast", br)
+	default:
+		return fmt.Sprintf("videoconvert ! x264enc bitrate=%d speed-preset=ultrafast tune=zerolatency", br)
 	}
 }
 
-func buildAudioChain(opts PipelineOpts) []string {
-	acodec := normalizeCodec(opts.AudioCodec)
-	outAudio := opts.OutputAudioCodec
-	if outAudio == "" || outAudio == "default" {
-		outAudio = "aac"
-	}
-
-	if outAudio == "copy" && canCopyAudio(acodec, opts.OutputFormat) {
-		return nil
-	}
-
-	var dec string
-	switch acodec {
+func audioDecoder(codec string) string {
+	switch codec {
 	case "aac_latm":
-		dec = "avdec_aac_latm"
+		return "avdec_aac_latm"
 	case "aac":
-		dec = "avdec_aac"
+		return "avdec_aac"
 	case "mp2", "mp3":
-		dec = "mpg123audiodec"
+		return "mpg123audiodec"
 	case "ac3":
-		dec = "avdec_ac3"
+		return "avdec_ac3"
+	case "eac3":
+		return "avdec_eac3"
 	default:
-		dec = "decodebin"
-	}
-
-	return []string{
-		"demux.", "!", "queue", "!", dec, "!", "audioconvert",
-		"!", "faac", "!", "aacparse", "!", "mux.",
+		return "avdec_aac_latm"
 	}
 }
 
-func buildMux(opts PipelineOpts) []string {
-	switch opts.OutputFormat {
-	case OutputHLS:
-		seg := opts.HLSSegmentTime
-		if seg <= 0 {
-			seg = 6
-		}
-		dir := opts.HLSDir
-		if dir == "" {
-			dir = "/tmp/hls"
-		}
-		return []string{
-			"!", fmt.Sprintf("hlssink3 target-duration=%d playlist-location=%s/playlist.m3u8 location=%s/seg%%05d.ts", seg, dir, dir),
-		}
-	case OutputMP4:
-		return []string{"!", "isofmp4mux", "name=mux", "fragment-duration=1000"}
-	default:
-		return []string{"!", "mpegtsmux", "name=mux"}
-	}
-}
-
-func buildSink(opts PipelineOpts) []string {
-	if opts.RecordingPath != "" {
-		return []string{"!", fmt.Sprintf("filesink location=%q", opts.RecordingPath)}
-	}
-	return []string{"!", "fdsink", "fd=1"}
-}
-
-func buildDualOutput(opts PipelineOpts) []string {
-	var elements []string
-
-	elements = append(elements, "demux.", "!", "queue")
-	elements = append(elements, buildDecoder(normalizeCodec(opts.VideoCodec), opts.HWAccel)...)
-	elements = append(elements, "!", "tee", "name=vt")
-
-	seg := opts.HLSSegmentTime
-	if seg <= 0 {
-		seg = 6
-	}
-	dir := opts.HLSDir
-	if dir == "" {
-		dir = "/tmp/hls"
-	}
-
-	elements = append(elements,
-		"vt.", "!", "queue",
-	)
-	elements = append(elements, buildEncoder(opts.OutputVideoCodec, opts.HWAccel, opts.OutputBitrate)...)
-	elements = append(elements,
-		"!", "h264parse",
-		"!", "mpegtsmux", "name=hlsmux",
-		"!", fmt.Sprintf("hlssink3 target-duration=%d playlist-location=%s/playlist.m3u8 location=%s/seg%%05d.ts", seg, dir, dir),
-	)
-
-	if opts.RecordingPath != "" {
-		elements = append(elements,
-			"vt.", "!", "queue",
-		)
-		elements = append(elements, buildEncoder(opts.OutputVideoCodec, opts.HWAccel, opts.OutputBitrate)...)
-		elements = append(elements,
-			"!", "h264parse",
-			"!", "mpegtsmux", "name=recmux",
-			"!", fmt.Sprintf("filesink location=%q", opts.RecordingPath),
-		)
-	}
-
-	acodec := normalizeCodec(opts.AudioCodec)
-	var adec string
-	switch acodec {
-	case "aac_latm":
-		adec = "avdec_aac_latm"
-	case "aac":
-		adec = "avdec_aac"
+func audioParser(codec string) string {
+	switch codec {
+	case "aac", "aac_latm":
+		return "aacparse"
+	case "ac3":
+		return "ac3parse"
 	case "mp2", "mp3":
-		adec = "mpg123audiodec"
+		return "mpegaudioparse"
 	default:
-		adec = "decodebin"
+		return "aacparse"
 	}
-
-	elements = append(elements,
-		"demux.", "!", "queue", "!", adec, "!", "audioconvert", "!", "tee", "name=at",
-		"at.", "!", "queue", "!", "faac", "!", "aacparse", "!", "hlsmux.",
-	)
-	if opts.RecordingPath != "" {
-		elements = append(elements,
-			"at.", "!", "queue", "!", "faac", "!", "aacparse", "!", "recmux.",
-		)
-	}
-
-	return elements
 }
 
 func canCopyAudio(codec string, format OutputFormat) bool {

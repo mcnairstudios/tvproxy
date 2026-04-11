@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
+	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 )
 
@@ -77,17 +78,43 @@ func (s *Session) StartTranscode(ctx context.Context, startNumber int, startTime
 	s.startNumber = startNumber
 	s.done = make(chan struct{})
 
-	pipeHTTP := s.shouldPipeHTTP()
-	args := s.buildFFmpegArgs(startNumber, startTimeTicks, pipeHTTP)
+	var command string
+	var args []string
+	var pipeHTTP bool
 
-	s.log.Info().
-		Str("session", s.ID).
-		Int("start_number", startNumber).
-		Int64("start_ticks", startTimeTicks).
-		Bool("pipe_http", pipeHTTP).
-		Msg("starting hls transcode")
+	if gstreamer.Available() {
+		inputType := "http"
+		if isRTSP(s.StreamURL) {
+			inputType = "rtsp"
+		}
+		outVideo := s.Profile.VideoCodec
+		if outVideo == "" {
+			outVideo = "copy"
+		}
+		pipeline := gstreamer.BuildPipeline(gstreamer.PipelineOpts{
+			InputURL:         s.StreamURL,
+			InputType:        inputType,
+			IsLive:           s.IsLive,
+			VideoCodec:       "",
+			AudioCodec:       "aac_latm",
+			OutputVideoCodec: outVideo,
+			OutputAudioCodec: "aac",
+			OutputFormat:     gstreamer.OutputHLS,
+			HLSDir:           s.OutputDir,
+			HLSSegmentTime:   s.SegmentLength,
+			HWAccel:          gstreamer.HWAccel(s.Profile.HWAccel),
+		})
+		command = pipeline.Cmd
+		args = pipeline.Args
+		s.log.Info().Str("session", s.ID).Strs("pipeline", args).Msg("starting hls transcode (gstreamer)")
+	} else {
+		pipeHTTP = s.shouldPipeHTTP()
+		args = s.buildFFmpegArgs(startNumber, startTimeTicks, pipeHTTP)
+		command = "ffmpeg"
+		s.log.Info().Str("session", s.ID).Msg("starting hls transcode (ffmpeg)")
+	}
 
-	s.cmd = exec.CommandContext(rctx, "ffmpeg", args...)
+	s.cmd = exec.CommandContext(rctx, command, args...)
 	s.cmd.Cancel = func() error {
 		return s.cmd.Process.Signal(syscall.SIGTERM)
 	}

@@ -15,8 +15,9 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
-	"github.com/gavinmcnair/tvproxy/pkg/media"
+	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
@@ -341,6 +342,10 @@ func (s *ProxyService) startHTTPPassthrough(ctx context.Context, channelID strin
 }
 
 func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream *models.Stream, profile *models.StreamProfile) (io.ReadCloser, error) {
+	if gstreamer.Available() {
+		return s.startGStreamerProxy(ctx, channelID, stream, profile)
+	}
+
 	useDirectInput := !media.IsHTTPURL(stream.URL)
 
 	var inputToken string
@@ -359,7 +364,7 @@ func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream
 		Str("profile", profile.Name).
 		Bool("direct_input", useDirectInput).
 		Strs("args", args).
-		Msg("starting transcoding")
+		Msg("starting transcoding (ffmpeg)")
 
 	var httpBody io.ReadCloser
 	if !useDirectInput {
@@ -438,6 +443,57 @@ func (s *ProxyService) logFFmpegStderr(channelID string, stderr io.ReadCloser) {
 		}
 		s.log.Warn().Str("channel_id", channelID).Str("ffmpeg", line).Msg("ffmpeg output")
 	}
+}
+
+func (s *ProxyService) startGStreamerProxy(ctx context.Context, channelID string, stream *models.Stream, profile *models.StreamProfile) (io.ReadCloser, error) {
+	inputType := "http"
+	if strings.HasPrefix(stream.URL, "rtsp://") {
+		inputType = "rtsp"
+	}
+
+	pipeline := gstreamer.BuildPipeline(gstreamer.PipelineOpts{
+		InputURL:         stream.URL,
+		InputType:        inputType,
+		IsLive:           true,
+		VideoCodec:       profile.VideoCodec,
+		AudioCodec:       "aac_latm",
+		OutputVideoCodec: profile.VideoCodec,
+		OutputAudioCodec: "aac",
+		OutputFormat:     gstreamer.OutputMPEGTS,
+		HWAccel:          gstreamer.HWAccel(profile.HWAccel),
+	})
+
+	s.log.Info().
+		Str("channel_id", channelID).
+		Str("stream_id", stream.ID).
+		Str("url", stream.URL).
+		Str("profile", profile.Name).
+		Msg("starting transcoding (gstreamer)")
+
+	cmd := exec.CommandContext(ctx, pipeline.Cmd, pipeline.Args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("creating stdout pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting gstreamer: %w", err)
+	}
+
+	go func() {
+		waitErr := cmd.Wait()
+		if waitErr == nil {
+			s.log.Info().Str("channel_id", channelID).Msg("proxy gstreamer finished")
+			return
+		}
+		if ctx.Err() != nil {
+			s.log.Info().Str("channel_id", channelID).Msg("proxy gstreamer stopped (client disconnected)")
+			return
+		}
+		s.log.Error().Err(waitErr).Str("channel_id", channelID).Msg("gstreamer exited with error")
+	}()
+
+	return stdout, nil
 }
 
 func (s *ProxyService) proxyLoop(channelID string, upstream io.ReadCloser, cancel context.CancelFunc) {

@@ -3798,7 +3798,7 @@
           return;
         }
         if (resp.session_id) {
-          session = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, request_headers: resp.request_headers };
+          session = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, delivery: resp.delivery, request_headers: resp.request_headers };
         }
       } catch(e) {
         playInProgress = false;
@@ -3988,9 +3988,9 @@
           var vodPath = '/channel/' + channelID + '/vod';
           var resp = await api.post(vodPath + '?profile=' + encodeURIComponent(currentProfile) + audioParam);
           if (resp.session_id) {
-            dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
+            dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, delivery: resp.delivery };
             if (dvrTracker) dvrTracker.reset();
-            streamSrc = '/vod/' + dvr.id + '/hls/master.m3u8';
+            streamSrc = dvr.delivery === 'hls' ? '/vod/' + dvr.id + '/hls/master.m3u8' : '/vod/' + dvr.id + '/stream';
           }
         } catch(e) {
           toast.error('Audio switch failed');
@@ -4156,7 +4156,7 @@
     };
     document.body.appendChild(overlay);
 
-    var streamSrc = dvr ? '/vod/' + dvr.id + '/hls/master.m3u8' : url;
+    var streamSrc = dvr ? (dvr.delivery === 'hls' ? '/vod/' + dvr.id + '/hls/master.m3u8' : '/vod/' + dvr.id + '/stream') : url;
     var epgDuration = 0;
 
     var savedVol = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
@@ -4213,7 +4213,7 @@
       statusEl.style.color = '#ffa726';
       statusEl.textContent = 'Buffering...';
 
-      if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+      if (isHLS && typeof Hls !== 'undefined' && Hls.isSupported()) {
         var hlsPlayer = new Hls({
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
@@ -4296,9 +4296,9 @@
             var audioParam = currentAudioIndex > 0 ? '&audio=' + currentAudioIndex : '';
             var resp = await fetch('/channel/' + channelID + '/vod?profile=' + encodeURIComponent(currentProfile) + audioParam, { method: 'POST' }).then(function(r) { return r.json(); });
             if (resp.session_id) {
-              dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container };
+              dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, delivery: resp.delivery };
               if (dvrTracker) dvrTracker.reset();
-              streamSrc = '/vod/' + dvr.id + '/hls/master.m3u8';
+              streamSrc = dvr.delivery === 'hls' ? '/vod/' + dvr.id + '/hls/master.m3u8' : '/vod/' + dvr.id + '/stream';
             }
           } catch(e) {}
           restartPlayback();

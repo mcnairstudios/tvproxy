@@ -37,9 +37,11 @@ type Session struct {
 	consumers    map[string]*Consumer
 	wasRecording bool
 	cancel       func()
+	stopPipeline func()
 	done         chan struct{}
 	doneOnce     sync.Once
 	err          error
+	lastStderr   string
 	lingerTimer  *time.Timer
 	mu           sync.RWMutex
 }
@@ -102,6 +104,35 @@ func (s *Session) getError() error {
 	err := s.err
 	s.mu.RUnlock()
 	return err
+}
+
+func (s *Session) setLastStderr(stderr string) {
+	s.mu.Lock()
+	s.lastStderr = stderr
+	s.mu.Unlock()
+}
+
+func (s *Session) LastStderr() string {
+	s.mu.RLock()
+	v := s.lastStderr
+	s.mu.RUnlock()
+	return v
+}
+
+func (s *Session) SetStopPipeline(fn func()) {
+	s.mu.Lock()
+	s.stopPipeline = fn
+	s.mu.Unlock()
+}
+
+func (s *Session) StopPipeline() {
+	s.mu.Lock()
+	fn := s.stopPipeline
+	s.stopPipeline = nil
+	s.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 func (s *Session) SetProbeInfo(video *media.VideoInfo, audio []media.AudioTrack, duration float64) {
