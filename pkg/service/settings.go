@@ -79,6 +79,7 @@ var apiVisibleKeys = map[string]bool{
 	"vod_profile_selector":       true,
 	"default_hwaccel":            true,
 	"default_video_codec":        true,
+	"transcoder":                 true,
 	"dlna_enabled":               true,
 	"debug_enabled":              true,
 	"tmdb_api_key":               true,

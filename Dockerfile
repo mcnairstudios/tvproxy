@@ -1,11 +1,17 @@
 FROM golang:1.24-bookworm AS builder
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.buildVersion=$VERSION" -o /tvproxy ./cmd/tvproxy/
+RUN CGO_ENABLED=1 go build -ldflags="-s -w -X main.buildVersion=$VERSION" -o /tvproxy ./cmd/tvproxy/
 
 FROM linuxserver/ffmpeg:latest
 

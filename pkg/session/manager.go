@@ -53,6 +53,7 @@ type StartOpts struct {
 	SourceFPSMode     string
 	SkipProbe         bool
 	MetadataOnly      bool
+	Transcoder        string // "auto", "gstreamer", "ffmpeg"
 }
 
 type Manager struct {
@@ -667,7 +668,25 @@ func (m *Manager) resolveTranscoder(opts StartOpts, filePath string) (string, []
 		hwAccel = gstreamer.HWVideoToolbox
 	}
 
+	transcoder := opts.Transcoder
+	if transcoder == "" {
+		transcoder = "auto"
+	}
+	if transcoder == "ffmpeg" {
+		m.log.Info().Str("channel_id", opts.ChannelID).Msg("using ffmpeg (forced by setting)")
+		args := m.buildArgs(opts.Args, opts.StreamURL, filePath, opts.UseWireGuard, opts.HLSOutputDir, opts)
+		command := opts.Command
+		if command == "" {
+			command = "ffmpeg"
+		}
+		return command, args
+	}
+
 	choice := gstreamer.ShouldUseGStreamer(m.probeCache, opts.StreamURL, hwAccel)
+	if transcoder == "gstreamer" && !choice.UseGStreamer {
+		choice.UseGStreamer = gstreamer.Available()
+		choice.Reason = "forced by setting (no probe data)"
+	}
 	if choice.UseGStreamer {
 		probe, _ := m.probeCache.GetProbe(ffmpeg.StreamHash(opts.StreamURL))
 		if probe == nil {

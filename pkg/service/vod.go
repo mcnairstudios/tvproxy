@@ -126,6 +126,13 @@ func (s *VODService) lookupSourceProfile(ctx context.Context, m3uAccountID, sati
 	return nil
 }
 
+func (s *VODService) transcoderPreference(ctx context.Context) string {
+	if val, _ := s.settingsService.Get(ctx, "transcoder"); val != "" {
+		return val
+	}
+	return "auto"
+}
+
 type sessionArgs struct {
 	Command          string
 	Args             string
@@ -242,6 +249,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		SourceFPSMode:     strategy.SourceFPSMode,
 		SkipProbe:         strategy.SkipProbe,
 		MetadataOnly:     strategy.MetadataOnly,
+		Transcoder:       s.transcoderPreference(ctx),
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", false, err
@@ -328,6 +336,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		SkipProbe:         strategy.SkipProbe,
 		KnownDuration:    stream.VODDuration,
 		MetadataOnly:     strategy.MetadataOnly,
+		Transcoder:       s.transcoderPreference(ctx),
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", err
