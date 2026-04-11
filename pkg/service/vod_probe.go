@@ -12,7 +12,7 @@ import (
 
 func (s *VODService) ProbeFile(ctx context.Context, streamURL, filePath string) (*ffmpeg.ProbeResult, error) {
 	if streamURL != "" {
-		cached, _ := s.recordingStore.GetProbe(ffmpeg.StreamHash(streamURL))
+		cached, _ := s.probeCache.GetProbe(ffmpeg.StreamHash(streamURL))
 		if cached != nil {
 			return cached, nil
 		}
@@ -22,7 +22,7 @@ func (s *VODService) ProbeFile(ctx context.Context, streamURL, filePath string) 
 		return nil, err
 	}
 	if streamURL != "" && result != nil {
-		s.recordingStore.SaveProbe(ffmpeg.StreamHash(streamURL), result)
+		s.probeCache.SaveProbe(ffmpeg.StreamHash(streamURL), result)
 	}
 	return result, nil
 }
@@ -89,12 +89,12 @@ func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName st
 
 func (s *VODService) cachedOrFreshProbe(ctx context.Context, filePath string) (*ffmpeg.ProbeResult, error) {
 	hash := ffmpeg.StreamHash(filePath)
-	if cached, err := s.recordingStore.GetProbe(hash); err == nil && cached != nil {
+	if cached, err := s.probeCache.GetProbe(hash); err == nil && cached != nil {
 		return cached, nil
 	}
 	result, err := ffmpeg.Probe(ctx, filePath, "")
 	if err == nil && result != nil {
-		s.recordingStore.SaveProbe(hash, result)
+		s.probeCache.SaveProbe(hash, result)
 	}
 	return result, err
 }

@@ -46,6 +46,7 @@ type StartOpts struct {
 	OutputDir         string
 	HLSOutputDir      string
 	SourceInputArgs   string
+	SourceAudioCodec  string
 	SourceDeinterlace bool
 	SourceAudioResync bool
 	SourceFPSMode     string
@@ -114,7 +115,13 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 
 
 func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string, useWireGuard bool, hlsOutputDir string, opts StartOpts) []string {
-	pipeInput := ffmpeg.IsHTTPURL(inputURL) && useWireGuard
+	hasTSHeader := false
+	if m.probeCache != nil {
+		if h, _ := m.probeCache.GetTSHeader(ffmpeg.StreamHash(inputURL)); h != nil {
+			hasTSHeader = true
+		}
+	}
+	pipeInput := ffmpeg.IsHTTPURL(inputURL) && (useWireGuard || hasTSHeader)
 
 	if hlsOutputDir != "" {
 		if useWireGuard && m.wgClient != nil && ffmpeg.IsHTTPURL(inputURL) {
@@ -257,14 +264,22 @@ func (m *Manager) buildDualOutputArgs(hlsDir, mp4Path string, pipeInput bool, op
 		"-y", filepath.Join(hlsDir, "playlist.m3u8"),
 	)
 
-	args = append(args,
-		"-c:v", "copy",
-		"-c:a", "copy",
-		"-bsf:a", "aac_adtstoasc",
+	mp4AudioCodec := "copy"
+	if opts.SourceAudioCodec == "aac_latm" || opts.SourceAudioCodec == "mp2" || opts.SourceAudioCodec == "mp3" {
+		mp4AudioCodec = "aac"
+	}
+	mp4Args := []string{"-c:v", "copy", "-c:a", mp4AudioCodec}
+	if mp4AudioCodec == "copy" {
+		mp4Args = append(mp4Args, "-bsf:a", "aac_adtstoasc")
+	} else {
+		mp4Args = append(mp4Args, "-ac", "2", "-b:a", "192k")
+	}
+	mp4Args = append(mp4Args,
 		"-f", "mp4",
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
 		mp4Path,
 	)
+	args = append(args, mp4Args...)
 
 	args = append(args, "-progress", "pipe:2")
 	return args
@@ -833,8 +848,34 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 	}
 	cmd.WaitDelay = waitDelay
 
+	var tsHeader []byte
+	if m.probeCache != nil {
+		tsHeader, _ = m.probeCache.GetTSHeader(ffmpeg.StreamHash(inputURL))
+	}
+
 	var httpResp *http.Response
-	if ffmpeg.IsHTTPURL(inputURL) && s.UseWireGuard && s.HLSOutputDir == "" {
+	if tsHeader != nil && ffmpeg.IsHTTPURL(inputURL) && s.HLSOutputDir == "" {
+		m.log.Info().Str("session_id", s.ID).Int("header_size", len(tsHeader)).Msg("injecting cached TS header for fast startup")
+		resp, err := httputil.Fetch(ctx, m.clientForSession(s), m.config, inputURL)
+		if err != nil {
+			m.log.Error().Err(err).Msg("upstream connection failed")
+			s.setError(fmt.Errorf("upstream connection failed: %w", err))
+			return
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			s.setError(fmt.Errorf("upstream returned %d", resp.StatusCode))
+			return
+		}
+		httpResp = resp
+		pr, pw := io.Pipe()
+		cmd.Stdin = pr
+		go func() {
+			pw.Write(tsHeader)
+			io.Copy(pw, resp.Body)
+			pw.Close()
+		}()
+	} else if ffmpeg.IsHTTPURL(inputURL) && s.UseWireGuard && s.HLSOutputDir == "" {
 		m.log.Info().Str("session_id", s.ID).Str("url", inputURL).Msg("routing upstream via wireguard")
 		resp, err := httputil.Fetch(ctx, m.clientForSession(s), m.config, inputURL)
 		if err != nil {

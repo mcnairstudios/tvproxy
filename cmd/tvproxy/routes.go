@@ -29,6 +29,7 @@ type routeHandlers struct {
 	epgSource    *handler.EPGSourceHandler
 	epgData      *handler.EPGDataHandler
 	hdhr         *handler.HDHRHandler
+	hdhrSource   *handler.HDHRSourceHandler
 	output       *handler.OutputHandler
 	proxy        *handler.ProxyHandler
 	vod          *handler.VODHandler
@@ -135,8 +136,29 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 			})
 		})
 
+		r.Route("/api/hdhr/sources", func(r chi.Router) {
+			r.Get("/", h.hdhrSource.List)
+			r.Get("/{id}", h.hdhrSource.Get)
+			r.Get("/{id}/status", h.hdhrSource.ScanStatus)
+			r.Group(func(r chi.Router) {
+				r.Use(authMW.RequireAdmin)
+				r.Post("/discover", h.hdhrSource.Discover)
+				r.Post("/add-device", h.hdhrSource.AddDevice)
+				r.Post("/", h.hdhrSource.Create)
+				r.Put("/{id}", h.hdhrSource.Update)
+				r.Delete("/{id}", h.hdhrSource.Delete)
+				r.Post("/{id}/scan", h.hdhrSource.Scan)
+				r.Post("/{id}/retune", h.hdhrSource.Retune)
+				r.Post("/{id}/clear", h.hdhrSource.Clear)
+			})
+		})
+
 		r.Route("/api/streams", func(r chi.Router) {
 			r.Get("/", h.stream.List)
+			r.Get("/tree", h.stream.Tree)
+			r.Get("/group", h.stream.Group)
+			r.Get("/search", h.stream.Search)
+			r.Get("/stats", h.stream.Stats)
 			r.Get("/{id}", h.stream.Get)
 			r.Group(func(r chi.Router) {
 				r.Use(authMW.RequireAdmin)

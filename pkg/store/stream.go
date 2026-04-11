@@ -133,6 +133,15 @@ func (s *StreamStoreImpl) BulkUpsert(_ context.Context, streams []models.Stream)
 				st.TMDBID = existing.TMDBID
 				st.TMDBManual = existing.TMDBManual
 			}
+			if st.CacheType == "" && existing.CacheType != "" {
+				st.CacheType = existing.CacheType
+			}
+			if st.Language == "" && existing.Language != "" {
+				st.Language = existing.Language
+			}
+			if st.VODType == "" && existing.VODType != "" {
+				st.VODType = existing.VODType
+			}
 		} else {
 			st.CreatedAt = now
 		}
@@ -271,6 +280,81 @@ func (s *StreamStoreImpl) DeleteOrphanedSatIPStreams(_ context.Context, knownSou
 			continue
 		}
 		if _, ok := known[st.SatIPSourceID]; !ok {
+			delete(s.items, id)
+			deleted = append(deleted, id)
+		}
+	}
+	if len(deleted) > 0 {
+		s.rev.Bump()
+	}
+	return deleted, nil
+}
+
+func (s *StreamStoreImpl) ListByHDHRSourceID(_ context.Context, sourceID string) ([]models.Stream, error) {
+	s.mu.RLock()
+	var items []models.Stream
+	for _, v := range s.items {
+		if v.HDHRSourceID == sourceID {
+			items = append(items, v)
+		}
+	}
+	s.mu.RUnlock()
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+	return items, nil
+}
+
+func (s *StreamStoreImpl) DeleteByHDHRSourceID(_ context.Context, sourceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, st := range s.items {
+		if st.HDHRSourceID == sourceID {
+			delete(s.items, id)
+		}
+	}
+	s.rev.Bump()
+	return nil
+}
+
+func (s *StreamStoreImpl) DeleteStaleByHDHRSourceID(_ context.Context, sourceID string, keepIDs []string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keep := make(map[string]struct{}, len(keepIDs))
+	for _, id := range keepIDs {
+		keep[id] = struct{}{}
+	}
+	var deleted []string
+	for id, st := range s.items {
+		if st.HDHRSourceID != sourceID {
+			continue
+		}
+		if _, shouldKeep := keep[id]; !shouldKeep {
+			delete(s.items, id)
+			deleted = append(deleted, id)
+		}
+	}
+	if len(deleted) > 0 {
+		s.rev.Bump()
+	}
+	return deleted, nil
+}
+
+func (s *StreamStoreImpl) DeleteOrphanedHDHRStreams(_ context.Context, knownSourceIDs []string) ([]string, error) {
+	known := make(map[string]struct{}, len(knownSourceIDs))
+	for _, id := range knownSourceIDs {
+		known[id] = struct{}{}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var deleted []string
+	for id, st := range s.items {
+		if st.HDHRSourceID == "" {
+			continue
+		}
+		if _, ok := known[st.HDHRSourceID]; !ok {
 			delete(s.items, id)
 			deleted = append(deleted, id)
 		}

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -274,27 +273,4 @@ func (s *VODService) RecoverRecordings(ctx context.Context) {
 		}
 	}
 
-	s.recoverLegacyRecordings(ctx)
-}
-
-func (s *VODService) recoverLegacyRecordings(ctx context.Context) {
-	vodDir := s.config.VODOutputDir
-	if vodDir == "" {
-		return
-	}
-	entries, err := os.ReadDir(vodDir)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		intentPath := filepath.Join(vodDir, entry.Name(), "recording.json")
-		if _, err := os.Stat(intentPath); os.IsNotExist(err) {
-			continue
-		}
-		s.log.Info().Str("dir", entry.Name()).Msg("found legacy recording.json, cleaning up")
-		os.RemoveAll(filepath.Join(vodDir, entry.Name()))
-	}
 }

@@ -197,7 +197,7 @@
     invalidateCaches() {
       channelsCache.invalidate();
       channelGroupsCache.invalidate();
-      streamsCache.invalidate();
+      rebuildStreamNav();
       epgCache.invalidate();
       logosCache.invalidate();
     },
@@ -471,17 +471,22 @@
   const streamsCache = new DataCache({
     label: 'Streams',
     loader: async () => {
-      const [streams, accounts, satipSources] = await Promise.all([
+      const [streams, accounts, satipSources, hdhrSources] = await Promise.all([
         api.get('/api/streams'),
         api.get('/api/m3u/accounts').catch(() => []),
         api.get('/api/satip/sources').catch(() => []),
+        api.get('/api/hdhr/sources').catch(() => []),
       ]);
       const nameMap = {};
       accounts.forEach(a => { nameMap[a.id] = a.name; });
       const satipMap = {};
       satipSources.forEach(s => { satipMap[s.id] = s.name; });
+      const hdhrMap = {};
+      hdhrSources.forEach(s => { hdhrMap[s.id] = s.name; });
       streams.forEach(s => {
-        if (s.satip_source_id) {
+        if (s.hdhr_source_id) {
+          s._display_name = (hdhrMap[s.hdhr_source_id] || 'HDHomeRun') + '/' + s.name;
+        } else if (s.satip_source_id) {
           s._display_name = (satipMap[s.satip_source_id] || 'SAT>IP') + '/' + s.name;
         } else {
           s._display_name = (nameMap[s.m3u_account_id] || '') + '/' + s.name;
@@ -654,7 +659,6 @@
           await auth.login(usernameInput.value, passwordInput.value);
           render();
           rebuildStreamNav();
-          streamsCache.getAll();
           epgCache.getAll();
           logosCache.getAll();
           channelsCache.getAll();
@@ -793,13 +797,14 @@
     { section: 'Sources', adminOnly: true },
     { id: 'm3u-accounts', label: 'M3U Accounts', icon: '\u2630', tip: 'Add your SAT>IP or IPTV source M3U files', adminOnly: true },
     { id: 'satip-sources', label: 'SAT>IP Sources', icon: '\ud83d\udce1', tip: 'Scan MiniSAT>IP devices for channels', adminOnly: true },
+    { id: 'hdhr-sources', label: 'HDHomeRun', icon: '\ud83d\udcf6', tip: 'Discover channels from HDHomeRun DVB-T/C devices', adminOnly: true },
     { id: 'epg-sources', label: 'EPG Sources', icon: '\ud83d\udcc5', tip: 'Manage XMLTV EPG data sources for programme guides', adminOnly: true },
     { section: 'Stream Management', adminOnly: true },
     { id: 'channel-groups', label: 'Channel Groups', icon: '\ud83d\udcc2', tip: 'Organise channels into groups for Jellyfin and output', adminOnly: true },
     { id: 'source-profiles', label: 'Source Stream Profiles', icon: '\ud83d\udce5', tip: 'Describes what the source delivers: expected codecs, container, transport and WireGuard routing', adminOnly: true },
     { id: 'clients', label: 'Client Detection', icon: '\ud83d\udd0d', tip: 'Auto-detect players by HTTP headers and assign client stream profiles', adminOnly: true },
     { id: 'stream-profiles', label: 'Client Stream Profiles', icon: '\ud83d\udd27', tip: 'Defines what each client needs: output codec, container, delivery method and hardware acceleration', adminOnly: true },
-    { id: 'hdhr-devices', label: 'HDHR Devices', icon: '\ud83d\udce1', tip: 'Virtual HDHomeRun devices for Plex, Jellyfin, and Emby', adminOnly: true },
+    { id: 'hdhr-devices', label: 'HDHomeRun Emu', icon: '\ud83d\udce1', tip: 'Virtual HDHomeRun devices for Plex, Jellyfin, and Emby', adminOnly: true },
     { section: 'System', adminOnly: true },
     { id: 'settings', label: 'Settings', icon: '\u2699', tip: 'Core application settings', adminOnly: true },
     { id: 'users', label: 'Users', icon: '\ud83d\udc65', tip: 'Manage admin and user accounts', adminOnly: true },
@@ -827,7 +832,7 @@
     tooltipEl.style.opacity = '0';
   }
 
-  function showSeriesDetail(show) {
+  function showSeriesDetail(show, onRefresh) {
     var overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);';
     overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
@@ -865,6 +870,7 @@
       refreshPromise.then(function() {
         overlay.remove();
         toast.success('Refreshing metadata for ' + show.name);
+        if (onRefresh) onRefresh();
       }).catch(function() {
         refreshBtn.style.opacity = '1';
         refreshBtn.disabled = false;
@@ -880,7 +886,10 @@
     rematchBtn.onmouseleave = function() { rematchBtn.style.background = 'rgba(0,0,0,0.6)'; };
     rematchBtn.onclick = function() {
       var firstEp = show.episodes[0];
-      if (firstEp) showRematchModal(firstEp.id, 'series', show.name, function() { overlay.remove(); });
+      if (firstEp) showRematchModal(firstEp.id, 'series', show.name, function() {
+        overlay.remove();
+        if (onRefresh) onRefresh();
+      });
     };
     backdrop.appendChild(rematchBtn);
 
@@ -1168,7 +1177,10 @@
       rematchIcon.onmouseenter = function() { rematchIcon.style.background = 'rgba(255,255,255,0.2)'; };
       rematchIcon.onmouseleave = function() { rematchIcon.style.background = 'rgba(0,0,0,0.5)'; };
       rematchIcon.onclick = function() {
-        showRematchModal(opts.vodStreamID, opts.mediaType, opts.title, function() { overlay.remove(); });
+        showRematchModal(opts.vodStreamID, opts.mediaType, opts.title, function() {
+          overlay.remove();
+          if (opts.onRefresh) opts.onRefresh();
+        });
       };
       actionIcons.appendChild(rematchIcon);
     }
@@ -1223,7 +1235,8 @@
       }
       rp.then(function() {
         overlay.remove();
-        showProgrammeModal(opts);
+        if (opts.onRefresh) opts.onRefresh();
+        else showProgrammeModal(opts);
       }).catch(function() {
         refreshIcon.style.opacity = '1';
         refreshIcon.disabled = false;
@@ -1267,6 +1280,35 @@
       descArea.appendChild(descEl);
     }
     body.appendChild(descArea);
+
+    if (opts.alternates && opts.alternates.length > 0) {
+      var altSection = document.createElement('div');
+      altSection.style.cssText = 'margin-bottom:24px;';
+      altSection.appendChild(Object.assign(document.createElement('div'), { style: 'font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;', textContent: 'Alternative Sources' }));
+      var allSources = [{ id: opts.vodStreamID, name: opts.title, url: opts.vodStreamURL, group: opts.group || '' }].concat(opts.alternates);
+      allSources.forEach(function(alt, i) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;transition:background 0.15s;' + (i === 0 ? 'background:rgba(59,130,246,0.15);' : '');
+        row.onmouseenter = function() { row.style.background = i === 0 ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)'; };
+        row.onmouseleave = function() { row.style.background = i === 0 ? 'rgba(59,130,246,0.15)' : ''; };
+        var label = alt.group || alt.name;
+        row.appendChild(Object.assign(document.createElement('div'), { style: 'flex:1;font-size:14px;color:var(--text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;', textContent: label }));
+        if (i === 0) row.appendChild(Object.assign(document.createElement('div'), { style: 'font-size:11px;color:#3b82f6;font-weight:600;flex-shrink:0;', textContent: 'CURRENT' }));
+        var playBtn = document.createElement('button');
+        playBtn.textContent = '\u25B6';
+        playBtn.style.cssText = 'background:rgba(59,130,246,0.8);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:14px;flex-shrink:0;transition:background 0.2s;';
+        playBtn.onmouseenter = function() { playBtn.style.background = '#3b82f6'; };
+        playBtn.onmouseleave = function() { playBtn.style.background = 'rgba(59,130,246,0.8)'; };
+        playBtn.onclick = function(e) {
+          e.stopPropagation();
+          overlay.remove();
+          play({ streamID: alt.id, name: opts.title });
+        };
+        row.appendChild(playBtn);
+        altSection.appendChild(row);
+      });
+      body.appendChild(altSection);
+    }
 
     var castArea = document.createElement('div');
     castArea.style.cssText = 'margin-bottom:24px;display:none;';
@@ -1860,6 +1902,139 @@
 
   const streamGroupsCache = Object.create(null); // accountId -> { groups, sortedGroups, groupDisplay, groupSearch }
 
+  function buildLazyStreamPage(sourceType, sourceId) {
+    return async function(container) {
+      container.innerHTML = '';
+      container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...'));
+
+      if (!_favoriteIds) await loadFavorites();
+
+      var treeData;
+      try {
+        treeData = await api.get('/api/streams/tree?source_type=' + sourceType + '&source_id=' + encodeURIComponent(sourceId));
+      } catch (err) {
+        container.innerHTML = '';
+        container.appendChild(h('p', { style: 'color: var(--danger)' }, 'Failed to load: ' + err.message));
+        return;
+      }
+
+      var groups = treeData.groups || [];
+      var searchTerm = '';
+      var searchTimer = null;
+
+      var summaryEl = h('h3', null, groups.reduce(function(s, g) { return s + g.count; }, 0).toLocaleString() + ' streams in ' + groups.length + ' group' + (groups.length !== 1 ? 's' : ''));
+      var groupsContainer = h('div', null);
+
+      var searchInput = h('input', {
+        type: 'text',
+        placeholder: 'Filter groups...',
+        className: 'filter-input',
+        style: 'min-width: 200px;'
+      });
+      searchInput.addEventListener('input', function() {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(function() {
+          searchTerm = searchInput.value.toLowerCase();
+          renderGroups();
+        }, 200);
+      });
+
+      groupsContainer.addEventListener('toggle', async function(e) {
+        var details = e.target;
+        if (!details.open || details.tagName !== 'DETAILS') return;
+        if (details.dataset.loaded) return;
+        details.dataset.loaded = '1';
+        var groupName = details.dataset.group;
+        var loadingEl = h('div', { style: 'padding:12px;color:var(--text-muted);font-size:13px;' }, 'Loading...');
+        details.appendChild(loadingEl);
+        try {
+          var resp = await api.get('/api/streams/group?source_type=' + sourceType + '&source_id=' + encodeURIComponent(sourceId) + '&group=' + encodeURIComponent(groupName));
+          var streams = resp.streams || [];
+          streams.sort(function(a, b) {
+            if (a.vod_type === 'series' && b.vod_type === 'series') {
+              if ((a.vod_season || 0) !== (b.vod_season || 0)) return (a.vod_season || 0) - (b.vod_season || 0);
+              return (a.vod_episode || 0) - (b.vod_episode || 0);
+            }
+            if ((a.vod_year || 0) !== (b.vod_year || 0)) return (a.vod_year || 0) - (b.vod_year || 0);
+            return a.name.localeCompare(b.name);
+          });
+          loadingEl.remove();
+          var tableEl = document.createElement('table');
+          tableEl.className = 'stream-group-table';
+          tableEl.innerHTML = '<tbody>' + buildLazyStreamRows(streams).join('') + '</tbody>';
+          details.appendChild(tableEl);
+        } catch (err) {
+          loadingEl.textContent = 'Failed: ' + err.message;
+        }
+      }, true);
+
+      groupsContainer.addEventListener('click', function(e) {
+        var btn = e.target.closest('button[data-sid]');
+        if (!btn) return;
+        if (btn.dataset.fav) {
+          var sid = btn.dataset.sid;
+          var isFav = _favoriteIds && _favoriteIds.has(sid);
+          (isFav ? api.del('/api/favorites/' + sid) : api.post('/api/favorites/' + sid)).then(function() {
+            if (isFav) { _favoriteIds.delete(sid); } else { _favoriteIds.add(sid); }
+            btn.textContent = isFav ? '\u2606' : '\u2B50';
+            btn.style.color = isFav ? 'var(--text-muted)' : '#eab308';
+          }).catch(function() {});
+          return;
+        }
+        if (btn.dataset.qadd) {
+          quickAddChannel(btn.dataset.sid, btn.dataset.sname, btn.dataset.tvgid || '', btn.dataset.slogo || '');
+          return;
+        }
+        play({ streamID: btn.dataset.sid, name: btn.dataset.sname, tvgId: btn.dataset.tvgid || undefined });
+      });
+
+      function buildLazyStreamRows(streams) {
+        var rows = [];
+        for (var j = 0; j < streams.length; j++) {
+          var s = streams[j];
+          var logo = s.logo ? '<img class="stream-group-logo" src="' + esc(s.logo) + '" loading="lazy" alt="">' : '';
+          var actionHtml = '<div class="actions-cell" style="justify-content:flex-end;gap:4px;">';
+          actionHtml += '<button class="btn btn-sm btn-icon" title="Favorite" data-fav="1" data-sid="' + s.id + '" style="font-size:14px;color:' + (_favoriteIds && _favoriteIds.has(s.id) ? '#eab308' : 'var(--text-muted)') + '">' + (_favoriteIds && _favoriteIds.has(s.id) ? '\u2B50' : '\u2606') + '</button>';
+          actionHtml += '<button class="btn btn-primary btn-sm btn-icon" title="Add as Channel" style="font-size:16px" data-qadd="1" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '" data-slogo="' + esc(s.logo || '') + '">+</button>';
+          actionHtml += '<button class="btn btn-secondary btn-sm btn-icon" title="Play" data-sid="' + s.id + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '">\u25B6</button>';
+          actionHtml += '</div>';
+          rows.push('<tr><td>' + logo + '</td><td>' + esc(s.name) + '</td><td style="width:120px">' + actionHtml + '</td></tr>');
+        }
+        return rows;
+      }
+
+      function renderGroups() {
+        var html = [];
+        var totalVisible = 0;
+        for (var i = 0; i < groups.length; i++) {
+          var g = groups[i];
+          var display = (g.name || '(No Group)').replace(/^(TV|Movie)\|/, '');
+          if (searchTerm && display.toLowerCase().indexOf(searchTerm) === -1) continue;
+          totalVisible += g.count;
+          html.push('<details class="stream-group" data-group="' + esc(g.name) + '"><summary>' + esc(display) + '<span class="stream-group-count">' + g.count + '</span></summary></details>');
+        }
+        summaryEl.textContent = totalVisible.toLocaleString() + ' streams in ' + html.length + ' group' + (html.length !== 1 ? 's' : '');
+        if (html.length === 0) {
+          groupsContainer.innerHTML = '<div style="padding:40px 16px;text-align:center;color:var(--text-muted)">' +
+            (searchTerm ? 'No groups match "' + esc(searchInput.value) + '"' : 'No streams found') + '</div>';
+          return;
+        }
+        groupsContainer.innerHTML = html.join('');
+      }
+
+      container.innerHTML = '';
+      container.appendChild(h('div', { className: 'table-container' },
+        h('div', { className: 'stream-groups-header' },
+          summaryEl,
+          h('div', { className: 'btn-group', style: 'align-items: center;' }, searchInput),
+        ),
+        groupsContainer,
+      ));
+
+      renderGroups();
+    };
+  }
+
   function buildStreamGroupsPage(pageId, filterFn) {
     return async function(container) {
       container.innerHTML = '';
@@ -2174,24 +2349,17 @@
   }
 
   async function rebuildStreamNav() {
-    const [accounts, satipSources] = await Promise.all([
+    const [accounts, satipSources, hdhrSources] = await Promise.all([
       api.get('/api/m3u/accounts').catch(() => []),
       api.get('/api/satip/sources').catch(() => []),
+      api.get('/api/hdhr/sources').catch(() => []),
     ]);
     state._hasXtream = accounts.some(function(a) { return a.type === 'xtream'; });
-    navItems = navItems.filter(n => !n.id || (!n.id.startsWith('streams-') && !n.id.startsWith('satip-streams-')));
-    Object.keys(pages).forEach(k => { if ((k.startsWith('streams-') || k.startsWith('satip-streams-')) && k !== 'stream-profiles') delete pages[k]; });
+    navItems = navItems.filter(n => !n.id || (!n.id.startsWith('streams-') && !n.id.startsWith('satip-streams-') && !n.id.startsWith('hdhr-streams-')));
+    Object.keys(pages).forEach(k => { if ((k.startsWith('streams-') || k.startsWith('satip-streams-') || k.startsWith('hdhr-streams-')) && k !== 'stream-profiles') delete pages[k]; });
     const idx = navItems.findIndex(n => n.section === 'Streams');
     if (idx === -1) return;
-    var allStreams = streamsCache._data || [];
-    var vodAccountIds = new Set();
-    accounts.forEach(function(a) {
-      var accountStreams = allStreams.filter(function(s) { return s.m3u_account_id === a.id; });
-      if (accountStreams.length > 0 && accountStreams.every(function(s) { return s.vod_type; })) {
-        vodAccountIds.add(a.id);
-      }
-    });
-    var liveAccounts = accounts.filter(function(a) { return !vodAccountIds.has(a.id); });
+    var liveAccounts = accounts;
     const accountNavItems = liveAccounts.map(a => ({
       id: 'streams-' + a.id,
       label: a.name,
@@ -2199,22 +2367,20 @@
       tip: 'Streams from ' + a.name,
     }));
     liveAccounts.forEach(a => {
-      pages['streams-' + a.id] = buildStreamGroupsPage('streams-' + a.id, function(s) { return s.m3u_account_id === a.id; });
+      pages['streams-' + a.id] = buildLazyStreamPage('m3u', a.id);
     });
     const satipNavItems = satipSources.map(function(s) {
       var pageId = 'satip-streams-' + s.id;
-      pages[pageId] = buildStreamGroupsPage(pageId, function(ss) { return ss.satip_source_id === s.id; });
+      pages[pageId] = buildLazyStreamPage('satip', s.id);
       return { id: pageId, label: s.name, icon: '\ud83d\udce1', tip: 'Streams from ' + s.name };
     });
+    const hdhrNavItems = hdhrSources.map(function(s) {
+      var pageId = 'hdhr-streams-' + s.id;
+      pages[pageId] = buildLazyStreamPage('hdhr', s.id);
+      return { id: pageId, label: s.name, icon: '\ud83d\udcf6', tip: 'Streams from ' + s.name };
+    });
 
-    pages['streams-movies'] = buildStreamGroupsPage('streams-movies', function(s) { return s.vod_type === 'movie'; });
-    pages['streams-tvseries'] = buildStreamGroupsPage('streams-tvseries', function(s) { return s.vod_type === 'series'; });
-    var vodNavItems = [
-      { id: 'streams-movies', label: 'Movies', icon: '\uD83C\uDFAC', tip: 'Movie streams from all sources (deduplicated)' },
-      { id: 'streams-tvseries', label: 'TV Series', icon: '\uD83D\uDCFA', tip: 'TV series streams grouped by show' },
-    ];
-
-    navItems.splice(idx + 1, 0, ...accountNavItems, ...satipNavItems, ...vodNavItems);
+    navItems.splice(idx + 1, 0, ...accountNavItems, ...satipNavItems, ...hdhrNavItems);
     if (auth.isLoggedIn()) {
       const oldSidebar = document.querySelector('.sidebar');
       if (oldSidebar) {
@@ -2253,7 +2419,7 @@
       return el;
     });
 
-    var caches = [streamsCache, epgCache, logosCache];
+    var caches = [epgCache, logosCache];
     var statusEl = h('div', { className: 'data-status' });
 
     function updateStatus() {
@@ -2295,18 +2461,17 @@
     container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading...'));
 
     try {
-      const [accounts, satipSources, channels, groups, epgSources, devices, wgStatus] = await Promise.all([
+      const [accounts, satipSources, hdhrSources, channels, groups, epgSources, devices, wgStatus, streamStats] = await Promise.all([
         api.get('/api/m3u/accounts').catch(() => []),
         api.get('/api/satip/sources').catch(() => []),
+        api.get('/api/hdhr/sources').catch(() => []),
         channelsCache.getAll().catch(() => []),
         channelGroupsCache.getAll().catch(() => []),
         api.get('/api/epg/sources').catch(() => []),
         api.get('/api/hdhr/devices').catch(() => []),
         api.get('/api/wireguard/multi/status').catch(() => null),
+        api.get('/api/streams/stats').catch(() => ({ total: 0, by_source: {}, by_vod_type: {} })),
       ]);
-
-      const m3uStreamCount = accounts.reduce((sum, a) => sum + (a.stream_count || 0), 0);
-      const satipStreamCount = satipSources.reduce((sum, s) => sum + (s.stream_count || 0), 0);
       var wgProfiles = wgStatus && wgStatus.profiles ? wgStatus.profiles : [];
       var realProfiles = wgProfiles.filter(function(p) { return p.name !== 'Default'; });
       var wgConnected = realProfiles.filter(function(p) { return p.state === 'connected' && (p.healthy === true || p.healthy === null || p.healthy === undefined); }).length;
@@ -2315,15 +2480,21 @@
 
       container.innerHTML = '';
 
+      var totalStreams = streamStats.total || 0;
+      var movieCount = (streamStats.by_vod_type || {}).movie || 0;
+      var seriesCount = (streamStats.by_vod_type || {}).series || 0;
+
       const cards = [
+        { label: 'Total Streams', value: totalStreams.toLocaleString(), icon: '\u25b6', page: accounts.length ? 'streams-' + accounts[0].id : 'dashboard' },
         { label: 'M3U Accounts', value: accounts.length, icon: '\u2630', page: 'm3u-accounts' },
         { label: 'SAT>IP Sources', value: satipSources.length, icon: '\ud83d\udce1', page: 'satip-sources' },
-        { label: 'M3U Streams', value: m3uStreamCount, icon: '\u25b6', page: accounts.length ? 'streams-' + accounts[0].id : 'dashboard' },
-        { label: 'SAT>IP Streams', value: satipStreamCount, icon: '\ud83d\udce1', page: satipSources.length ? 'satip-sources' : 'dashboard' },
+        { label: 'HDHR Streams', value: hdhrSources.reduce(function(s, h) { return s + (h.stream_count || 0); }, 0), icon: '\ud83d\udcf6', page: 'hdhr-sources' },
+        { label: 'Movies', value: movieCount.toLocaleString(), icon: '\uD83C\uDFAC', page: 'movies' },
+        { label: 'TV Series', value: seriesCount.toLocaleString(), icon: '\uD83D\uDCFA', page: 'tv-series' },
         { label: 'Channels', value: channels.length, icon: '\ud83d\udcfa', page: 'channels' },
         { label: 'Channel Groups', value: groups.length, icon: '\ud83d\udcc2', page: 'channels' },
         { label: 'EPG Sources', value: epgSources.length, icon: '\ud83d\udcc5', page: 'epg-sources' },
-        { label: 'HDHR Devices', value: devices.length, icon: '\ud83d\udce1', page: 'hdhr-devices' },
+        { label: 'HDHomeRun Emu', value: devices.length, icon: '\ud83d\udce1', page: 'hdhr-devices' },
         { label: 'WireGuard', value: wgLabel, icon: '\ud83d\udd12', page: 'wireguard' },
       ];
 
@@ -2372,14 +2543,13 @@
           h('div', { className: 'table-header' }, h('h3', null, 'HDHR Device URLs')),
           h('div', { style: 'padding: 16px; color: var(--text-secondary)' },
             'No HDHR devices configured. Add one in ',
-            h('a', { href: '#', onClick: (e) => { e.preventDefault(); navigate('hdhr-devices'); } }, 'HDHR Devices'),
+            h('a', { href: '#', onClick: (e) => { e.preventDefault(); navigate('hdhr-devices'); } }, 'HDHomeRun Emu'),
             '.',
           ),
         );
       }
 
       const cachesInfo = [
-        { cache: streamsCache, icon: '\u25b6' },
         { cache: epgCache, icon: '\ud83d\udcc5' },
         { cache: logosCache, icon: '\ud83d\uddbc' },
       ];
@@ -3055,7 +3225,12 @@
               const q = (query || '').toLowerCase();
               let matches = [];
               if (q.length >= 1) {
-                if (field.cache) {
+                if (field.searchFn) {
+                  field.searchFn(q).then(function(results) {
+                    renderMatches(results);
+                  });
+                  return;
+                } else if (field.cache) {
                   matches = field.cache.search(q, 50);
                 } else {
                   if (!acOptions) { dropdown.style.display = 'none'; return; }
@@ -3077,7 +3252,12 @@
                   }
                 }
               }
-              if (matches.length === 0) { dropdown.style.display = 'none'; return; }
+              renderMatches(matches);
+            }
+
+            function renderMatches(matches) {
+              dropdown.innerHTML = '';
+              if (!matches || matches.length === 0) { dropdown.style.display = 'none'; return; }
               selectedIdx = -1;
               for (let i = 0; i < matches.length; i++) {
                 const opt = matches[i];
@@ -3564,12 +3744,14 @@
           lookupID = ch.stream_ids[0];
         }
       }
-      if (lookupID && streamsCache._data) {
-        var s = streamsCache._data.find(function(s) { return s.id === lookupID; });
-        if (s) {
-          if (s.tracks) streamTracks = s.tracks;
-          if (s.group) streamGroup = s.group;
-        }
+      if (lookupID) {
+        try {
+          var s = await api.get('/api/streams/' + lookupID);
+          if (s) {
+            if (s.tracks) streamTracks = s.tracks;
+            if (s.group) streamGroup = s.group;
+          }
+        } catch(e) {}
       }
 
       if (isAudioOnly(streamTracks, streamGroup) && !opts.fileUrl) {
@@ -4563,7 +4745,7 @@
       ],
       rowActions: (item, reload) => {
         function pollRefresh() {
-          streamsCache.invalidate();
+          rebuildStreamNav();
           for (var k in streamGroupsCache) delete streamGroupsCache[k];
           rebuildStreamNav();
           var pollCount = 0;
@@ -4754,6 +4936,220 @@
       ],
     }),
 
+    'hdhr-sources': buildCrudPage({
+      title: 'HDHomeRun',
+      singular: 'HDHomeRun',
+      apiPath: '/api/hdhr/sources',
+      create: true,
+      update: true,
+      extraActions: [
+        {
+          label: 'Discover Devices',
+          handler: async (reload) => {
+            var overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);';
+            overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+            var modal = document.createElement('div');
+            modal.style.cssText = 'width:90%;max-width:600px;max-height:80vh;background:#1a1d23;border-radius:16px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.6);';
+            var header = h('div', { style: 'padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;' });
+            header.appendChild(h('div', { style: 'font-size:18px;font-weight:700;color:var(--text-primary);' }, 'Discover HDHomeRun Devices'));
+            var closeBtn = h('button', { style: 'background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;', onclick: function() { overlay.remove(); } }, '\u2715');
+            header.appendChild(closeBtn);
+            modal.appendChild(header);
+            var body = h('div', { style: 'padding:24px;overflow-y:auto;flex:1;' });
+            body.appendChild(h('div', { style: 'text-align:center;padding:24px;color:var(--text-muted);' }, h('div', { className: 'spinner' }), 'Scanning network...'));
+            modal.appendChild(body);
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+            try {
+              var devices = await api.post('/api/hdhr/sources/discover');
+              body.innerHTML = '';
+              if (!devices || devices.length === 0) {
+                body.appendChild(h('div', { style: 'text-align:center;padding:24px;color:var(--text-muted);' }, 'No HDHomeRun devices found on the network'));
+                return;
+              }
+              devices.forEach(function(d) {
+                var row = h('div', { style: 'display:flex;align-items:center;gap:16px;padding:12px 16px;border-radius:8px;border:1px solid var(--border);margin-bottom:8px;' });
+                var info = h('div', { style: 'flex:1;min-width:0;' });
+                info.appendChild(h('div', { style: 'font-size:15px;font-weight:600;color:var(--text-primary);' }, d.friendly_name || d.model_number || d.host));
+                var meta = [d.host];
+                if (d.model_number) meta.push(d.model_number);
+                if (d.tuner_count > 0) meta.push(d.tuner_count + ' tuner' + (d.tuner_count > 1 ? 's' : ''));
+                info.appendChild(h('div', { style: 'font-size:12px;color:var(--text-muted);margin-top:2px;' }, meta.join(' \u2022 ')));
+                row.appendChild(info);
+                if (d.already_added) {
+                  row.appendChild(h('span', { style: 'font-size:12px;color:var(--text-muted);font-weight:600;' }, 'Already added'));
+                } else {
+                  var addBtn = h('button', { style: 'padding:6px 16px;border-radius:6px;border:none;background:#22c55e;color:#fff;cursor:pointer;font-size:13px;font-weight:600;flex-shrink:0;' }, 'Add');
+                  addBtn.onclick = async function() {
+                    addBtn.disabled = true;
+                    addBtn.textContent = '...';
+                    try {
+                      await api.post('/api/hdhr/sources/add-device', { host: d.host });
+                      addBtn.textContent = 'Added';
+                      addBtn.style.background = 'var(--text-muted)';
+                      d.already_added = true;
+                      reload();
+                    } catch(e) {
+                      addBtn.textContent = 'Failed';
+                      addBtn.style.background = 'var(--danger)';
+                    }
+                  };
+                  row.appendChild(addBtn);
+                }
+                body.appendChild(row);
+              });
+            } catch(e) {
+              body.innerHTML = '';
+              body.appendChild(h('div', { style: 'text-align:center;padding:24px;color:var(--danger);' }, 'Discovery failed: ' + e.message));
+            }
+          }
+        }
+      ],
+      columns: [
+        { key: 'name', label: 'Name', render: item => {
+          const wrap = h('span', null, item.name);
+          if (item.last_error) wrap.appendChild(h('div', { style: 'color:var(--danger);font-size:0.85em;margin-top:2px' }, item.last_error));
+          return wrap;
+        }},
+        { key: 'devices', label: 'Devices', render: item => {
+          var devs = item.devices || [];
+          if (devs.length === 0) return '—';
+          return devs.map(function(d) { return d.host + ' (' + d.device_model + ')'; }).join(', ');
+        }},
+        { key: 'tuner_count', label: 'Tuners' },
+        { key: 'is_enabled', label: 'Enabled', render: item => item.is_enabled ? '\u2714' : '\u2718' },
+        { key: 'stream_count', label: 'Streams' },
+        { key: 'last_scanned', label: 'Last Scanned', render: item => item.last_scanned ? new Date(item.last_scanned).toLocaleString() : 'Never' },
+      ],
+      fields: [
+        { key: 'name', label: 'Name', placeholder: 'HDHomeRun' },
+        { key: 'is_enabled', label: 'Enabled', type: 'checkbox', default: true },
+        { key: 'source_profile_id', label: 'Source Stream Profile', type: 'async-select',
+          loadOptions: () => api.get('/api/source-profiles'),
+          valueKey: 'id', displayKey: 'name', allowEmpty: true, emptyLabel: 'None' },
+      ],
+      rowActions: (item, reload) => [
+        {
+          label: 'Scan',
+          icon: '\u21BB',
+          handler: async (e) => {
+            const scanBtn = e.currentTarget;
+            const cell = scanBtn.parentElement;
+            try {
+              await api.post('/api/hdhr/sources/' + item.id + '/scan');
+              scanBtn.disabled = true;
+              scanBtn.style.display = 'none';
+              const progressWrap = document.createElement('div');
+              progressWrap.style.cssText = 'display:flex;flex-direction:column;gap:2px;min-width:80px;';
+              const progressBar = document.createElement('div');
+              progressBar.style.cssText = 'height:6px;background:var(--bg-hover);border-radius:3px;overflow:hidden;';
+              const progressFill = document.createElement('div');
+              progressFill.style.cssText = 'height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width 0.3s;';
+              progressBar.appendChild(progressFill);
+              const progressLabel = document.createElement('div');
+              progressLabel.style.cssText = 'font-size:10px;color:var(--text-muted);text-align:center;';
+              progressLabel.textContent = 'Starting...';
+              progressWrap.appendChild(progressBar);
+              progressWrap.appendChild(progressLabel);
+              cell.appendChild(progressWrap);
+              var pollCount = 0;
+              var pollTimer = setInterval(async () => {
+                try {
+                  var status = await api.get('/api/hdhr/sources/' + item.id + '/status');
+                  if (status.total > 0) {
+                    var pct = Math.round((status.progress / status.total) * 100);
+                    progressFill.style.width = pct + '%';
+                    progressLabel.textContent = status.progress + '/' + status.total + ' (' + pct + '%)';
+                  } else {
+                    progressLabel.textContent = status.message || 'Scanning...';
+                  }
+                  if (status.state === 'done' || status.state === 'error') {
+                    clearInterval(pollTimer);
+                    progressWrap.remove();
+                    scanBtn.disabled = false;
+                    scanBtn.style.display = '';
+                    reload();
+                    if (status.state === 'done') toast.success(item.name + ': ' + status.message);
+                    else toast.error(item.name + ': ' + status.message);
+                  }
+                } catch (e) {}
+                if (++pollCount > 60) clearInterval(pollTimer);
+              }, 1000);
+            } catch (err) {
+              toast.error(err.message);
+            }
+          },
+        },
+        {
+          label: 'Retune',
+          icon: '\ud83d\udce1',
+          handler: async (e) => {
+            if (!confirm('Start a full channel scan on the HDHomeRun device? This takes 2-3 minutes.')) return;
+            const retuneBtn = e.currentTarget;
+            const cell = retuneBtn.parentElement;
+            try {
+              await api.post('/api/hdhr/sources/' + item.id + '/retune');
+              retuneBtn.disabled = true;
+              retuneBtn.style.display = 'none';
+              const progressWrap = document.createElement('div');
+              progressWrap.style.cssText = 'display:flex;flex-direction:column;gap:2px;min-width:80px;';
+              const progressBar = document.createElement('div');
+              progressBar.style.cssText = 'height:6px;background:var(--bg-hover);border-radius:3px;overflow:hidden;';
+              const progressFill = document.createElement('div');
+              progressFill.style.cssText = 'height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width 0.3s;';
+              progressBar.appendChild(progressFill);
+              const progressLabel = document.createElement('div');
+              progressLabel.style.cssText = 'font-size:10px;color:var(--text-muted);text-align:center;';
+              progressLabel.textContent = 'Retuning...';
+              progressWrap.appendChild(progressBar);
+              progressWrap.appendChild(progressLabel);
+              cell.appendChild(progressWrap);
+              var pollCount = 0;
+              var pollTimer = setInterval(async () => {
+                try {
+                  var status = await api.get('/api/hdhr/sources/' + item.id + '/status');
+                  if (status.total > 0) {
+                    var pct = Math.round((status.progress / status.total) * 100);
+                    progressFill.style.width = pct + '%';
+                    progressLabel.textContent = status.message || (pct + '%');
+                  } else {
+                    progressLabel.textContent = status.message || 'Retuning...';
+                  }
+                  if (status.state === 'done' || status.state === 'error') {
+                    clearInterval(pollTimer);
+                    progressWrap.remove();
+                    retuneBtn.disabled = false;
+                    retuneBtn.style.display = '';
+                    reload();
+                    if (status.state === 'done') toast.success(item.name + ': ' + status.message);
+                    else toast.error(item.name + ': ' + status.message);
+                  }
+                } catch (e) {}
+                if (++pollCount > 300) clearInterval(pollTimer);
+              }, 2000);
+            } catch (err) {
+              toast.error(err.message);
+            }
+          },
+        },
+        {
+          label: 'Clear',
+          icon: '\u{1F5D1}',
+          handler: async () => {
+            if (!confirm('Delete all streams for ' + item.name + '?')) return;
+            try {
+              await api.post('/api/hdhr/sources/' + item.id + '/clear');
+              toast.success('Streams cleared for ' + item.name);
+              reload();
+            } catch (err) {
+              toast.error(err.message);
+            }
+          },
+        },
+      ],
+    }),
+
     channels: buildCrudPage({
       title: 'Channels',
       singular: 'Channel',
@@ -4930,9 +5326,9 @@
           key: '_stream', label: 'Stream', type: 'autocomplete',
           placeholder: 'Search streams...',
           help: 'Search and select a stream source for this channel.',
-          cache: streamsCache,
-          valueKey: '_display_name',
-          displayKey: '_display_name',
+          searchFn: async function(q) { return api.get('/api/streams/search?q=' + encodeURIComponent(q) + '&limit=50'); },
+          valueKey: 'name',
+          displayKey: 'name',
           secondaryKey: 'group',
           exclude: true,
           onSelect: (stream, inputs) => {
@@ -4947,14 +5343,17 @@
             api.get('/api/channels/' + item.id + '/streams'),
             api.get('/api/m3u/accounts').catch(() => []),
             api.get('/api/satip/sources').catch(() => []),
-          ]).then(([streams, accounts, satipSources]) => {
+            api.get('/api/hdhr/sources').catch(() => []),
+          ]).then(([streams, accounts, satipSources, hdhrSources]) => {
             if (streams && streams.length > 0) {
               const nameMap = {};
               accounts.forEach(a => { nameMap[a.id] = a.name; });
               const satipMap = {};
               satipSources.forEach(s => { satipMap[s.id] = s.name; });
+              const hdhrMap = {};
+              hdhrSources.forEach(s => { hdhrMap[s.id] = s.name; });
               const s = streams[0];
-              const prefix = s.satip_source_id ? (satipMap[s.satip_source_id] || 'SAT>IP') : (nameMap[s.m3u_account_id] || 'Unknown');
+              const prefix = s.hdhr_source_id ? (hdhrMap[s.hdhr_source_id] || 'HDHomeRun') : s.satip_source_id ? (satipMap[s.satip_source_id] || 'SAT>IP') : (nameMap[s.m3u_account_id] || 'Unknown');
               inputs._stream.value = prefix + '/' + s.name;
               inputs._stream._selectedStreamId = s.id;
             }
@@ -5991,7 +6390,7 @@
               rating: item.rating, genres: item.genres,
               channelName: '', channelID: null, tvgId: null,
               isLive: false, isFuture: false, vodStreamURL: item.url, vodStreamID: item.id,
-              tmdbID: item.tmdb_id,
+              tmdbID: item.tmdb_id, onRefresh: function() { pages.movies(container); },
             });
           },
         });
@@ -6316,7 +6715,7 @@
           },
           onCardClick: function(di) {
             if (di.type === 'tv-collection') { showTvCollectionModal(di.collection); return; }
-            showSeriesDetail(di.show);
+            showSeriesDetail(di.show, function() { pages['tv-series'](container); });
           },
         });
 
@@ -6377,7 +6776,7 @@
       container.innerHTML = '';
       container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading IPTV movies...'));
       try {
-        var currentLang = 'EN';
+        var currentLang = '';
         async function loadMovies() {
           var url = '/api/vod/library?type=movie&source=xtream';
           if (currentLang) url += '&lang=' + encodeURIComponent(currentLang);
@@ -6385,6 +6784,11 @@
           var items = resp.data;
           var langHeader = resp.headers.get('X-Language-Counts');
           var allLangs = langHeader ? JSON.parse(langHeader) : {};
+          if (!currentLang && Object.keys(allLangs).length > 0) {
+            var sorted = Object.keys(allLangs).sort(function(a, b) { return allLangs[b] - allLangs[a]; });
+            currentLang = sorted.indexOf('EN') >= 0 ? 'EN' : sorted[0];
+            return loadMovies();
+          }
           container.innerHTML = '';
 
           var topbarRight = document.getElementById('topbar-right');
@@ -6429,6 +6833,10 @@
           title: 'IPTV Movies',
           getName: function(di) { return di.item.name; },
           getPoster: function(di) { return di.item.poster_url || ''; },
+          getOverlayBadge: function(di) {
+            if (di.item.alternates && di.item.alternates.length > 0) return (di.item.alternates.length + 1) + ' sources';
+            return null;
+          },
           getBadges: function(di) {
             var b = []; var item = di.item;
             if (item.year) b.push(item.year);
@@ -6445,6 +6853,7 @@
               rating: di.item.rating, genres: di.item.genres,
               channelName: '', channelID: null, tvgId: null,
               isLive: false, isFuture: false, vodStreamURL: di.item.url, vodStreamID: di.item.id,
+              tmdbID: di.item.tmdb_id, onRefresh: loadMovies, alternates: di.item.alternates,
             });
           },
         });
@@ -6483,7 +6892,7 @@
       container.innerHTML = '';
       container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading IPTV series...'));
       try {
-        var currentLang = 'EN';
+        var currentLang = '';
         async function loadSeries() {
           var url = '/api/vod/library?type=series&source=xtream';
           if (currentLang) url += '&lang=' + encodeURIComponent(currentLang);
@@ -6491,6 +6900,11 @@
           var items = resp.data;
           var langHeader = resp.headers.get('X-Language-Counts');
           var allLangs = langHeader ? JSON.parse(langHeader) : {};
+          if (!currentLang && Object.keys(allLangs).length > 0) {
+            var sorted = Object.keys(allLangs).sort(function(a, b) { return allLangs[b] - allLangs[a]; });
+            currentLang = sorted.indexOf('EN') >= 0 ? 'EN' : sorted[0];
+            return loadSeries();
+          }
           container.innerHTML = '';
 
           var topbarRight = document.getElementById('topbar-right');
@@ -6556,7 +6970,7 @@
               return b;
             },
             getGenres: function(di) { var g = []; di.show.episodes.forEach(function(ep) { (ep.genres || []).forEach(function(genre) { if (g.indexOf(genre) === -1) g.push(genre); }); }); return g; },
-            onCardClick: function(di) { showSeriesDetail(di.show); },
+            onCardClick: function(di) { showSeriesDetail(di.show, loadSeries); },
           });
           var pills = [{ label: '\u2B50 Favorites', key: 'fav:yes', group: 'collection' }];
           var dropdowns = [];
@@ -7034,7 +7448,7 @@
             toast.success('Import complete: ' + (result.imported || 0) + ' items imported');
             channelsCache.invalidate();
             channelGroupsCache.invalidate();
-            streamsCache.invalidate();
+            rebuildStreamNav();
             navigate('settings');
           } catch (err) { toast.error('Import failed: ' + err.message); }
           importFileInput.value = '';
@@ -7763,7 +8177,6 @@
     render();
     if (auth.isLoggedIn()) {
       rebuildStreamNav();
-      streamsCache.getAll();
       epgCache.getAll();
       logosCache.getAll();
       channelsCache.getAll();

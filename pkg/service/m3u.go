@@ -22,17 +22,18 @@ import (
 )
 
 type M3UService struct {
-	m3uAccountStore store.M3UAccountStore
-	streamStore     store.StreamStore
-	channelStore    store.ChannelStore
-	logoService     *LogoService
-	probeCache      store.ProbeCache
-	config          *config.Config
-	configDir       string
-	httpClient      *http.Client
-	wgClient        *http.Client
-	xtreamCache     *xtream.Cache
-	log             zerolog.Logger
+	m3uAccountStore    store.M3UAccountStore
+	streamStore        store.StreamStore
+	channelStore       store.ChannelStore
+	sourceProfileStore *store.SourceProfileStoreImpl
+	logoService        *LogoService
+	probeCache         store.ProbeCache
+	config             *config.Config
+	configDir          string
+	httpClient         *http.Client
+	wgClient           *http.Client
+	xtreamCache        *xtream.Cache
+	log                zerolog.Logger
 	StatusTracker
 }
 
@@ -66,7 +67,8 @@ func NewM3UService(
 
 func (s *M3UService) Log() *zerolog.Logger { return &s.log }
 
-func (s *M3UService) SetXtreamCache(c *xtream.Cache) { s.xtreamCache = c }
+func (s *M3UService) SetXtreamCache(c *xtream.Cache)                        { s.xtreamCache = c }
+func (s *M3UService) SetSourceProfileStore(sp *store.SourceProfileStoreImpl) { s.sourceProfileStore = sp }
 
 func (s *M3UService) CreateAccount(ctx context.Context, account *models.M3UAccount) error {
 	if err := s.m3uAccountStore.Create(ctx, account); err != nil {
@@ -363,6 +365,7 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 	s.Set(account.ID, RefreshStatus{State: "running", Message: "Processing streams...", Total: len(entries)})
 
 	m3uSvc := s
+	cacheType := m3uSvc.cacheTypeForAccount(account)
 	seen := make(map[string]struct{}, len(entries))
 	streams := make([]models.Stream, 0, len(entries))
 	keepIDs := make([]string, 0, len(entries))
@@ -374,6 +377,10 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 		seen[hash] = struct{}{}
 		id := deterministicStreamID(hash)
 		keepIDs = append(keepIDs, id)
+		streamCacheType := cacheType
+		if streamCacheType == "" && entry.TVPType != "" {
+			streamCacheType = "local"
+		}
 		s := models.Stream{
 			ID:            id,
 			M3UAccountID:  account.ID,
@@ -384,6 +391,7 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 			TvgID:         entry.TvgID,
 			TvgName:       entry.TvgName,
 			ContentHash:   hash,
+			CacheType:     streamCacheType,
 			UseWireGuard:  account.UseWireGuard,
 			IsActive:      true,
 			VODType:       entry.TVPType,
@@ -405,6 +413,12 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 		}
 		s.VODSeasonName = entry.TVPSeasonName
 		s.VODYear = extractYearFromName(entry.Name)
+		if s.CacheType != "local" && s.Language == "" && entry.Group != "" {
+			lang := extractLangFromCategory(entry.Group)
+			if lang != "" {
+				s.Language = lang
+			}
+		}
 		streams = append(streams, s)
 
 		if entry.TVPVCodec != "" && m3uSvc.probeCache != nil {
@@ -550,6 +564,20 @@ func extractLangFromCategory(cat string) string {
 
 func deterministicStreamID(contentHash string) string {
 	return uuid.NewSHA1(streamNamespace, []byte(contentHash)).String()
+}
+
+func (s *M3UService) cacheTypeForAccount(account *models.M3UAccount) string {
+	if account.Type == "xtream" {
+		return "xtream"
+	}
+	if s.sourceProfileStore != nil && account.SourceProfileID != "" {
+		if p, err := s.sourceProfileStore.GetByID(context.Background(), account.SourceProfileID); err == nil && p != nil {
+			if strings.EqualFold(p.Name, "TVProxy-streams") {
+				return "local"
+			}
+		}
+	}
+	return ""
 }
 
 func computeContentHash(streamURL string) string {

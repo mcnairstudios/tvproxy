@@ -151,6 +151,12 @@ func (s *SourceProfileStoreImpl) SeedDefaults() {
 			AudioResync: true, FPSMode: "cfr",
 		},
 		{
+			ID: uuid.New().String(), Name: "HDHomeRun", ProbeMode: "none", Transport: "http",
+			VideoCodec: "h264", AudioCodec: "aac_latm", Container: "mpegts",
+			AnalyzeDuration: 0, ProbeSize: 32,
+			ErrDetect: "ignore_err", FFlags: "+igndts+genpts+discardcorrupt+nobuffer",
+		},
+		{
 			ID: uuid.New().String(), Name: "TVProxy-streams", ProbeMode: "auto", Transport: "http",
 			AnalyzeDuration: 1000000, ProbeSize: 1000000,
 			ErrDetect: "ignore_err", FFlags: "+genpts+discardcorrupt",

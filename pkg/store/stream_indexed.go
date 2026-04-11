@@ -24,6 +24,7 @@ type StreamIndex struct {
 	Group         string
 	M3UAccountID  string
 	SatIPSourceID string
+	HDHRSourceID  string
 	VODType       string
 	VODSeries     string
 	VODCollection string
@@ -78,6 +79,7 @@ func (s *IndexedStreamStore) indexFromStream(st models.Stream) StreamIndex {
 		Group:         st.Group,
 		M3UAccountID:  st.M3UAccountID,
 		SatIPSourceID: st.SatIPSourceID,
+		HDHRSourceID:  st.HDHRSourceID,
 		VODType:       st.VODType,
 		VODSeries:     st.VODSeries,
 		VODCollection: st.VODCollection,
@@ -103,6 +105,7 @@ func (s *IndexedStreamStore) summaryFromIndex(idx StreamIndex) models.StreamSumm
 		ID:            idx.ID,
 		M3UAccountID:  idx.M3UAccountID,
 		SatIPSourceID: idx.SatIPSourceID,
+		HDHRSourceID:  idx.HDHRSourceID,
 		Name:          idx.Name,
 		Group:         idx.Group,
 		Logo:          idx.Logo,
@@ -304,6 +307,15 @@ func (s *IndexedStreamStore) BulkUpsert(_ context.Context, streams []models.Stre
 				st.TMDBID = existing.TMDBID
 				st.TMDBManual = existing.TMDBManual
 			}
+			if st.CacheType == "" && existing.CacheType != "" {
+				st.CacheType = existing.CacheType
+			}
+			if st.Language == "" && existing.Language != "" {
+				st.Language = existing.Language
+			}
+			if st.VODType == "" && existing.VODType != "" {
+				st.VODType = existing.VODType
+			}
 		} else {
 			st.CreatedAt = now
 		}
@@ -428,6 +440,90 @@ func (s *IndexedStreamStore) DeleteOrphanedSatIPStreams(_ context.Context, known
 			continue
 		}
 		if _, ok := known[idx.SatIPSourceID]; !ok {
+			delete(s.index, id)
+			deleted = append(deleted, id)
+		}
+	}
+	if len(deleted) > 0 {
+		s.rev.Bump()
+	}
+	return deleted, nil
+}
+
+func (s *IndexedStreamStore) ListByHDHRSourceID(_ context.Context, sourceID string) ([]models.Stream, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var matching []StreamIndex
+	for _, idx := range s.index {
+		if idx.HDHRSourceID == sourceID {
+			matching = append(matching, idx)
+		}
+	}
+
+	sort.Slice(matching, func(i, j int) bool {
+		return matching[i].CreatedAt.Before(matching[j].CreatedAt)
+	})
+
+	var items []models.Stream
+	for _, idx := range matching {
+		if st, err := s.readStream(idx); err == nil {
+			items = append(items, *st)
+		}
+	}
+	return items, nil
+}
+
+func (s *IndexedStreamStore) DeleteStaleByHDHRSourceID(_ context.Context, sourceID string, keepIDs []string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keep := make(map[string]struct{}, len(keepIDs))
+	for _, id := range keepIDs {
+		keep[id] = struct{}{}
+	}
+	var deleted []string
+	for id, idx := range s.index {
+		if idx.HDHRSourceID != sourceID {
+			continue
+		}
+		if _, shouldKeep := keep[id]; !shouldKeep {
+			delete(s.index, id)
+			deleted = append(deleted, id)
+		}
+	}
+	if len(deleted) > 0 {
+		s.rev.Bump()
+	}
+	return deleted, nil
+}
+
+func (s *IndexedStreamStore) DeleteByHDHRSourceID(_ context.Context, sourceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, idx := range s.index {
+		if idx.HDHRSourceID == sourceID {
+			delete(s.index, id)
+		}
+	}
+	s.rev.Bump()
+	return nil
+}
+
+func (s *IndexedStreamStore) DeleteOrphanedHDHRStreams(_ context.Context, knownSourceIDs []string) ([]string, error) {
+	known := make(map[string]struct{}, len(knownSourceIDs))
+	for _, id := range knownSourceIDs {
+		known[id] = struct{}{}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var deleted []string
+	for id, idx := range s.index {
+		if idx.HDHRSourceID == "" {
+			continue
+		}
+		if _, ok := known[idx.HDHRSourceID]; !ok {
 			delete(s.index, id)
 			deleted = append(deleted, id)
 		}

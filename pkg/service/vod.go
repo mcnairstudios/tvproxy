@@ -39,12 +39,15 @@ type VODService struct {
 	settingsService    *SettingsService
 	sessionMgr         *session.Manager
 	recordingStore     store.RecordingStore
+	probeCache         store.ProbeCache
 	activity           *ActivityService
 	log                zerolog.Logger
 
 	mu         sync.RWMutex
 	recordings map[string]*recordingState
 }
+
+func (s *VODService) SetProbeCache(pc store.ProbeCache) { s.probeCache = pc }
 
 func NewVODService(
 	channelStore store.ChannelStore,
@@ -158,7 +161,9 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 
 	var probe *ffmpeg.ProbeResult
 	if streamURL != "" {
-		probe, _ = s.recordingStore.GetProbe(ffmpeg.StreamHash(streamURL))
+		if s.probeCache != nil {
+			probe, _ = s.probeCache.GetProbe(ffmpeg.StreamHash(streamURL))
+		}
 	}
 
 	audioOnly := strings.EqualFold(streamGroup, "radio")

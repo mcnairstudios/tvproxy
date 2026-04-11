@@ -132,6 +132,18 @@ func (ms *MetadataStore) SetSeasonEpisodes(tmdbID int, seasonNum int, episodes m
 	ms.mu.Unlock()
 }
 
+func (ms *MetadataStore) SeriesNeedingEpisodes() []int {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+	var ids []int
+	for id, s := range ms.Series {
+		if s.TMDBID > 0 && len(s.Seasons) == 0 {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 func (ms *MetadataStore) GetCollection(tmdbID int) *CollectionMeta {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()

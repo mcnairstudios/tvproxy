@@ -79,7 +79,10 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 		Settings:           tuningSettings,
 	}
 
-	streamStore := store.NewStreamStore(filepath.Join(dir, "streams.gob"), log)
+	streamStore, err := store.NewBoltStreamStore(dir, log)
+	if err != nil {
+		t.Fatal(err)
+	}
 	epgStore := store.NewEPGStore(filepath.Join(dir, "epg.gob"), log)
 
 	userStore := store.NewUserStore(filepath.Join(dir, "users.json"))

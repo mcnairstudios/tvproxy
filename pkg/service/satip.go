@@ -20,7 +20,7 @@ type SatIPService struct {
 	satipSourceStore store.SatIPSourceStore
 	streamStore      store.StreamStore
 	channelStore     store.ChannelStore
-	recordingStore   *store.RecordingStoreImpl
+	probeCache       store.ProbeCache
 	log              zerolog.Logger
 	StatusTracker
 }
@@ -29,14 +29,14 @@ func NewSatIPService(
 	satipSourceStore store.SatIPSourceStore,
 	streamStore store.StreamStore,
 	channelStore store.ChannelStore,
-	recordingStore *store.RecordingStoreImpl,
+	probeCache store.ProbeCache,
 	log zerolog.Logger,
 ) *SatIPService {
 	return &SatIPService{
 		satipSourceStore: satipSourceStore,
 		streamStore:      streamStore,
 		channelStore:     channelStore,
-		recordingStore:   recordingStore,
+		probeCache:       probeCache,
 		log:              log.With().Str("service", "satip").Logger(),
 		StatusTracker:    NewStatusTracker(),
 	}
@@ -194,7 +194,7 @@ func (s *SatIPService) scanSource(ctx context.Context, source *models.SatIPSourc
 			Tracks:        tracks,
 		})
 
-		if s.recordingStore != nil {
+		if s.probeCache != nil {
 			hasVideo := group != "Radio"
 			probe := &ffmpeg.ProbeResult{
 				HasVideo: hasVideo,
@@ -215,7 +215,7 @@ func (s *SatIPService) scanSource(ctx context.Context, source *models.SatIPSourc
 					})
 				}
 			}
-			s.recordingStore.SaveProbeByStreamID(id, probe)
+			s.probeCache.SaveProbeByStreamID(id, probe)
 		}
 	}
 

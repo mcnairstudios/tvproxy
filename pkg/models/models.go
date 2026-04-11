@@ -50,6 +50,28 @@ type SatIPSource struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
+type HDHRTuner struct {
+	Host            string `json:"host"`
+	DeviceID        string `json:"device_id"`
+	DeviceModel     string `json:"device_model"`
+	FirmwareVersion string `json:"firmware_version"`
+	TunerCount      int    `json:"tuner_count"`
+}
+
+type HDHRSource struct {
+	ID              string       `json:"id"`
+	Name            string       `json:"name"`
+	Devices         []HDHRTuner  `json:"devices"`
+	IsEnabled       bool         `json:"is_enabled"`
+	TunerCount      int          `json:"tuner_count"`
+	LastScanned     *time.Time   `json:"last_scanned,omitempty"`
+	StreamCount     int          `json:"stream_count"`
+	LastError       string       `json:"last_error"`
+	SourceProfileID string       `json:"source_profile_id,omitempty"`
+	CreatedAt       time.Time    `json:"created_at"`
+	UpdatedAt       time.Time    `json:"updated_at"`
+}
+
 type StreamTrack struct {
 	PID       uint16 `json:"pid"`
 	Type      string `json:"type"`
@@ -63,6 +85,7 @@ type Stream struct {
 	ID            string        `json:"id"`
 	M3UAccountID  string        `json:"m3u_account_id"`
 	SatIPSourceID string        `json:"satip_source_id,omitempty"`
+	HDHRSourceID  string        `json:"hdhr_source_id,omitempty"`
 	Name          string        `json:"name"`
 	URL           string        `json:"url"`
 	Group         string        `json:"group"`
@@ -287,6 +310,7 @@ type StreamSummary struct {
 	ID            string `json:"id"`
 	M3UAccountID  string `json:"m3u_account_id"`
 	SatIPSourceID string `json:"satip_source_id,omitempty"`
+	HDHRSourceID  string `json:"hdhr_source_id,omitempty"`
 	Name          string `json:"name"`
 	Group         string `json:"group"`
 	Logo          string `json:"logo,omitempty"`

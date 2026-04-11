@@ -17,6 +17,7 @@ type StreamReader interface {
 	ListSummaries(ctx context.Context) ([]models.StreamSummary, error)
 	ListByAccountID(ctx context.Context, accountID string) ([]models.Stream, error)
 	ListBySatIPSourceID(ctx context.Context, sourceID string) ([]models.Stream, error)
+	ListByHDHRSourceID(ctx context.Context, sourceID string) ([]models.Stream, error)
 	ListByVODType(ctx context.Context, vodType string) ([]models.Stream, error)
 	GetByID(ctx context.Context, id string) (*models.Stream, error)
 }
@@ -29,12 +30,22 @@ type StreamWriter interface {
 	DeleteBySatIPSourceID(ctx context.Context, sourceID string) error
 	DeleteOrphanedM3UStreams(ctx context.Context, knownAccountIDs []string) ([]string, error)
 	DeleteOrphanedSatIPStreams(ctx context.Context, knownSourceIDs []string) ([]string, error)
+	DeleteStaleByHDHRSourceID(ctx context.Context, sourceID string, keepIDs []string) ([]string, error)
+	DeleteByHDHRSourceID(ctx context.Context, sourceID string) error
+	DeleteOrphanedHDHRStreams(ctx context.Context, knownSourceIDs []string) ([]string, error)
 	Delete(ctx context.Context, id string) error
 	UpdateTMDBID(ctx context.Context, id string, tmdbID int) error
 	SetTMDBManual(ctx context.Context, id string, tmdbID int) error
 	ClearAutoTMDBByAccountID(ctx context.Context, accountID string) error
 	UpdateWireGuardByAccountID(ctx context.Context, accountID string, useWireGuard bool) error
 	Clear() error
+}
+
+type StreamBrowser interface {
+	ListGroups(sourceKey string) ([]GroupInfo, error)
+	ListByGroup(sourceKey, group string, offset, limit int) ([]models.StreamSummary, int, error)
+	SearchByName(query string, limit int) ([]models.StreamSummary, error)
+	StreamCount() int
 }
 
 type StreamPersister interface {
@@ -86,6 +97,8 @@ type ProbeCache interface {
 	InvalidateProbe(streamHash string) error
 	GetProbeByStreamID(streamID string) (*ffmpeg.ProbeResult, error)
 	SaveProbeByStreamID(streamID string, result *ffmpeg.ProbeResult) error
+	SaveTSHeader(streamHash string, header []byte) error
+	GetTSHeader(streamHash string) ([]byte, error)
 }
 
 type RecordingReader interface {

@@ -17,6 +17,7 @@ import (
 
 type StreamHandler struct {
 	streamStore store.StreamReader
+	browser     store.StreamBrowser
 	versioned   store.Versioned
 	logoService *service.LogoService
 	tmdb        *tmdb.Client
@@ -24,7 +25,11 @@ type StreamHandler struct {
 }
 
 func NewStreamHandler(streamStore store.StreamReader, versioned store.Versioned, logoService *service.LogoService, tmdbClient *tmdb.Client, xtreamCache *xtream.Cache) *StreamHandler {
-	return &StreamHandler{streamStore: streamStore, versioned: versioned, logoService: logoService, tmdb: tmdbClient, xtreamCache: xtreamCache}
+	h := &StreamHandler{streamStore: streamStore, versioned: versioned, logoService: logoService, tmdb: tmdbClient, xtreamCache: xtreamCache}
+	if b, ok := streamStore.(store.StreamBrowser); ok {
+		h.browser = b
+	}
+	return h
 }
 
 func (h *StreamHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +95,100 @@ func (h *StreamHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *StreamHandler) Tree(w http.ResponseWriter, r *http.Request) {
+	if h.browser == nil {
+		respondError(w, http.StatusNotImplemented, "tree browsing not available")
+		return
+	}
+	sourceType := r.URL.Query().Get("source_type")
+	sourceID := r.URL.Query().Get("source_id")
+	if sourceID == "" {
+		respondError(w, http.StatusBadRequest, "source_id required")
+		return
+	}
+	sk := sourceType + ":" + sourceID
+	groups, err := h.browser.ListGroups(sk)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=30")
+	respondJSON(w, http.StatusOK, map[string]any{
+		"groups": groups,
+		"total":  h.browser.StreamCount(),
+	})
+}
+
+func (h *StreamHandler) Group(w http.ResponseWriter, r *http.Request) {
+	if h.browser == nil {
+		respondError(w, http.StatusNotImplemented, "group browsing not available")
+		return
+	}
+	sourceType := r.URL.Query().Get("source_type")
+	sourceID := r.URL.Query().Get("source_id")
+	group := r.URL.Query().Get("group")
+	if sourceID == "" {
+		respondError(w, http.StatusBadRequest, "source_id required")
+		return
+	}
+	var offset, limit int
+	fmt.Sscanf(r.URL.Query().Get("offset"), "%d", &offset)
+	fmt.Sscanf(r.URL.Query().Get("limit"), "%d", &limit)
+	if limit <= 0 {
+		limit = 200
+	}
+	sk := sourceType + ":" + sourceID
+	summaries, total, err := h.browser.ListByGroup(sk, group, offset, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=30")
+	respondJSON(w, http.StatusOK, map[string]any{
+		"streams": summaries,
+		"total":   total,
+	})
+}
+
+func (h *StreamHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	if h.browser == nil {
+		respondError(w, http.StatusNotImplemented, "stats not available")
+		return
+	}
+	type statsProvider interface {
+		Stats() store.StreamStats
+	}
+	if sp, ok := h.streamStore.(statsProvider); ok {
+		w.Header().Set("Cache-Control", "public, max-age=10")
+		respondJSON(w, http.StatusOK, sp.Stats())
+	} else {
+		respondError(w, http.StatusNotImplemented, "stats not available")
+	}
+}
+
+func (h *StreamHandler) Search(w http.ResponseWriter, r *http.Request) {
+	if h.browser == nil {
+		respondError(w, http.StatusNotImplemented, "search not available")
+		return
+	}
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		respondJSON(w, http.StatusOK, []any{})
+		return
+	}
+	var limit int
+	fmt.Sscanf(r.URL.Query().Get("limit"), "%d", &limit)
+	if limit <= 0 {
+		limit = 50
+	}
+	summaries, err := h.browser.SearchByName(q, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, summaries)
+}
+
 func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 	vodType := r.URL.Query().Get("type")
 	series := r.URL.Query().Get("series")
@@ -112,10 +211,10 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 	if source != "" {
 		var sourceFiltered []models.Stream
 		for _, s := range streams {
-			if source == "xtream" && s.CacheType != "xtream" {
+			if source == "xtream" && s.CacheType == "local" {
 				continue
 			}
-			if source == "local" && s.CacheType == "xtream" {
+			if source == "local" && s.CacheType != "local" {
 				continue
 			}
 			sourceFiltered = append(sourceFiltered, s)
@@ -134,7 +233,7 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 		if vodType != "" && s.VODType != vodType {
 			continue
 		}
-		if s.VODType == "series" && s.VODSeason == 0 && s.VODEpisode == 0 {
+		if s.VODType == "series" && s.VODSeason == 0 && s.VODEpisode == 0 && s.CacheType == "local" {
 			continue
 		}
 		langCounts[s.Language]++
@@ -149,6 +248,13 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 			filtered = append(filtered, s)
 		}
 		streams = filtered
+	}
+
+	type vodAlt struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		URL   string `json:"url"`
+		Group string `json:"group,omitempty"`
 	}
 
 	type vodItem struct {
@@ -182,6 +288,8 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 		Res                string   `json:"resolution,omitempty"`
 		Audio              string   `json:"audio,omitempty"`
 		Duration           float64  `json:"duration,omitempty"`
+		Alternates         []vodAlt `json:"alternates,omitempty"`
+		Group              string   `json:"group,omitempty"`
 	}
 
 	var items []vodItem
@@ -195,7 +303,7 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 		if vodType != "" && s.VODType != vodType {
 			continue
 		}
-		if s.VODType == "series" && s.VODSeason == 0 && s.VODEpisode == 0 {
+		if s.VODType == "series" && s.VODSeason == 0 && s.VODEpisode == 0 && s.CacheType == "local" {
 			continue
 		}
 		if series != "" && s.VODSeries != series {
@@ -236,6 +344,7 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 			Season:     s.VODSeason,
 			SeasonName: s.VODSeasonName,
 			Episode:    s.VODEpisode,
+			Group:      s.Group,
 			VCodec:     s.VODVCodec,
 			ACodec:     s.VODACodec,
 			Res:        s.VODRes,
@@ -339,6 +448,48 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 
 	if h.tmdb != nil && len(uncached) > 0 {
 		h.tmdb.Sync(uncached, nil)
+	}
+
+	scoreItem := func(item vodItem) int {
+		score := 0
+		if item.TMDBID > 0 {
+			score += 10
+		}
+		if item.PosterURL != "" {
+			score += 5
+		}
+		if item.Overview != "" {
+			score += 3
+		}
+		if item.Rating > 0 {
+			score += 2
+		}
+		if item.Year != "" {
+			score += 1
+		}
+		return score
+	}
+
+	if vodType == "movie" || (vodType == "series" && series == "") {
+		deduped := make(map[string]int)
+		var merged []vodItem
+		for _, item := range items {
+			key := strings.ToLower(item.Name)
+			if idx, exists := deduped[key]; exists {
+				existing := &merged[idx]
+				if scoreItem(item) > scoreItem(*existing) {
+					existing.Alternates = append(existing.Alternates, vodAlt{ID: existing.ID, Name: existing.Name, URL: existing.URL, Group: existing.Group})
+					item.Alternates = existing.Alternates
+					merged[idx] = item
+				} else {
+					existing.Alternates = append(existing.Alternates, vodAlt{ID: item.ID, Name: item.Name, URL: item.URL, Group: item.Group})
+				}
+			} else {
+				deduped[key] = len(merged)
+				merged = append(merged, item)
+			}
+		}
+		items = merged
 	}
 
 	if items == nil {

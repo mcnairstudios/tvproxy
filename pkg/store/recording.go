@@ -185,6 +185,9 @@ func (s *RecordingStoreImpl) InvalidateProbe(streamHash string) error {
 	return nil
 }
 
+func (s *RecordingStoreImpl) SaveTSHeader(streamHash string, header []byte) error { return nil }
+func (s *RecordingStoreImpl) GetTSHeader(streamHash string) ([]byte, error)     { return nil, nil }
+
 func isUsefulProbe(result *ffmpeg.ProbeResult) bool {
 	if result == nil {
 		return false

@@ -102,7 +102,10 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to seed client defaults")
 	}
 
-	streamStore := store.NewIndexedStreamStore(dataDir, filepath.Join(dataDir, "streams.gob"), log)
+	streamStore, err := store.NewBoltStreamStore(dataDir, log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to open stream bolt store")
+	}
 	epgStore := store.NewEPGStore(filepath.Join(dataDir, "epg.gob"), log)
 	{
 		streamErr := make(chan error, 1)
@@ -165,6 +168,21 @@ func main() {
 		streamStore.Save()
 	}
 
+	hdhrSourceStore := store.NewHDHRSourceStore(filepath.Join(dataDir, "hdhr_sources.json"))
+	if err := hdhrSourceStore.Load(); err != nil {
+		log.Fatal().Err(err).Msg("failed to load hdhr source store")
+	}
+
+	hdhrSources, _ := hdhrSourceStore.List(ctx)
+	hdhrSourceIDs := make([]string, len(hdhrSources))
+	for i, s := range hdhrSources {
+		hdhrSourceIDs[i] = s.ID
+	}
+	if deleted, err := streamStore.DeleteOrphanedHDHRStreams(ctx, hdhrSourceIDs); err == nil && len(deleted) > 0 {
+		log.Info().Int("count", len(deleted)).Msg("cleaned up orphaned hdhr source streams")
+		streamStore.Save()
+	}
+
 	authService := service.NewAuthService(userStore, cfg.JWTSecret, cfg.AccessTokenExpiry, cfg.RefreshTokenExpiry)
 	authService.SetInviteExpiry(cfg.Settings.Auth.InviteTokenExpiry)
 
@@ -212,8 +230,13 @@ func main() {
 
 	xtreamCache := xtream.NewCache(filepath.Join(dataDir, "cache", "xtream"))
 	recordingStore := store.NewRecordingStore(cfg.RecordDir, log)
-	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, recordingStore, cfg, dataDir, wgHTTPClient, log)
+	probeCache, err := store.NewBoltProbeCache(filepath.Join(dataDir, "cache"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to open probe cache")
+	}
+	m3uService := service.NewM3UService(m3uAccountStore, streamStore, channelStore, logoService, probeCache, cfg, dataDir, wgHTTPClient, log)
 	m3uService.SetXtreamCache(xtreamCache)
+	m3uService.SetSourceProfileStore(sourceProfileStore)
 	m3uService.CleanupOrphanedStreams(ctx)
 	channelService := service.NewChannelService(channelStore, channelGroupStore, streamStore, log)
 	epgService := service.NewEPGService(epgSourceStore, epgStore, cfg, wgHTTPClient, log)
@@ -223,10 +246,12 @@ func main() {
 	proxyService := service.NewProxyService(channelStore, streamStore, profileStore, clientService, activityService, cfg, wgHTTPClient, log)
 	hdhrService := service.NewHDHRService(hdhrStore, channelStore, cfg)
 	outputService := service.NewOutputService(channelStore, channelGroupStore, epgStore, logoService, cfg, log)
-	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, recordingStore, log)
+	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, probeCache, log)
+	hdhrSourceService := service.NewHDHRSourceService(hdhrSourceStore, streamStore, channelStore, log)
+	hdhrSourceService.SetProbeCache(probeCache)
 	wgMultiClient := wgMultiService.HTTPClient()
 	m3uService.SetWGClient(wgMultiClient)
-	sessionMgr := session.NewManager(cfg, wgHTTPClient, wgMultiClient, recordingStore, log)
+	sessionMgr := session.NewManager(cfg, wgHTTPClient, wgMultiClient, probeCache, log)
 
 	wgPool := session.NewWGPool(log)
 	for profileID, client := range wgMultiService.ConnectedTransports() {
@@ -240,7 +265,8 @@ func main() {
 	log.Info().Int("proxies", wgPool.Count()).Msg("wireguard pool active with failover")
 
 	vodService := service.NewVODService(channelStore, streamStore, profileStore, sourceProfileStore, m3uAccountStore, satipSourceStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
-	vodService.RecoverRecordings(ctx)
+	vodService.SetProbeCache(probeCache)
+	go vodService.RecoverRecordings(ctx)
 	schedulerService := service.NewSchedulerService(scheduledRecStore, channelStore, vodService, cfg, log)
 	dlnaService := service.NewDLNAService(channelStore, channelGroupStore, userStore, favoriteStore, streamStore, settingsService, logoService, vodService, cfg, log)
 
@@ -289,6 +315,7 @@ func main() {
 		user:           handler.NewUserHandler(authService),
 		m3uAccount:     handler.NewM3UAccountHandler(m3uService, dataDir),
 		satip:          handler.NewSatIPHandler(satipService),
+		hdhrSource:     handler.NewHDHRSourceHandler(hdhrSourceService),
 		stream:         handler.NewStreamHandler(streamStore, streamStore, logoService, tmdbClient, xtreamCache),
 		channel:        handler.NewChannelHandler(channelService, logoService),
 		channelGroup:   handler.NewChannelGroupHandler(channelService),
@@ -453,6 +480,9 @@ func main() {
 
 	wgService.Stop()
 	vodService.Shutdown()
+	hlsManager.StopAll()
+	sessionMgr.Shutdown()
+	wgPool.StopAll()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()

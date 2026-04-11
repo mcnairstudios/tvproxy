@@ -29,11 +29,33 @@ type VODItem struct {
 
 type ResolvedFunc func(streamID string, tmdbID int)
 
+type TMDBCache interface {
+	Get(key string) (any, bool)
+	Set(key string, value any)
+	Delete(key string)
+	Has(key string) bool
+	Prune(keepKeys map[string]bool) int
+	MigrateFrom(dir string)
+}
+
+type MetaStore interface {
+	GetMovie(tmdbID int) *MovieMeta
+	SetMovie(tmdbID int, m *MovieMeta)
+	GetSeries(tmdbID int) *SeriesMeta
+	SetSeries(tmdbID int, s *SeriesMeta)
+	GetEpisode(tmdbID int, season, episode int) *EpisodeMeta
+	SetSeasonEpisodes(tmdbID int, seasonNum int, episodes map[int]*EpisodeMeta)
+	GetCollection(tmdbID int) *CollectionMeta
+	SetCollection(tmdbID int, c *CollectionMeta)
+	SeriesNeedingEpisodes() []int
+	Save()
+}
+
 type Client struct {
 	http     *http.Client
 	log      zerolog.Logger
-	cache    *Cache
-	meta     *MetadataStore
+	cache    TMDBCache
+	meta     MetaStore
 	images   *ImageCache
 	apiKeyFn func() string
 
@@ -44,14 +66,32 @@ type Client struct {
 
 func NewClient(baseDir string, apiKeyFn func() string, log zerolog.Logger) *Client {
 	httpClient := &http.Client{Timeout: 10 * time.Second}
-	cache := NewCache(filepath.Join(baseDir, "search"))
-	cache.MigrateFrom(baseDir)
+
+	var cache TMDBCache
+	boltCache, err := NewBoltCache(baseDir)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open bolt tmdb cache, falling back to JSON")
+		c := NewCache(filepath.Join(baseDir, "search"))
+		c.MigrateFrom(baseDir)
+		cache = c
+	} else {
+		cache = boltCache
+	}
+
+	var meta MetaStore
+	boltMeta, err := NewBoltMetadataStore(baseDir)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open bolt metadata store, falling back to JSON")
+		meta = NewMetadataStore(baseDir)
+	} else {
+		meta = boltMeta
+	}
 
 	return &Client{
 		http:     httpClient,
 		log:      log.With().Str("component", "tmdb").Logger(),
 		cache:    cache,
-		meta:     NewMetadataStore(baseDir),
+		meta:     meta,
 		images:   NewImageCache(filepath.Join(baseDir, "images"), httpClient),
 		apiKeyFn: apiKeyFn,
 	}
@@ -498,14 +538,7 @@ func (c *Client) Sync(items []VODItem, onResolved ResolvedFunc) {
 		toSync = append(toSync, item)
 	}
 
-	var seriesNeedEpisodes []int
-	c.meta.mu.RLock()
-	for id, s := range c.meta.Series {
-		if s.TMDBID > 0 && len(s.Seasons) == 0 {
-			seriesNeedEpisodes = append(seriesNeedEpisodes, id)
-		}
-	}
-	c.meta.mu.RUnlock()
+	seriesNeedEpisodes := c.meta.SeriesNeedingEpisodes()
 
 	totalWork := len(toSync) + len(seriesNeedEpisodes)
 	if totalWork == 0 {
