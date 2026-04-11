@@ -19,15 +19,7 @@ ARG VERSION=dev
 RUN CGO_ENABLED=1 go build -ldflags="-s -w -X main.buildVersion=$VERSION" -o /tvproxy ./cmd/tvproxy/
 
 RUN cd gstreamer-plugins/tvproxydemux && meson setup builddir && ninja -C builddir \
-    && cp builddir/gsttvproxydemux.so /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/gstreamer-1.0/
-
-RUN cd gstreamer-plugins/tvproxymux && go generate 2>/dev/null; \
-    CGO_ENABLED=1 go build -o /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/gstreamer-1.0/libgsttvproxymux.so -buildmode c-shared . \
-    && rm -f /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/gstreamer-1.0/libgsttvproxymux.h
-
-RUN cd gstreamer-plugins/tvproxysrc && go generate 2>/dev/null; \
-    CGO_ENABLED=1 go build -o /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/gstreamer-1.0/libgsttvproxysrc.so -buildmode c-shared . \
-    && rm -f /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/gstreamer-1.0/libgsttvproxysrc.h
+    && cp builddir/libgsttvproxydemux.so /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/gstreamer-1.0/
 
 FROM linuxserver/ffmpeg:latest
 
@@ -46,9 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /tvproxy /usr/local/bin/tvproxy
-COPY --from=builder /usr/lib/*/gstreamer-1.0/gsttvproxydemux.so /usr/local/lib/gstreamer-1.0/
-COPY --from=builder /usr/lib/*/gstreamer-1.0/libgsttvproxymux.so /usr/local/lib/gstreamer-1.0/
-COPY --from=builder /usr/lib/*/gstreamer-1.0/libgsttvproxysrc.so /usr/local/lib/gstreamer-1.0/
+COPY --from=builder /usr/lib/*/gstreamer-1.0/libgsttvproxydemux.so /usr/local/lib/gstreamer-1.0/
 COPY pkg/defaults/clients.json /defaults/clients.json
 COPY pkg/defaults/settings.json /defaults/settings.json
 

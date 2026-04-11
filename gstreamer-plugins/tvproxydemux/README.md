@@ -1,6 +1,12 @@
-# tvproxydemux — GStreamer MPEG-TS Demux Plugin
+# tvproxy GStreamer Plugins
 
-A GStreamer element that demuxes MPEG-TS streams and auto-transcodes audio to stereo AAC, exposing static `video` and `audio` source pads. Designed for live TV streaming pipelines where you need a simple, reliable pipeline string instead of programmatic `pad-added` signal handlers.
+Three GStreamer elements for live TV streaming pipelines, shipped as a single plugin library:
+
+- **`tvproxysrc`** — Source element for HTTP, RTSP, and file MPEG-TS streams
+- **`tvproxydemux`** — Demuxes MPEG-TS and auto-transcodes audio to stereo AAC with static pads
+- **`tvproxymux`** — Muxes video+audio to MP4 or MPEG-TS with auto-inserted parsers
+
+Together they replace complex multi-element pipeline wiring with a simple pipeline string:
 
 ## Why This Exists
 
@@ -16,11 +22,11 @@ GStreamer's stock `tsdemux` element creates dynamic pads at runtime, which makes
 `tvproxydemux` gives you the speed of the native `pad-added` approach with the simplicity of a pipeline string:
 
 ```
-souphttpsrc location=http://hdhr/auto/v101 do-timestamp=true is-live=true \
+tvproxysrc location=http://hdhr/auto/v101 \
   ! tvproxydemux name=d \
-  d.video ! h264parse config-interval=-1 ! mp4mux name=mux fragment-duration=500 streamable=true \
-  ! filesink location=out.mp4 \
-  d.audio ! mux.
+  d.video ! m.video \
+  d.audio ! m.audio \
+  tvproxymux name=m ! filesink location=out.mp4
 ```
 
 First byte in **3.1 seconds** with mp4mux. Versus 7-11 seconds with `parsebin`.
@@ -75,6 +81,78 @@ MPEG-TS streams often contain multiple audio tracks (e.g. stereo + surround, or 
 | `audio-language` | string | `""` | Preferred audio language as ISO 639 code (e.g. `"eng"`). Empty = first non-AD track. When set, collects all audio pads and selects the best match at `no-more-pads`. |
 | `video-interlaced` | bool | `false` | Read-only. `TRUE` if the source video is interlaced, detected from stream caps. |
 
+## tvproxysrc
+
+Wraps `souphttpsrc`, `rtspsrc`, or `filesrc` with sensible defaults based on the URI scheme. Detects the source type from the `location` property:
+
+| URI prefix | Internal element | Notes |
+|------------|-----------------|-------|
+| `http://`, `https://` | `souphttpsrc` | `do-timestamp=true`, `is-live=true` |
+| `rtsp://`, `rtsps://` | `rtspsrc` + `rtpmp2tdepay` | For SAT>IP tuners. `pad-added` handled internally. |
+| anything else | `filesrc` | For local `.ts` files |
+
+### tvproxysrc Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `location` | string | `""` | URI of the MPEG-TS stream (http://, rtsp://, or file path) |
+| `is-live` | bool | `true` | Whether the source is a live stream |
+| `rtsp-transport` | string | `"tcp"` | RTSP transport: `"tcp"` or `"udp"` |
+
+### RTSP example (SAT>IP)
+
+```bash
+gst-launch-1.0 -e \
+  tvproxysrc location="rtsp://192.168.1.149/?freq=545.833&msys=dvbt2&pids=0,6650,6601" \
+  ! tvproxydemux name=d \
+  d.video ! m.video d.audio ! m.audio \
+  tvproxymux name=m ! filesink location=/tmp/output.mp4
+```
+
+## tvproxymux
+
+Wraps `mp4mux` or `mpegtsmux` behind `video` and `audio` request pads. Auto-inserts the correct video parser with `config-interval=-1` (repeats SPS/PPS so mid-stream join works in VLC/browsers) and `aacparse` for audio.
+
+### tvproxymux Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `output-format` | string | `"mp4"` | `"mp4"` (fragmented, streamable) or `"mpegts"` |
+| `video-codec` | string | `""` | Video parser: `"h264"`, `"h265"`, `"mpeg2"`, or empty (default: h264) |
+
+### Pad linking
+
+`tvproxymux` has **request** pads, not static pads. You must use explicit pad names:
+
+```bash
+# CORRECT:
+d.video ! m.video
+d.audio ! m.audio
+
+# WRONG (will fail with "could not link"):
+d.video ! tvproxymux name=m
+```
+
+### Auto-parser insertion
+
+When the `video` pad is requested, tvproxymux automatically creates a parser internally:
+- Default (or `video-codec=h264`): `h264parse config-interval=-1`
+- `video-codec=h265`: `h265parse config-interval=-1`
+- `video-codec=mpeg2`: `mpegvideoparse`
+
+The `audio` pad always gets `aacparse` internally.
+
+This means you do NOT need `h264parse` in your pipeline when using tvproxymux — it's handled automatically. For h265 transcode pipelines, set `video-codec=h265`:
+
+```bash
+gst-launch-1.0 -e \
+  tvproxysrc location=http://hdhr/auto/v101 \
+  ! tvproxydemux name=d \
+  d.video ! vtdec ! vtenc_h265 bitrate=4000 realtime=true allow-frame-reordering=false ! m.video \
+  d.audio ! m.audio \
+  tvproxymux name=m output-format=mpegts video-codec=h265 ! filesink location=/tmp/output.ts
+```
+
 ## Building
 
 Requires GStreamer development libraries (>= 1.20) and Meson.
@@ -87,16 +165,21 @@ brew install gstreamer meson
 meson setup build
 meson compile -C build
 
-# Verify
+# Verify all three elements
+GST_PLUGIN_PATH=./build gst-inspect-1.0 tvproxysrc
 GST_PLUGIN_PATH=./build gst-inspect-1.0 tvproxydemux
+GST_PLUGIN_PATH=./build gst-inspect-1.0 tvproxymux
 ```
 
-Produces `build/gsttvproxydemux.dylib` (macOS) or `build/gsttvproxydemux.so` (Linux).
+Produces `build/gsttvproxydemux.dylib` (macOS) or `build/gsttvproxydemux.so` (Linux). All three elements are in the same library.
 
 ### GStreamer element dependencies
 
 The following GStreamer elements must be installed (all standard in Homebrew's `gstreamer` package):
 
+- `souphttpsrc` (soup plugin) — HTTP source
+- `rtspsrc` (rtsp plugin) — RTSP source
+- `rtpmp2tdepay` (rtpmanager plugin) — RTP MPEG-TS depayloader
 - `tsparse`, `tsdemux` (mpegtsdemux plugin)
 - `h264parse`, `h265parse` (videoparsersbad plugin)
 - `mpegvideoparse` (videoparsersbad plugin)
@@ -105,6 +188,8 @@ The following GStreamer elements must be installed (all standard in Homebrew's `
 - `mpg123audiodec` (mpg123 plugin)
 - `faac` (faac plugin)
 - `audioconvert`, `audioresample` (audioconvert, audioresample plugins)
+- `mp4mux` (isomp4 plugin) — fragmented MP4 muxer
+- `mpegtsmux` (mpegtsmux plugin) — MPEG-TS muxer
 
 ## Usage Examples
 
@@ -150,6 +235,54 @@ GST_PLUGIN_PATH=./build gst-launch-1.0 -e \
   d.audio ! mux.
 ```
 
+## Integration with Companion Plugins
+
+This plugin works with two companions: `tvproxysrc` (source) and `tvproxymux` (muxer).
+
+**CRITICAL: When linking to `tvproxymux`, use explicit pad names `m.video` and `m.audio`.** `tvproxymux` has request pads, not static pads. GStreamer cannot auto-negotiate request pads — you must name them explicitly.
+
+```bash
+# WRONG — "could not link d to m":
+tvproxysrc location=... ! tvproxydemux name=d d.video ! tvproxymux name=m ! filesink d.audio ! m.
+
+# CORRECT — explicit pad names:
+tvproxysrc location=... ! tvproxydemux name=d d.video ! m.video d.audio ! m.audio tvproxymux name=m ! filesink location=out.mp4
+```
+
+Full working pipeline:
+```bash
+gst-launch-1.0 -e \
+  tvproxysrc location=http://192.168.1.186:5004/auto/v101 \
+  ! tvproxydemux name=d \
+  d.video ! m.video \
+  d.audio ! m.audio \
+  tvproxymux name=m ! filesink location=/tmp/output.mp4
+```
+
+With transcode (h264 to h265 via VideoToolbox):
+```bash
+gst-launch-1.0 -e \
+  tvproxysrc location=http://192.168.1.186:5004/auto/v101 \
+  ! tvproxydemux name=d \
+  d.video ! vtdec ! vtenc_h265 bitrate=4000 realtime=true allow-frame-reordering=false ! m.video \
+  d.audio ! m.audio \
+  tvproxymux name=m output-format=mpegts ! filesink location=/tmp/output.ts
+```
+
+### Standalone usage with standard GStreamer elements
+
+The plugin also works with any standard GStreamer muxer (mp4mux, mpegtsmux, etc.):
+
+```bash
+GST_PLUGIN_PATH=./build gst-launch-1.0 -e \
+  souphttpsrc location=http://192.168.1.186:5004/auto/v101 do-timestamp=true is-live=true \
+  ! tvproxydemux name=d \
+  d.video ! h264parse config-interval=-1 \
+  ! mp4mux name=mux fragment-duration=500 streamable=true \
+  ! filesink location=/tmp/output.mp4 \
+  d.audio ! mux.
+```
+
 ## Integration with Go (go-gst)
 
 The plugin is loaded via `GST_PLUGIN_PATH` and used as a normal element in pipeline strings:
@@ -163,7 +296,18 @@ func main() {
     // Set GST_PLUGIN_PATH before calling gst.Init, or:
     // os.Setenv("GST_PLUGIN_PATH", "/path/to/build")
 
+    // With companion plugins:
     pipelineStr := fmt.Sprintf(
+        "tvproxysrc location=%s "+
+            "! tvproxydemux name=d "+
+            "d.video ! m.video "+
+            "d.audio ! m.audio "+
+            "tvproxymux name=m output-format=mp4 "+
+            "! filesink location=%s",
+        url, outputPath)
+
+    // Or with standard GStreamer elements:
+    pipelineStr = fmt.Sprintf(
         "souphttpsrc location=%s do-timestamp=true is-live=true "+
             "! tvproxydemux name=d "+
             "d.video ! h264parse config-interval=-1 "+
@@ -192,13 +336,13 @@ func main() {
     "demux. ! audio/mpeg ! queue ! aacparse ! avdec_aac_latm " +
     "! audioconvert ! audioresample ! audio/x-raw,channels=2 ! faac ! aacparse ! mux."
 
-// AFTER: tvproxydemux (3.1 second startup, handles all codecs)
-"souphttpsrc location=%s do-timestamp=true is-live=true " +
+// AFTER: with companion plugins (3.1 second startup, handles all codecs)
+"tvproxysrc location=%s " +
     "! tvproxydemux name=d " +
-    "d.video ! h264parse config-interval=-1 " +
-    "! mp4mux name=mux fragment-duration=500 streamable=true " +
-    "! filesink location=%s " +
-    "d.audio ! mux."
+    "d.video ! m.video " +
+    "d.audio ! m.audio " +
+    "tvproxymux name=m output-format=mp4 " +
+    "! filesink location=%s"
 ```
 
 ### Reading the interlaced flag from Go

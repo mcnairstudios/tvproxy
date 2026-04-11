@@ -74,10 +74,10 @@ func BuildNativeFromOpts(videoCodec, audioCodec, hwAccel, inputURL, outputPath s
 	var videoElements []*gst.Element
 	var audioElements []*gst.Element
 
-	if outVideo == "copy" || outVideo == "h264" {
-		vParse, _ := gst.NewElement("h264parse")
-		vParse.SetProperty("config-interval", -1)
-		videoElements = []*gst.Element{vParse}
+	sourceVideo := normalizeCodec(videoCodec)
+	if outVideo == "copy" || outVideo == sourceVideo {
+		parser := createOutputParser(outVideo)
+		videoElements = parser
 	} else {
 		vDec := createHWDecoder("h264", hw)
 		vEnc := createHWEncoder(outVideo, hw, 4000)
@@ -157,6 +157,8 @@ func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
 		parser, _ = gst.NewElement("h264parse")
 	case "h265":
 		parser, _ = gst.NewElement("h265parse")
+	case "av1":
+		parser, _ = gst.NewElement("av1parse")
 	case "mpeg2video":
 		parser, _ = gst.NewElement("mpegvideoparse")
 	default:
@@ -181,6 +183,8 @@ func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
 			decoder, _ = gst.NewElement("qsvh264dec")
 		case "h265":
 			decoder, _ = gst.NewElement("qsvh265dec")
+		case "av1":
+			decoder, _ = gst.NewElement("qsvav1dec")
 		default:
 			decoder, _ = gst.NewElement("avdec_h264")
 		}
@@ -190,6 +194,8 @@ func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
 			decoder, _ = gst.NewElement("avdec_h264")
 		case "h265":
 			decoder, _ = gst.NewElement("avdec_h265")
+		case "av1":
+			decoder, _ = gst.NewElement("avdec_av1")
 		default:
 			decoder, _ = gst.NewElement("avdec_h264")
 		}
@@ -206,6 +212,8 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 		switch codec {
 		case "h265":
 			encoder, _ = gst.NewElement("vtenc_h265")
+		case "av1":
+			encoder, _ = gst.NewElement("vtenc_av1")
 		default:
 			encoder, _ = gst.NewElement("vtenc_h264")
 		}
@@ -216,6 +224,8 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 		switch codec {
 		case "h265":
 			encoder, _ = gst.NewElement("vaapih265enc")
+		case "av1":
+			encoder, _ = gst.NewElement("vaapiav1enc")
 		default:
 			encoder, _ = gst.NewElement("vaapih264enc")
 			encoder.SetProperty("tune", uint(3))
@@ -225,6 +235,8 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 		switch codec {
 		case "h265":
 			encoder, _ = gst.NewElement("qsvh265enc")
+		case "av1":
+			encoder, _ = gst.NewElement("qsvav1enc")
 		default:
 			encoder, _ = gst.NewElement("qsvh264enc")
 			encoder.SetProperty("target-usage", uint(1))
@@ -253,6 +265,8 @@ func createOutputParser(codec string) []*gst.Element {
 	switch codec {
 	case "h265":
 		parser, _ = gst.NewElement("h265parse")
+	case "av1":
+		parser, _ = gst.NewElement("av1parse")
 	default:
 		parser, _ = gst.NewElement("h264parse")
 	}

@@ -228,6 +228,8 @@ func videoParser(outCodec, sourceCodec string) (string, string) {
 	switch codec {
 	case "h265":
 		return "h265parse", "config-interval=-1"
+	case "av1":
+		return "av1parse", "config-interval=-1"
 	case "mpeg2video":
 		return "mpegvideoparse", ""
 	default:
@@ -243,6 +245,8 @@ func hwDecoder(codec string, hw HWAccel) string {
 			return "h264parse ! vaapih264dec"
 		case "h265":
 			return "h265parse ! vaapih265dec"
+		case "av1":
+			return "av1parse ! vaapidecode"
 		case "mpeg2video":
 			return "mpegvideoparse ! vaapidecode"
 		}
@@ -252,6 +256,8 @@ func hwDecoder(codec string, hw HWAccel) string {
 			return "h264parse ! qsvh264dec"
 		case "h265":
 			return "h265parse ! qsvh265dec"
+		case "av1":
+			return "av1parse ! qsvav1dec"
 		}
 	case HWVideoToolbox:
 		switch codec {
@@ -259,6 +265,8 @@ func hwDecoder(codec string, hw HWAccel) string {
 			return "h264parse ! vtdec"
 		case "h265":
 			return "h265parse ! vtdec"
+		case "av1":
+			return "av1parse ! vtdec"
 		}
 	}
 	switch codec {
@@ -266,6 +274,8 @@ func hwDecoder(codec string, hw HWAccel) string {
 		return "h264parse ! avdec_h264"
 	case "h265":
 		return "h265parse ! avdec_h265"
+	case "av1":
+		return "av1parse ! avdec_av1"
 	case "mpeg2video":
 		return "mpegvideoparse ! avdec_mpeg2video"
 	}
@@ -294,11 +304,15 @@ func hwEncoder(codec string, hw HWAccel, bitrate int) string {
 			return fmt.Sprintf("qsvh264enc bitrate=%d target-usage=1", br)
 		case "h265":
 			return fmt.Sprintf("qsvh265enc bitrate=%d", br)
+		case "av1":
+			return fmt.Sprintf("qsvav1enc bitrate=%d", br)
 		}
 	case HWVideoToolbox:
 		switch codec {
 		case "h265":
 			return fmt.Sprintf("vtenc_h265 bitrate=%d realtime=true allow-frame-reordering=false", br)
+		case "av1":
+			return fmt.Sprintf("vtenc_av1 bitrate=%d realtime=true allow-frame-reordering=false", br)
 		default:
 			return fmt.Sprintf("vtenc_h264 bitrate=%d realtime=true allow-frame-reordering=false", br)
 		}
@@ -306,6 +320,8 @@ func hwEncoder(codec string, hw HWAccel, bitrate int) string {
 	switch codec {
 	case "h265":
 		return fmt.Sprintf("videoconvert ! x265enc bitrate=%d speed-preset=ultrafast", br)
+	case "av1":
+		return fmt.Sprintf("videoconvert ! svtav1enc preset=12 target-bitrate=%d", br)
 	default:
 		return fmt.Sprintf("videoconvert ! x264enc bitrate=%d speed-preset=ultrafast tune=zerolatency", br)
 	}
