@@ -45,11 +45,11 @@ All files still import `pkg/ffmpeg` via the compat layer. Each should be migrate
 ### HLS session (pkg/hls/session.go)
 - [x] `StartTranscode()` now uses GStreamer hlssink3 when gstreamer.Available()
 - [x] Falls back to ffmpeg when GStreamer unavailable
-- [ ] Local duplicate helpers (`mapEncoderHW`, `isHTTPURL`, `isRTSP`, `isHEVC`) should be deleted, replaced with `media.*`
+- [x] Local duplicate helpers deleted, replaced with `media.MapEncoderHW`, `media.IsHTTPURL`, `media.IsRTSPURL`, `media.IsHEVC`
 
 ### Proxy transcode (pkg/service/proxy.go)
 - [x] `startFFmpeg()` now delegates to `startGStreamerProxy()` when gstreamer.Available()
-- [ ] `startFFmpeg()` should be renamed `startTranscoder()`
+- [x] `startFFmpeg()` renamed to `startTranscoder()`, `waitFFmpeg` to `waitTranscoder`, log messages updated
 - [ ] ffmpeg fallback still uses profile.Args with `{input}` substitution
 
 ### VOD file transcode (pkg/service/vod_probe.go)
@@ -130,3 +130,20 @@ After all Phase 3 + Phase 4 items are done:
 - [ ] `SourceProfile.Deinterlace` exists but is NOT used by GStreamer pipeline builder
 - [ ] Should add deinterlace element to pipeline when enabled
 - [ ] GStreamer: `deinterlace` (software) or `vaapideinterlace` (hardware)
+- [ ] NOTE: Do NOT use `videoconvert ! deinterlace` between hw decode/encode — causes 100% CPU
+
+## Session management (fixed 2026-04-12)
+- [x] Linger timer wired (30s) — sessions persist for channel switching
+- [x] GStreamer bus loop break labels fixed (EOS/error now exit properly)
+- [ ] ProbeCache initialization inconsistent between HDHR (SetProbeCache) and SAT>IP (constructor)
+
+## Jellyfin VOD library (fixed 2026-04-12)
+- [x] Movies/series filtered by CacheType=="local" (tvproxy-streams only)
+- [ ] Consider adding per-M3U-account JellyfinVOD toggle for finer control
+
+## GStreamer plugin integration
+- [x] Three plugins built as single .so (tvproxydemux, tvproxymux, tvproxysrc)
+- [x] Plugin detection via gst.Find() at runtime
+- [x] Plugin pipeline used for copy mode, manual pipeline for transcode
+- [ ] tvproxymux can't accept encoder output directly (needs auto-parser to handle dynamic caps)
+- [ ] tvproxysrc RTSP support implemented but not verified end-to-end through tvproxy
