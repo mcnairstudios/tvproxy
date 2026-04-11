@@ -102,15 +102,6 @@ func settings() *defaults.FFmpegSettings {
 	return &merged
 }
 
-func DefaultContainer(videoCodec string) string {
-	switch videoCodec {
-	case "av1":
-		return "matroska"
-	default:
-		return "mpegts"
-	}
-}
-
 func buildVFChain(hwaccel, videoCodec string, deinterlace bool) []string {
 	if videoCodec == "copy" {
 		return nil

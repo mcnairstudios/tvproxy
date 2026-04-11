@@ -1,36 +1,16 @@
-package ffmpeg
+package media
 
 import (
-	"regexp"
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"time"
+	"unicode"
 )
 
-func ShellSplit(s string) []string {
-	var args []string
-	var current strings.Builder
-	inDouble, inSingle := false, false
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '"' && !inSingle:
-			inDouble = !inDouble
-		case c == '\'' && !inDouble:
-			inSingle = !inSingle
-		case (c == ' ' || c == '\n' || c == '\r' || c == '\t') && !inDouble && !inSingle:
-			if current.Len() > 0 {
-				args = append(args, current.String())
-				current.Reset()
-			}
-		default:
-			current.WriteByte(c)
-		}
-	}
-	if current.Len() > 0 {
-		args = append(args, current.String())
-	}
-	return args
+func StreamHash(url string) string {
+	sum := sha256.Sum256([]byte(url))
+	return fmt.Sprintf("%x", sum)[:16]
 }
 
 func IsHTTPURL(s string) bool {
@@ -41,91 +21,119 @@ func IsRTSPURL(s string) bool {
 	return strings.HasPrefix(s, "rtsp://") || strings.HasPrefix(s, "rtsps://")
 }
 
-var ffmpegNoisePatterns = []string{
-	"non-existing PPS",
-	"non-existing SPS",
-	"no frame!",
-	"skipping",
-	"Skipping",
-	"missing picture",
-	"concealing",
-	"decode_slice_header",
-	"error while decoding",
-	"missing reference picture",
-	"reference picture reordering",
-	"Last message repeated",
-	"undecodable NALU",
+func ShellSplit(s string) []string {
+	var args []string
+	var current strings.Builder
+	inQuote := false
+	quoteChar := byte(0)
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inQuote {
+			if c == quoteChar {
+				inQuote = false
+			} else {
+				current.WriteByte(c)
+			}
+		} else if c == '\'' || c == '"' {
+			inQuote = true
+			quoteChar = c
+		} else if c == ' ' || c == '\t' {
+			if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+		} else {
+			current.WriteByte(c)
+		}
+	}
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args
+}
+
+func SanitizeFilename(title string, t time.Time) string {
+	ts := t.Format("20060102_1504")
+	clean := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || r == '-' || r == '_' || r == '(' || r == ')' {
+			return r
+		}
+		return '_'
+	}, title)
+	clean = strings.TrimSpace(clean)
+	if clean == "" {
+		clean = "recording"
+	}
+	return strings.ReplaceAll(clean, " ", "_") + "_" + ts
 }
 
 func IsFFmpegNoise(line string) bool {
-	for _, pattern := range ffmpegNoisePatterns {
-		if strings.Contains(line, pattern) {
+	noisy := []string{
+		"Last message repeated",
+		"non-existing PPS",
+		"mmco: unref short failure",
+		"no frame!",
+		"non-monotonic DTS",
+		"Discarded",
+	}
+	for _, n := range noisy {
+		if strings.Contains(line, n) {
 			return true
 		}
 	}
 	return false
 }
 
-var nonAlphanumRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
-
-func SanitizeFilename(title string, t time.Time) string {
-	name := nonAlphanumRe.ReplaceAllString(title, "_")
-	name = strings.Trim(name, "_")
-	if len(name) > 60 {
-		name = name[:60]
-	}
-	if name == "" {
-		name = "recording"
-	}
-	return name + "_" + t.Format("20060102_1504")
-}
-
-func MapEncoder(codec string) string {
-	return MapEncoderHW(codec, "")
-}
-
 func MapEncoderHW(codec, hwaccel string) string {
-	switch codec {
-	case "", "copy":
-		return "copy"
-	case "h264":
-		switch hwaccel {
-		case "qsv":
-			return "h264_qsv"
-		case "nvenc", "cuda":
-			return "h264_nvenc"
-		case "vaapi":
+	switch hwaccel {
+	case "vaapi":
+		switch codec {
+		case "h264":
 			return "h264_vaapi"
-		case "videotoolbox":
-			return "h264_videotoolbox"
-		default:
-			return "libx264"
-		}
-	case "h265", "hevc":
-		switch hwaccel {
-		case "qsv":
-			return "hevc_qsv"
-		case "nvenc", "cuda":
-			return "hevc_nvenc"
-		case "vaapi":
+		case "h265", "hevc":
 			return "hevc_vaapi"
-		case "videotoolbox":
-			return "hevc_videotoolbox"
-		default:
-			return "libx265"
-		}
-	case "av1":
-		switch hwaccel {
-		case "qsv":
-			return "av1_qsv"
-		case "nvenc", "cuda":
-			return "av1_nvenc"
-		case "vaapi":
+		case "av1":
 			return "av1_vaapi"
-		default:
-			return "libsvtav1"
 		}
+	case "qsv":
+		switch codec {
+		case "h264":
+			return "h264_qsv"
+		case "h265", "hevc":
+			return "hevc_qsv"
+		}
+	case "nvenc", "cuda":
+		switch codec {
+		case "h264":
+			return "h264_nvenc"
+		case "h265", "hevc":
+			return "hevc_nvenc"
+		}
+	case "videotoolbox":
+		switch codec {
+		case "h264":
+			return "h264_videotoolbox"
+		case "h265", "hevc":
+			return "hevc_videotoolbox"
+		}
+	}
+	switch codec {
+	case "h264":
+		return "libx264"
+	case "h265", "hevc":
+		return "libx265"
+	case "av1":
+		return "libsvtav1"
+	}
+	return codec
+}
+
+func DefaultContainer(videoCodec string) string {
+	switch videoCodec {
+	case "av1":
+		return "matroska"
 	default:
-		return codec
+		return "mpegts"
 	}
 }
