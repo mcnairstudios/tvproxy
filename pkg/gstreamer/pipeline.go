@@ -166,30 +166,31 @@ func buildVideoStr(opts PipelineOpts) string {
 	}
 
 	if outCodec == "copy" || outCodec == vcodec {
-		parser, configInterval := videoParser(outCodec, vcodec)
-		return fmt.Sprintf("demux. ! queue ! %s %s ! mux.", parser, configInterval)
+		parser := videoParserStr(outCodec, vcodec)
+		return fmt.Sprintf("demux. ! queue ! %s ! mux.", parser)
 	}
 
 	dec := hwDecoder(vcodec, opts.HWAccel)
 	enc := hwEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)
-	parser, configInterval := videoParser(outCodec, "")
+	parser := videoParserStr(outCodec, "")
 
-	return fmt.Sprintf("demux. ! queue ! %s ! %s ! %s %s ! mux.", dec, enc, parser, configInterval)
+	return fmt.Sprintf("demux. ! queue ! %s ! %s ! %s ! mux.", dec, enc, parser)
 }
 
 func buildSinkStr(opts PipelineOpts) string {
-	switch opts.OutputFormat {
-	case OutputMP4:
+	outCodec := normalizeCodec(opts.OutputVideoCodec)
+	useMP4 := opts.OutputFormat == OutputMP4 || outCodec == "av1"
+
+	if useMP4 {
 		if opts.RecordingPath != "" {
 			return fmt.Sprintf("mp4mux name=mux fragment-duration=500 streamable=true ! filesink location=%s", opts.RecordingPath)
 		}
 		return "mp4mux name=mux fragment-duration=500 streamable=true ! fdsink fd=1"
-	default:
-		if opts.RecordingPath != "" {
-			return fmt.Sprintf("mpegtsmux name=mux ! filesink location=%s", opts.RecordingPath)
-		}
-		return "mpegtsmux name=mux ! fdsink fd=1"
 	}
+	if opts.RecordingPath != "" {
+		return fmt.Sprintf("mpegtsmux name=mux ! filesink location=%s", opts.RecordingPath)
+	}
+	return "mpegtsmux name=mux ! fdsink fd=1"
 }
 
 func buildAudioStr(opts PipelineOpts) string {
@@ -224,6 +225,14 @@ func audioInputParser(codec string) string {
 	default:
 		return "aacparse"
 	}
+}
+
+func videoParserStr(outCodec, sourceCodec string) string {
+	name, ci := videoParser(outCodec, sourceCodec)
+	if ci != "" {
+		return name + " " + ci
+	}
+	return name
 }
 
 func videoParser(outCodec, sourceCodec string) (string, string) {

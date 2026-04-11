@@ -501,6 +501,9 @@ func (s *Server) buildMovieItems(ctx context.Context, searchTerm, genres string)
 		if st.VODType != "movie" {
 			continue
 		}
+		if st.CacheType != "local" {
+			continue
+		}
 		if searchTerm != "" {
 			nameMatch := strings.Contains(strings.ToLower(st.Name), searchTerm)
 			collMatch := st.VODCollection != "" && strings.Contains(strings.ToLower(st.VODCollection), searchTerm)
@@ -530,6 +533,9 @@ func (s *Server) buildSeriesItems(ctx context.Context, searchTerm, genres string
 
 	for _, st := range streams {
 		if st.VODType != "series" {
+			continue
+		}
+		if st.CacheType != "local" {
 			continue
 		}
 		key := seriesKey(&st)

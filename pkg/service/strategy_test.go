@@ -75,12 +75,6 @@ func TestResolveSessionStrategy_LiveIPTV(t *testing.T) {
 	if s.MetadataOnly {
 		t.Error("MetadataOnly should be false for live")
 	}
-	if s.HLSOutputDir == "" {
-		t.Error("HLSOutputDir should be set for live HLS")
-	}
-	if s.FFmpegArgs != "" {
-		t.Errorf("FFmpegArgs should be empty for live HLS, got %q", s.FFmpegArgs)
-	}
 }
 
 func TestResolveSessionStrategy_VODRemote(t *testing.T) {

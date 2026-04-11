@@ -17,6 +17,7 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
+	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
 type ProfileSettings struct {
@@ -84,7 +85,7 @@ func (s *Session) StartTranscode(ctx context.Context, startNumber int, startTime
 
 	if gstreamer.Available() {
 		inputType := "http"
-		if isRTSP(s.StreamURL) {
+		if media.IsRTSPURL(s.StreamURL) {
 			inputType = "rtsp"
 		}
 		outVideo := s.Profile.VideoCodec
@@ -162,7 +163,7 @@ func (s *Session) shouldPipeHTTP() bool {
 	if s.httpClient == nil {
 		return false
 	}
-	return isHTTPURL(s.StreamURL)
+	return media.IsHTTPURL(s.StreamURL)
 }
 
 func (s *Session) segmentExt() string {
@@ -204,7 +205,7 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64, pipeHTT
 			"-fflags", "+genpts+discardcorrupt",
 			"-i", "pipe:0",
 		)
-	} else if isRTSP(s.StreamURL) {
+	} else if media.IsRTSPURL(s.StreamURL) {
 		args = append(args,
 			"-rtsp_transport", "tcp",
 			"-analyzeduration", "1000000",
@@ -224,7 +225,7 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64, pipeHTT
 		)
 	}
 
-	videoCodec := mapEncoderHW(s.Profile.VideoCodec, s.Profile.HWAccel)
+	videoCodec := media.MapEncoderHW(s.Profile.VideoCodec, s.Profile.HWAccel)
 	audioCodec := s.Profile.AudioCodec
 	if audioCodec == "" || audioCodec == "copy" {
 		audioCodec = "copy"
@@ -243,7 +244,7 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64, pipeHTT
 		"-c:v", videoCodec,
 	)
 
-	if isHEVC(videoCodec) {
+	if media.IsHEVC(videoCodec) {
 		args = append(args, "-tag:v:0", "hvc1")
 	}
 
@@ -272,7 +273,7 @@ func (s *Session) buildFFmpegArgs(startNumber int, startTimeTicks int64, pipeHTT
 	args = append(args, "-c:a", audioCodec)
 	if audioCodec != "copy" {
 		args = append(args, "-b:a", "192k", "-ac", "2")
-		if isRTSP(s.StreamURL) || pipeHTTP {
+		if media.IsRTSPURL(s.StreamURL) || pipeHTTP {
 			args = append(args, "-af", "aresample=async=1000:first_pts=0")
 		}
 	}
@@ -392,69 +393,4 @@ func (s *Session) IdleSince() time.Duration {
 	return d
 }
 
-func mapEncoder(codec string) string {
-	return mapEncoderHW(codec, "")
-}
-
-func mapEncoderHW(codec, hwaccel string) string {
-	switch codec {
-	case "", "copy":
-		return "copy"
-	case "h264":
-		switch hwaccel {
-		case "qsv":
-			return "h264_qsv"
-		case "nvenc", "cuda":
-			return "h264_nvenc"
-		case "vaapi":
-			return "h264_vaapi"
-		case "videotoolbox":
-			return "h264_videotoolbox"
-		default:
-			return "libx264"
-		}
-	case "h265", "hevc":
-		switch hwaccel {
-		case "qsv":
-			return "hevc_qsv"
-		case "nvenc", "cuda":
-			return "hevc_nvenc"
-		case "vaapi":
-			return "hevc_vaapi"
-		case "videotoolbox":
-			return "hevc_videotoolbox"
-		default:
-			return "libx265"
-		}
-	case "av1":
-		switch hwaccel {
-		case "qsv":
-			return "av1_qsv"
-		case "nvenc", "cuda":
-			return "av1_nvenc"
-		case "vaapi":
-			return "av1_vaapi"
-		default:
-			return "libsvtav1"
-		}
-	default:
-		return codec
-	}
-}
-
-func isHTTPURL(url string) bool {
-	return strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")
-}
-
-func isRTSP(url string) bool {
-	return strings.HasPrefix(url, "rtsp://") || strings.HasPrefix(url, "rtsps://")
-}
-
-func isHEVC(codec string) bool {
-	switch codec {
-	case "libx265", "hevc", "hevc_vaapi", "hevc_qsv", "hevc_nvenc", "hevc_videotoolbox":
-		return true
-	}
-	return false
-}
 

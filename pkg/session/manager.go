@@ -329,8 +329,13 @@ func (m *Manager) RemoveConsumer(channelID string, consumerID string) {
 		if s.HasRecordingConsumer() {
 			m.log.Info().Str("channel_id", channelID).Msg("viewer gone but recording active, keeping session")
 		} else {
-			m.log.Info().Str("channel_id", channelID).Msg("no consumers, cleaning up session")
-			go m.stopAndCleanup(channelID, s)
+			s.mu.Lock()
+			s.lingerTimer = time.AfterFunc(lingerDuration, func() {
+				m.log.Info().Str("channel_id", channelID).Msg("linger expired, cleaning up session")
+				go m.stopAndCleanup(channelID, s)
+			})
+			s.mu.Unlock()
+			m.log.Info().Str("channel_id", channelID).Dur("linger", lingerDuration).Msg("no consumers, starting linger timer")
 		}
 	}
 }
@@ -343,6 +348,13 @@ func (m *Manager) stopAndCleanup(channelID string, s *Session) {
 	}
 	delete(m.sessions, channelID)
 	m.mu.Unlock()
+
+	s.mu.Lock()
+	if s.lingerTimer != nil {
+		s.lingerTimer.Stop()
+		s.lingerTimer = nil
+	}
+	s.mu.Unlock()
 
 	s.cancel()
 
@@ -1062,10 +1074,11 @@ func (m *Manager) runGStreamerNative(ctx context.Context, s *Session, pipelineSt
 	go m.pollFileProgress(ctx, s)
 
 	bus := pipeline.GetBus()
+loop:
 	for {
 		msg := bus.TimedPop(gst.ClockTime(500000000))
 		if ctx.Err() != nil {
-			break
+			break loop
 		}
 		if msg == nil {
 			continue
@@ -1073,17 +1086,14 @@ func (m *Manager) runGStreamerNative(ctx context.Context, s *Session, pipelineSt
 		switch msg.Type() {
 		case gst.MessageEOS:
 			m.log.Info().Str("session_id", s.ID).Msg("gstreamer EOS")
-			break
+			break loop
 		case gst.MessageError:
 			gstErr := msg.ParseError()
 			m.log.Error().Str("session_id", s.ID).Err(gstErr).Msg("gstreamer error")
 			s.setError(fmt.Errorf("gstreamer: %w", gstErr))
 			s.setLastStderr(gstErr.Error())
-			break
-		default:
-			continue
+			break loop
 		}
-		break
 	}
 
 	pipeline.SetState(gst.StateNull)

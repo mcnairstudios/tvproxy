@@ -318,7 +318,7 @@ func (s *ProxyService) openUpstream(ctx context.Context, channelID string, strea
 				Args:    "-hide_banner -loglevel warning -i {input} -c copy -f mpegts pipe:1",
 			}
 		}
-		return s.startFFmpeg(ctx, channelID, stream, p)
+		return s.startTranscoder(ctx, channelID, stream, p)
 	default:
 		return s.startHTTPPassthrough(ctx, channelID, stream)
 	}
@@ -341,7 +341,7 @@ func (s *ProxyService) startHTTPPassthrough(ctx context.Context, channelID strin
 	return resp.Body, nil
 }
 
-func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream *models.Stream, profile *models.StreamProfile) (io.ReadCloser, error) {
+func (s *ProxyService) startTranscoder(ctx context.Context, channelID string, stream *models.Stream, profile *models.StreamProfile) (io.ReadCloser, error) {
 	if gstreamer.Available() {
 		return s.startGStreamerProxy(ctx, channelID, stream, profile)
 	}
@@ -364,13 +364,13 @@ func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream
 		Str("profile", profile.Name).
 		Bool("direct_input", useDirectInput).
 		Strs("args", args).
-		Msg("starting transcoding (ffmpeg)")
+		Msg("starting transcoding")
 
 	var httpBody io.ReadCloser
 	if !useDirectInput {
 		resp, err := httputil.Fetch(ctx, s.httpClient, s.config, stream.URL)
 		if err != nil {
-			s.log.Error().Err(err).Str("channel_id", channelID).Str("url", stream.URL).Msg("ffmpeg upstream connection failed")
+			s.log.Error().Err(err).Str("channel_id", channelID).Str("url", stream.URL).Msg("transcoder upstream connection failed")
 			return nil, fmt.Errorf("upstream connection failed: %w", err)
 		}
 		if resp.StatusCode != http.StatusOK {
@@ -404,36 +404,36 @@ func (s *ProxyService) startFFmpeg(ctx context.Context, channelID string, stream
 		if httpBody != nil {
 			httpBody.Close()
 		}
-		return nil, fmt.Errorf("starting ffmpeg: %w", err)
+		return nil, fmt.Errorf("starting transcoder: %w", err)
 	}
 
-	go s.logFFmpegStderr(channelID, stderr)
-	go s.waitFFmpeg(ctx, channelID, cmd, httpBody)
+	go s.logTranscoderStderr(channelID, stderr)
+	go s.waitTranscoder(ctx, channelID, cmd, httpBody)
 
 	return stdout, nil
 }
 
-func (s *ProxyService) waitFFmpeg(ctx context.Context, channelID string, cmd *exec.Cmd, stdinBody io.Closer) {
+func (s *ProxyService) waitTranscoder(ctx context.Context, channelID string, cmd *exec.Cmd, stdinBody io.Closer) {
 	waitErr := cmd.Wait()
 	if stdinBody != nil {
 		stdinBody.Close()
 	}
 	if waitErr == nil {
-		s.log.Info().Str("channel_id", channelID).Msg("proxy ffmpeg finished (stream ended)")
+		s.log.Info().Str("channel_id", channelID).Msg("proxy transcoder finished (stream ended)")
 		return
 	}
 	if ctx.Err() != nil && cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == -1 {
-		s.log.Info().Str("channel_id", channelID).Msg("proxy ffmpeg stopped (client disconnected)")
+		s.log.Info().Str("channel_id", channelID).Msg("proxy transcoder stopped (client disconnected)")
 		return
 	}
 	exitCode := -1
 	if cmd.ProcessState != nil {
 		exitCode = cmd.ProcessState.ExitCode()
 	}
-	s.log.Error().Err(waitErr).Int("exit_code", exitCode).Str("channel_id", channelID).Msg("ffmpeg exited with error")
+	s.log.Error().Err(waitErr).Int("exit_code", exitCode).Str("channel_id", channelID).Msg("transcoder exited with error")
 }
 
-func (s *ProxyService) logFFmpegStderr(channelID string, stderr io.ReadCloser) {
+func (s *ProxyService) logTranscoderStderr(channelID string, stderr io.ReadCloser) {
 	defer stderr.Close()
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
@@ -441,7 +441,7 @@ func (s *ProxyService) logFFmpegStderr(channelID string, stderr io.ReadCloser) {
 		if media.IsFFmpegNoise(line) {
 			continue
 		}
-		s.log.Warn().Str("channel_id", channelID).Str("ffmpeg", line).Msg("ffmpeg output")
+		s.log.Warn().Str("channel_id", channelID).Str("stderr", line).Msg("transcoder output")
 	}
 }
 
@@ -635,27 +635,27 @@ func (s *ProxyService) ProxyRawStream(ctx context.Context, w http.ResponseWriter
 	}
 
 	if profile != nil && profile.Args != "" {
-		return s.proxyRawStreamFFmpeg(ctx, w, r, stream, profile, viewerID)
+		return s.proxyRawStreamTranscode(ctx, w, r, stream, profile, viewerID)
 	}
 	return s.proxyRawStreamPassthrough(ctx, w, r, stream, viewerID)
 }
 
-func (s *ProxyService) proxyRawStreamFFmpeg(ctx context.Context, w http.ResponseWriter, r *http.Request, stream *models.Stream, profile *models.StreamProfile, viewerID string) error {
+func (s *ProxyService) proxyRawStreamTranscode(ctx context.Context, w http.ResponseWriter, r *http.Request, stream *models.Stream, profile *models.StreamProfile, viewerID string) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return fmt.Errorf("streaming not supported")
 	}
 
-	ffmpegCtx, cancel := context.WithCancel(context.Background())
-	reader, err := s.startFFmpeg(ffmpegCtx, "", stream, profile)
+	transcoderCtx, cancel := context.WithCancel(context.Background())
+	reader, err := s.startTranscoder(transcoderCtx, "", stream, profile)
 	if err != nil {
 		cancel()
-		return fmt.Errorf("starting ffmpeg: %w", err)
+		return fmt.Errorf("starting transcoder: %w", err)
 	}
 	defer cancel()
 	defer reader.Close()
 
-	s.log.Info().Str("stream_id", stream.ID).Str("profile", profile.Name).Msg("raw stream ffmpeg started")
+	s.log.Info().Str("stream_id", stream.ID).Str("profile", profile.Name).Msg("raw stream transcoder started")
 
 	writeStreamHeaders(w, ContentTypeForProfile("ffmpeg", profile))
 	flusher.Flush()

@@ -85,6 +85,14 @@ func IsFFmpegNoise(line string) bool {
 	return false
 }
 
+func IsHEVC(codec string) bool {
+	switch codec {
+	case "libx265", "hevc", "hevc_vaapi", "hevc_qsv", "hevc_nvenc", "hevc_videotoolbox":
+		return true
+	}
+	return false
+}
+
 func MapEncoderHW(codec, hwaccel string) string {
 	switch hwaccel {
 	case "vaapi":
