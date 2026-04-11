@@ -108,7 +108,6 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 	}
 	s.mu.Unlock()
 	delete(m.sessions, channelID)
-	s.StopPipeline()
 	s.cancel()
 	<-s.done
 	os.RemoveAll(s.TempDir)
@@ -345,7 +344,6 @@ func (m *Manager) stopAndCleanup(channelID string, s *Session) {
 	delete(m.sessions, channelID)
 	m.mu.Unlock()
 
-	s.StopPipeline()
 	s.cancel()
 
 	<-s.done
@@ -1043,7 +1041,7 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 func (m *Manager) runGStreamerNative(ctx context.Context, s *Session, pipelineStr string, inputURL string) {
 	m.log.Info().Str("session_id", s.ID).Str("pipeline", pipelineStr).Msg("starting native gstreamer pipeline")
 
-	pipeline, err := gst.NewPipelineFromString(pipelineStr)
+	pipeline, err := gstreamer.BuildNativeFromOpts(s.startOpts.OutputVideoCodec, s.startOpts.OutputAudioCodec, s.startOpts.OutputHWAccel, inputURL, s.FilePath)
 	if err != nil {
 		s.setError(fmt.Errorf("gstreamer pipeline creation failed: %w", err))
 		return

@@ -86,7 +86,7 @@ func buildPipelineStr(opts PipelineOpts) string {
 	var parts []string
 
 	parts = append(parts, buildSource(opts))
-	parts = append(parts, "! parsebin name=demux")
+	parts = append(parts, "! tsparse set-timestamps=true ! tsdemux name=demux")
 	parts = append(parts, buildVideoStr(opts))
 	parts = append(parts, buildSinkStr(opts))
 	parts = append(parts, buildAudioStr(opts))
@@ -116,27 +116,25 @@ func buildVideoStr(opts PipelineOpts) string {
 		outCodec = "copy"
 	}
 
-	videoCaps := videoCapsFilter(vcodec)
-
 	if outCodec == "copy" || outCodec == vcodec {
 		parser, configInterval := videoParser(outCodec, vcodec)
-		return fmt.Sprintf("demux. ! %s ! queue ! %s %s ! mux.", videoCaps, parser, configInterval)
+		return fmt.Sprintf("demux. ! queue ! %s %s ! mux.", parser, configInterval)
 	}
 
 	dec := hwDecoder(vcodec, opts.HWAccel)
 	enc := hwEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)
 	parser, configInterval := videoParser(outCodec, "")
 
-	return fmt.Sprintf("demux. ! %s ! queue ! %s ! %s ! %s %s ! mux.", videoCaps, dec, enc, parser, configInterval)
+	return fmt.Sprintf("demux. ! queue ! %s ! %s ! %s %s ! mux.", dec, enc, parser, configInterval)
 }
 
 func buildSinkStr(opts PipelineOpts) string {
 	switch opts.OutputFormat {
 	case OutputMP4:
 		if opts.RecordingPath != "" {
-			return fmt.Sprintf("isofmp4mux name=mux fragment-duration=1000 ! filesink location=%s", opts.RecordingPath)
+			return fmt.Sprintf("mp4mux name=mux fragment-duration=500 streamable=true ! filesink location=%s", opts.RecordingPath)
 		}
-		return "isofmp4mux name=mux fragment-duration=1000 ! fdsink fd=1"
+		return "mp4mux name=mux fragment-duration=500 streamable=true ! fdsink fd=1"
 	default:
 		if opts.RecordingPath != "" {
 			return fmt.Sprintf("mpegtsmux name=mux ! filesink location=%s", opts.RecordingPath)
@@ -152,40 +150,30 @@ func buildAudioStr(opts PipelineOpts) string {
 		outAudio = "aac"
 	}
 
-	audioCaps := audioCapsFilter(acodec)
-
 	if outAudio == "copy" && canCopyAudio(acodec, opts.OutputFormat) {
 		parser := audioParser(acodec)
-		return fmt.Sprintf("demux. ! %s ! queue ! %s ! mux.", audioCaps, parser)
+		return fmt.Sprintf("demux. ! queue ! %s ! mux.", parser)
 	}
 
+	inputParser := audioInputParser(acodec)
 	dec := audioDecoder(acodec)
-	return fmt.Sprintf("demux. ! %s ! queue ! %s ! audioconvert ! audioresample ! audio/x-raw,channels=2 ! faac ! aacparse ! mux.", audioCaps, dec)
+	return fmt.Sprintf("demux. ! queue ! %s ! %s ! audioconvert ! audioresample ! audio/x-raw,channels=2 ! faac ! aacparse ! mux.", inputParser, dec)
 }
 
-func videoCapsFilter(codec string) string {
+func audioInputParser(codec string) string {
 	switch codec {
-	case "h264":
-		return "video/x-h264"
-	case "h265":
-		return "video/x-h265"
-	case "mpeg2video":
-		return "video/mpeg"
-	default:
-		return "video/x-h264"
-	}
-}
-
-func audioCapsFilter(codec string) string {
-	switch codec {
+	case "aac_latm":
+		return "aacparse"
+	case "aac":
+		return "aacparse"
 	case "ac3":
-		return "audio/x-ac3"
+		return "ac3parse"
 	case "eac3":
-		return "audio/x-eac3"
+		return "identity"
 	case "mp2", "mp3":
-		return "audio/mpeg,mpegversion=1"
+		return "mpegaudioparse"
 	default:
-		return "audio/mpeg"
+		return "aacparse"
 	}
 }
 
