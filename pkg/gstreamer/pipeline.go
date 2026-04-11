@@ -101,26 +101,26 @@ func buildPluginPipelineStr(opts PipelineOpts) string {
 	}
 
 	if outCodec == "copy" || outCodec == normalizeCodec(opts.VideoCodec) {
-		parts = append(parts, "d.video")
+		parts = append(parts, "d.video ! m.video")
 	} else {
 		dec := hwDecoder(normalizeCodec(opts.VideoCodec), opts.HWAccel)
 		enc := hwEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)
-		parts = append(parts, fmt.Sprintf("d.video ! %s ! %s", dec, enc))
+		parts = append(parts, fmt.Sprintf("d.video ! %s ! %s ! m.video", dec, enc))
 	}
+
+	parts = append(parts, "d.audio ! m.audio")
 
 	muxFormat := "mp4"
 	if opts.OutputFormat == OutputMPEGTS {
 		muxFormat = "mpegts"
 	}
-	parts = append(parts, fmt.Sprintf("! tvproxymux name=m output-format=%s", muxFormat))
+	parts = append(parts, fmt.Sprintf("tvproxymux name=m output-format=%s", muxFormat))
 
 	if opts.RecordingPath != "" {
 		parts = append(parts, fmt.Sprintf("! filesink location=%s", opts.RecordingPath))
 	} else {
 		parts = append(parts, "! fdsink fd=1")
 	}
-
-	parts = append(parts, "d.audio ! m.")
 
 	return strings.Join(parts, " ")
 }
