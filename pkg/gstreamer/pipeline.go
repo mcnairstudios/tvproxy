@@ -83,6 +83,49 @@ func BuildFromProbe(probe *media.ProbeResult, inputURL string, opts PipelineOpts
 }
 
 func buildPipelineStr(opts PipelineOpts) string {
+	if PluginsAvailable() {
+		return buildPluginPipelineStr(opts)
+	}
+	return buildManualPipelineStr(opts)
+}
+
+func buildPluginPipelineStr(opts PipelineOpts) string {
+	var parts []string
+
+	parts = append(parts, fmt.Sprintf("tvproxysrc location=%s", opts.InputURL))
+	parts = append(parts, "! tvproxydemux name=d")
+
+	outCodec := normalizeCodec(opts.OutputVideoCodec)
+	if outCodec == "" || outCodec == "default" {
+		outCodec = "copy"
+	}
+
+	if outCodec == "copy" || outCodec == normalizeCodec(opts.VideoCodec) {
+		parts = append(parts, "d.video")
+	} else {
+		dec := hwDecoder(normalizeCodec(opts.VideoCodec), opts.HWAccel)
+		enc := hwEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)
+		parts = append(parts, fmt.Sprintf("d.video ! %s ! %s", dec, enc))
+	}
+
+	muxFormat := "mp4"
+	if opts.OutputFormat == OutputMPEGTS {
+		muxFormat = "mpegts"
+	}
+	parts = append(parts, fmt.Sprintf("! tvproxymux name=m output-format=%s", muxFormat))
+
+	if opts.RecordingPath != "" {
+		parts = append(parts, fmt.Sprintf("! filesink location=%s", opts.RecordingPath))
+	} else {
+		parts = append(parts, "! fdsink fd=1")
+	}
+
+	parts = append(parts, "d.audio ! m.")
+
+	return strings.Join(parts, " ")
+}
+
+func buildManualPipelineStr(opts PipelineOpts) string {
 	var parts []string
 
 	parts = append(parts, buildSource(opts))

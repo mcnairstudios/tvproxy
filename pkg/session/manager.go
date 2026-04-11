@@ -1041,7 +1041,13 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 func (m *Manager) runGStreamerNative(ctx context.Context, s *Session, pipelineStr string, inputURL string) {
 	m.log.Info().Str("session_id", s.ID).Str("pipeline", pipelineStr).Msg("starting native gstreamer pipeline")
 
-	pipeline, err := gstreamer.BuildNativeFromOpts(s.startOpts.OutputVideoCodec, s.startOpts.OutputAudioCodec, s.startOpts.OutputHWAccel, inputURL, s.FilePath)
+	var pipeline *gst.Pipeline
+	var err error
+	if gstreamer.PluginsAvailable() {
+		pipeline, err = gst.NewPipelineFromString(pipelineStr)
+	} else {
+		pipeline, err = gstreamer.BuildNativeFromOpts(s.startOpts.OutputVideoCodec, s.startOpts.OutputAudioCodec, s.startOpts.OutputHWAccel, inputURL, s.FilePath)
+	}
 	if err != nil {
 		s.setError(fmt.Errorf("gstreamer pipeline creation failed: %w", err))
 		return
