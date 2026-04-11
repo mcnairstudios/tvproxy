@@ -83,6 +83,24 @@ After all Phase 3 + Phase 4 items are done:
 - [ ] GStreamer element properties (bitrate, tune, etc.) need a config path
 - [ ] Encoder presets currently ffmpeg-specific (libx264 preset, vaapi quality)
 
+## Frontend: auto-refresh after scan/refresh
+- [ ] HDHR scan completion should trigger `rebuildStreamNav()` to update sidebar streams
+- [ ] M3U refresh completion should do the same
+- [ ] SAT>IP scan completion should do the same
+- [ ] The scan progress polling already knows when state=done — add nav rebuild there
+
+## CRITICAL: Live channel HLS output broken
+- [ ] GStreamer session uses OutputMPEGTS but browser expects HLS at /vod/{id}/hls/playlist.m3u8
+- [ ] For browser playback (delivery=hls), GStreamer pipeline needs OutputFormat=OutputHLS with hlssink3
+- [ ] The session manager's resolveTranscoder sets OutputMPEGTS — needs to check if HLS is required
+- [ ] HDHR streams need: souphttpsrc → tsdemux → h264parse → hlssink3 (not mpegtsmux → filesink)
+
+## Strategy layer not wired to GStreamer
+- [ ] `resolveVideoAction`/`resolveAudioAction` from strategy.go not passed to PipelineOpts
+- [ ] GStreamer pipeline always uses global defaults instead of copy-when-codecs-match
+- [ ] Need: if source codec == output codec → OutputVideoCodec = "copy"
+- [ ] Need: audio codec compatibility check (AAC-LATM needs transcode, plain AAC can copy)
+
 ## CustomPipeline override
 - [ ] Add `CustomPipeline string` to `gstreamer.PipelineOpts`
 - [ ] If set, `BuildPipeline()` returns that string directly
