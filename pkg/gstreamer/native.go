@@ -130,7 +130,7 @@ func buildNativeOutputPipeline(opts PipelineOpts) []string {
 		dir := opts.HLSDir
 		parts = append(parts, "!", fmt.Sprintf("hlssink3 name=mux target-duration=%d playlist-location=%s/playlist.m3u8 location=%s/seg%%05d.ts", seg, dir, dir))
 	case OutputMP4:
-		parts = append(parts, "!", "mp4mux", "fragment-duration=1000", "streamable=true")
+		parts = append(parts, "!", "isofmp4mux", "fragment-duration=1000")
 		if opts.RecordingPath != "" {
 			parts = append(parts, "!", fmt.Sprintf("filesink location=%s", opts.RecordingPath))
 		} else {

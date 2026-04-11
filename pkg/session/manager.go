@@ -705,7 +705,7 @@ func (m *Manager) resolveTranscoder(opts StartOpts, filePath string) (string, []
 			OutputVideoCodec: opts.OutputVideoCodec,
 			OutputAudioCodec: opts.OutputAudioCodec,
 			OutputBitrate:    0,
-			OutputFormat:     gstreamer.OutputMPEGTS,
+			OutputFormat:     gstreamer.OutputMP4,
 			HWAccel:          hwAccel,
 			RecordingPath:    filePath,
 		}
@@ -917,7 +917,8 @@ func (m *Manager) logSignalAsync(sessionID, channelID, streamURL string) {
 func (m *Manager) run(ctx context.Context, s *Session, command string, args []string, inputURL string) {
 	defer s.markDone()
 
-	m.log.Info().Str("session_id", s.ID).Strs("args", args).Msg("starting ffmpeg")
+	isGStreamer := strings.Contains(command, "gst-launch")
+	m.log.Info().Str("session_id", s.ID).Str("command", command).Msg("starting transcoder")
 
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Cancel = func() error {
@@ -930,12 +931,12 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 	cmd.WaitDelay = waitDelay
 
 	var tsHeader []byte
-	if m.probeCache != nil {
+	if !isGStreamer && m.probeCache != nil {
 		tsHeader, _ = m.probeCache.GetTSHeader(ffmpeg.StreamHash(inputURL))
 	}
 
 	var httpResp *http.Response
-	if tsHeader != nil && ffmpeg.IsHTTPURL(inputURL) && s.HLSOutputDir == "" {
+	if !isGStreamer && tsHeader != nil && ffmpeg.IsHTTPURL(inputURL) && s.HLSOutputDir == "" {
 		m.log.Info().Str("session_id", s.ID).Int("header_size", len(tsHeader)).Msg("injecting cached TS header for fast startup")
 		resp, err := httputil.Fetch(ctx, m.clientForSession(s), m.config, inputURL)
 		if err != nil {
@@ -956,7 +957,7 @@ func (m *Manager) run(ctx context.Context, s *Session, command string, args []st
 			io.Copy(pw, resp.Body)
 			pw.Close()
 		}()
-	} else if ffmpeg.IsHTTPURL(inputURL) && s.UseWireGuard && s.HLSOutputDir == "" {
+	} else if !isGStreamer && ffmpeg.IsHTTPURL(inputURL) && s.UseWireGuard && s.HLSOutputDir == "" {
 		m.log.Info().Str("session_id", s.ID).Str("url", inputURL).Msg("routing upstream via wireguard")
 		resp, err := httputil.Fetch(ctx, m.clientForSession(s), m.config, inputURL)
 		if err != nil {

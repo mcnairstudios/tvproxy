@@ -163,13 +163,20 @@ func hasNALType(payload []byte, nalType byte) bool {
 func parsePATForPMTPID(pkt []byte) uint16 {
 	start := 4
 	if pkt[3]&0x20 != 0 {
+		if int(pkt[4])+5 > tsPacketSize {
+			return 0
+		}
 		start = 5 + int(pkt[4])
 	}
 	if start >= tsPacketSize-1 {
 		return 0
 	}
-	pointer := pkt[start]
-	data := pkt[start+1+int(pointer):]
+	pointer := int(pkt[start])
+	offset := start + 1 + pointer
+	if offset >= len(pkt) {
+		return 0
+	}
+	data := pkt[offset:]
 	if len(data) < 12 {
 		return 0
 	}
@@ -189,26 +196,39 @@ func parsePATForPMTPID(pkt []byte) uint16 {
 func isPMT(pkt []byte) bool {
 	start := 4
 	if pkt[3]&0x20 != 0 {
+		if int(pkt[4])+5 > tsPacketSize {
+			return false
+		}
 		start = 5 + int(pkt[4])
 	}
 	if start >= tsPacketSize-1 {
 		return false
 	}
-	pointer := pkt[start]
-	data := pkt[start+1+int(pointer):]
-	return len(data) > 0 && data[0] == 0x02
+	pointer := int(pkt[start])
+	offset := start + 1 + pointer
+	if offset >= len(pkt) {
+		return false
+	}
+	return pkt[offset] == 0x02
 }
 
 func parsePMTForVideoPID(pkt []byte) uint16 {
 	start := 4
 	if pkt[3]&0x20 != 0 {
+		if int(pkt[4])+5 > tsPacketSize {
+			return 0
+		}
 		start = 5 + int(pkt[4])
 	}
 	if start >= tsPacketSize-1 {
 		return 0
 	}
-	pointer := pkt[start]
-	data := pkt[start+1+int(pointer):]
+	pointer := int(pkt[start])
+	offset := start + 1 + pointer
+	if offset >= len(pkt) {
+		return 0
+	}
+	data := pkt[offset:]
 	if len(data) < 12 {
 		return 0
 	}

@@ -50,3 +50,5 @@ cache/
 jellyfin-openapi-stable.json
 users/
 streams.dat
+streams.bolt
+*.bolt

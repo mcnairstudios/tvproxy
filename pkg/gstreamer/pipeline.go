@@ -273,7 +273,7 @@ func buildMux(opts PipelineOpts) []string {
 			"!", fmt.Sprintf("hlssink3 target-duration=%d playlist-location=%s/playlist.m3u8 location=%s/seg%%05d.ts", seg, dir, dir),
 		}
 	case OutputMP4:
-		return []string{"!", "mp4mux", "fragment-duration=1000", "streamable=true"}
+		return []string{"!", "isofmp4mux", "fragment-duration=1000"}
 	default:
 		return []string{"!", "mpegtsmux"}
 	}

@@ -114,6 +114,12 @@ func (s *ProbeScheduler) nextJob() (ProbeJob, bool) {
 }
 
 func (s *ProbeScheduler) probeOne(ctx context.Context, job ProbeJob) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Error().Interface("panic", r).Str("stream", job.StreamID).Msg("probe panic recovered")
+		}
+	}()
+
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -131,9 +137,13 @@ func (s *ProbeScheduler) probeOne(ctx context.Context, job ProbeJob) {
 	s.probeCache.SaveProbe(hash, result)
 	s.probeCache.SaveProbeByStreamID(job.StreamID, result)
 
-	header, err := ffmpeg.CaptureTPSHeader(probeCtx, job.StreamURL, 5*time.Second)
-	if err == nil && len(header) > 0 {
-		s.probeCache.SaveTSHeader(hash, header)
+	var headerSize int
+	if ffmpeg.IsHTTPURL(job.StreamURL) {
+		header, err := ffmpeg.CaptureTPSHeader(probeCtx, job.StreamURL, 5*time.Second)
+		if err == nil && len(header) > 0 {
+			s.probeCache.SaveTSHeader(hash, header)
+			headerSize = len(header)
+		}
 	}
 
 	vcodec := ""
@@ -148,6 +158,6 @@ func (s *ProbeScheduler) probeOne(ctx context.Context, job ProbeJob) {
 		Str("stream", job.StreamID).
 		Str("video", vcodec).
 		Str("audio", acodec).
-		Int("header_bytes", len(header)).
+		Int("header_bytes", headerSize).
 		Msg("probed stream")
 }

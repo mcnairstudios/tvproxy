@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -64,6 +65,9 @@ func (w *ProbeWorker) queueUnprobed(ctx context.Context) {
 	var jobs []gstreamer.ProbeJob
 	for _, s := range streams {
 		if s.URL == "" || !s.IsActive {
+			continue
+		}
+		if !strings.HasPrefix(s.URL, "http://") && !strings.HasPrefix(s.URL, "https://") && !strings.HasPrefix(s.URL, "rtsp://") {
 			continue
 		}
 		jobs = append(jobs, gstreamer.ProbeJob{
