@@ -15,8 +15,9 @@ if [ "$(id -u tvproxy)" != "$PUID" ]; then
   usermod -o -u "$PUID" tvproxy
 fi
 
-mkdir -p /config /record
-chown "$PUID:$PGID" /config /record
+mkdir -p /config /record /run/user/$PUID
+chown "$PUID:$PGID" /config /record /run/user/$PUID
+export XDG_RUNTIME_DIR=/run/user/$PUID
 
 for f in /defaults/*.json; do
   base=$(basename "$f")
