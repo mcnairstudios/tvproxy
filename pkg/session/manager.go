@@ -1093,6 +1093,11 @@ loop:
 			break loop
 		case gst.MessageError:
 			gstErr := msg.ParseError()
+			errStr := gstErr.Error()
+			if strings.Contains(errStr, "Could not multiplex") || strings.Contains(errStr, "clock problem") {
+				m.log.Warn().Str("session_id", s.ID).Err(gstErr).Msg("gstreamer transient error (continuing)")
+				continue
+			}
 			m.log.Error().Str("session_id", s.ID).Err(gstErr).Msg("gstreamer error")
 			s.setError(fmt.Errorf("gstreamer: %w", gstErr))
 			s.setLastStderr(gstErr.Error())
