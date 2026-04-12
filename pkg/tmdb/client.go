@@ -535,6 +535,20 @@ func (c *Client) Sync(items []VODItem, onResolved ResolvedFunc) {
 			continue
 		}
 		seen[key] = true
+
+		clean, year := CleanVODName(item.Name)
+		query := clean
+		if year != "" {
+			query = clean + " (" + year + ")"
+		}
+		mediaType := item.MediaType
+		if mediaType != "movie" {
+			mediaType = "tv"
+		}
+		if _, cached := c.cache.Get(SearchCacheKey(query, mediaType)); cached {
+			continue
+		}
+
 		toSync = append(toSync, item)
 	}
 

@@ -18,7 +18,7 @@ type BoltCache struct {
 func NewBoltCache(baseDir string) (*BoltCache, error) {
 	os.MkdirAll(baseDir, 0755)
 	dbPath := filepath.Join(baseDir, "tmdb.db")
-	db, err := bolt.Open(dbPath, 0644, &bolt.Options{NoSync: true})
+	db, err := bolt.Open(dbPath, 0644, nil)
 	if err != nil {
 		return nil, fmt.Errorf("opening tmdb bolt db: %w", err)
 	}

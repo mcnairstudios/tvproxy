@@ -24,7 +24,7 @@ type BoltMetadataStore struct {
 func NewBoltMetadataStore(baseDir string) (*BoltMetadataStore, error) {
 	os.MkdirAll(baseDir, 0755)
 	dbPath := filepath.Join(baseDir, "metadata.db")
-	db, err := bolt.Open(dbPath, 0644, &bolt.Options{NoSync: true})
+	db, err := bolt.Open(dbPath, 0644, nil)
 	if err != nil {
 		return nil, fmt.Errorf("opening metadata bolt db: %w", err)
 	}
