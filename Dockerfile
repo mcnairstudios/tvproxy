@@ -21,8 +21,10 @@ RUN CGO_ENABLED=1 go build -ldflags="-s -w -X main.buildVersion=$VERSION" -o /tv
 RUN cd gstreamer-plugins/tvproxydemux \
     && meson setup builddir \
     && ninja -C builddir \
-    && mkdir -p /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/gstreamer-1.0/ \
-    && find builddir -name "*.so" -exec cp {} /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/gstreamer-1.0/ \;
+    && mkdir -p /gst-plugins \
+    && find builddir -name "*.so" -exec cp {} /gst-plugins/ \; \
+    && ls -la /gst-plugins/ \
+    && ls -la builddir/
 
 FROM debian:bookworm-slim
 
@@ -46,7 +48,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /tvproxy /usr/local/bin/tvproxy
-COPY --from=builder /usr/lib/*/gstreamer-1.0/*tvproxydemux.so /usr/local/lib/gstreamer-1.0/
+COPY --from=builder /gst-plugins/ /usr/local/lib/gstreamer-1.0/
 COPY pkg/defaults/clients.json /defaults/clients.json
 COPY pkg/defaults/settings.json /defaults/settings.json
 
