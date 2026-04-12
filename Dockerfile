@@ -24,13 +24,18 @@ RUN cd gstreamer-plugins/tvproxydemux \
     && mkdir -p /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/gstreamer-1.0/ \
     && find builddir -name "*.so" -exec cp {} /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/gstreamer-1.0/ \;
 
-FROM linuxserver/ffmpeg:latest
+FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     gosu \
     dtv-scan-tables \
+    ffmpeg \
+    libavformat59 \
+    libavcodec59 \
+    libavutil57 \
     gstreamer1.0-tools \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
@@ -42,9 +47,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /tvproxy /usr/local/bin/tvproxy
 COPY --from=builder /usr/lib/*/gstreamer-1.0/*tvproxydemux.so /usr/local/lib/gstreamer-1.0/
-COPY --from=builder /usr/lib/ /usr/lib/builder/
-RUN find /usr/lib/builder -name "*.so*" -exec cp -n {} /usr/lib/ \; 2>/dev/null; \
-    rm -rf /usr/lib/builder; ldconfig
 COPY pkg/defaults/clients.json /defaults/clients.json
 COPY pkg/defaults/settings.json /defaults/settings.json
 
