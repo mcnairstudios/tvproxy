@@ -64,7 +64,11 @@ func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, output
 	demux, _ := gst.NewElement("tsdemux")
 
 	vQueue, _ := gst.NewElement("queue")
+	vQueue.SetProperty("max-size-time", uint64(10000000000))
+	vQueue.SetProperty("max-size-buffers", uint(0))
 	aQueue, _ := gst.NewElement("queue")
+	aQueue.SetProperty("max-size-time", uint64(10000000000))
+	aQueue.SetProperty("max-size-buffers", uint(0))
 
 	outVideo := NormalizeCodec(outputVideoCodec)
 	if outVideo == "" || outVideo == "default" {
@@ -270,16 +274,22 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 
 func createSoftwareAV1Encoder(bitrate int) []*gst.Element {
 	conv, _ := gst.NewElement("videoconvert")
+	caps, _ := gst.NewElement("capsfilter")
+	caps.SetProperty("caps", gst.NewCapsFromString("video/x-raw,format=I420"))
 
-	encoder, _ := gst.NewElement("rav1enc")
+	encoder, _ := gst.NewElement("svtav1enc")
+	if encoder != nil {
+		encoder.SetProperty("preset", uint(12))
+		encoder.SetProperty("target-bitrate", uint(bitrate))
+		return []*gst.Element{conv, caps, encoder}
+	}
+
+	encoder, _ = gst.NewElement("rav1enc")
 	if encoder != nil {
 		encoder.SetProperty("speed-preset", uint(10))
 		encoder.SetProperty("low-latency", true)
 		encoder.SetProperty("bitrate", bitrate*1000)
-		encoder.SetProperty("threads", uint(0))
-		encoder.SetProperty("tile-cols", uint(2))
-		encoder.SetProperty("tile-rows", uint(2))
-		return []*gst.Element{conv, encoder}
+		return []*gst.Element{conv, caps, encoder}
 	}
 
 	encoder, _ = gst.NewElement("av1enc")
@@ -287,16 +297,10 @@ func createSoftwareAV1Encoder(bitrate int) []*gst.Element {
 		encoder.SetProperty("target-bitrate", uint(bitrate))
 		encoder.SetProperty("cpu-used", uint(8))
 		encoder.SetProperty("usage-profile", uint(1))
-		encoder.SetProperty("end-usage", uint(1))
-		encoder.SetProperty("row-mt", true)
-		encoder.SetProperty("threads", uint(0))
-		encoder.SetProperty("tile-columns", uint(2))
-		encoder.SetProperty("tile-rows", uint(2))
-		encoder.SetProperty("lag-in-frames", uint(0))
-		return []*gst.Element{conv, encoder}
+		return []*gst.Element{conv, caps, encoder}
 	}
 
-	return []*gst.Element{conv}
+	return []*gst.Element{conv, caps}
 }
 
 func createOutputParser(codec string) []*gst.Element {

@@ -346,10 +346,13 @@ func hwEncoder(codec string, hw HWAccel, bitrate int) string {
 }
 
 func softwareAV1EncoderStr(bitrate int) string {
-	if gst.Find("rav1enc") != nil {
-		return fmt.Sprintf("videoconvert ! rav1enc speed-preset=10 low-latency=true bitrate=%d threads=0 tile-cols=2 tile-rows=2", bitrate*1000)
+	if gst.Find("svtav1enc") != nil {
+		return fmt.Sprintf("videoconvert ! video/x-raw,format=I420 ! svtav1enc preset=12 target-bitrate=%d", bitrate)
 	}
-	return fmt.Sprintf("videoconvert ! av1enc cpu-used=8 usage-profile=realtime end-usage=cbr target-bitrate=%d row-mt=true threads=0 tile-columns=2 tile-rows=2 lag-in-frames=0", bitrate)
+	if gst.Find("rav1enc") != nil {
+		return fmt.Sprintf("videoconvert ! video/x-raw,format=I420 ! rav1enc speed-preset=10 low-latency=true bitrate=%d", bitrate*1000)
+	}
+	return fmt.Sprintf("videoconvert ! video/x-raw,format=I420 ! av1enc cpu-used=8 usage-profile=realtime target-bitrate=%d", bitrate)
 }
 
 func audioDecoder(codec string) string {
