@@ -329,13 +329,8 @@ func (m *Manager) RemoveConsumer(channelID string, consumerID string) {
 		if s.HasRecordingConsumer() {
 			m.log.Info().Str("channel_id", channelID).Msg("viewer gone but recording active, keeping session")
 		} else {
-			s.mu.Lock()
-			s.lingerTimer = time.AfterFunc(lingerDuration, func() {
-				m.log.Info().Str("channel_id", channelID).Msg("linger expired, cleaning up session")
-				go m.stopAndCleanup(channelID, s)
-			})
-			s.mu.Unlock()
-			m.log.Info().Str("channel_id", channelID).Dur("linger", lingerDuration).Msg("no consumers, starting linger timer")
+			m.log.Info().Str("channel_id", channelID).Msg("no consumers, cleaning up session")
+			go m.stopAndCleanup(channelID, s)
 		}
 	}
 }
