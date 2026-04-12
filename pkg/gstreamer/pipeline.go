@@ -299,7 +299,7 @@ func hwDecoder(codec string, hw HWAccel) string {
 func hwEncoder(codec string, hw HWAccel, bitrate int) string {
 	br := bitrate
 	if br <= 0 {
-		br = 4000
+		br = 6000
 	}
 
 	switch hw {

@@ -84,7 +84,7 @@ func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, output
 		videoElements = parser
 	} else {
 		vDec := createHWDecoder("h264", hw)
-		vEnc := createHWEncoder(outVideo, hw, 4000)
+		vEnc := createHWEncoder(outVideo, hw, 6000)
 		vOutParse := createOutputParser(outVideo)
 		videoElements = append(videoElements, vDec...)
 		videoElements = append(videoElements, vEnc...)
