@@ -33,8 +33,19 @@ func BuildNativePipeline(name string, probe *media.ProbeResult, opts PipelineOpt
 	return pipeline, nil
 }
 
+func mustElement(name string) (*gst.Element, error) {
+	el, err := gst.NewElement(name)
+	if err != nil || el == nil {
+		return nil, fmt.Errorf("GStreamer element %q not available", name)
+	}
+	return el, nil
+}
+
 func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, outputPath string) (*gst.Pipeline, error) {
-	pipeline, _ := gst.NewPipeline("tvproxy")
+	pipeline, err := gst.NewPipeline("tvproxy")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pipeline: %w", err)
+	}
 	isRTSP := strings.HasPrefix(inputURL, "rtsp://") || strings.HasPrefix(inputURL, "rtsps://")
 
 	var sourceElements []*gst.Element
@@ -111,6 +122,13 @@ func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, output
 	all = append(all, videoElements...)
 	all = append(all, audioElements...)
 	all = append(all, mux, sink)
+
+	for i, el := range all {
+		if el == nil {
+			return nil, fmt.Errorf("pipeline element at position %d is nil (missing GStreamer plugin)", i)
+		}
+	}
+
 	pipeline.AddMany(all...)
 
 	if isRTSP {
