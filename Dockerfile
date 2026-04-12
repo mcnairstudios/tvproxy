@@ -59,8 +59,12 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 WORKDIR /config
 
+RUN mkdir -p /run/user/1000 && chmod 700 /run/user/1000
+
 ENV PUID=1000
 ENV PGID=1000
+ENV XDG_RUNTIME_DIR=/run/user/1000
+ENV LIBVA_DRIVER_NAME=iHD
 ENV TVPROXY_DB_PATH=/config/tvproxy.db
 ENV TVPROXY_RECORD_DIR=/record
 ENV TVPROXY_VOD_OUTPUT_DIR=/record
