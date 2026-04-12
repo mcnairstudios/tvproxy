@@ -206,7 +206,8 @@ func buildAudioStr(opts PipelineOpts) string {
 
 	inputParser := audioInputParser(acodec)
 	dec := audioDecoder(acodec)
-	return fmt.Sprintf("demux. ! queue ! %s ! %s ! audioconvert ! audioresample ! audio/x-raw,channels=2 ! faac ! aacparse ! mux.", inputParser, dec)
+	aacEnc := aacEncoderName()
+	return fmt.Sprintf("demux. ! queue ! %s ! %s ! audioconvert ! audioresample ! audio/x-raw,channels=2 ! %s ! aacparse ! mux.", inputParser, dec, aacEnc)
 }
 
 func audioInputParser(codec string) string {
@@ -342,6 +343,15 @@ func hwEncoder(codec string, hw HWAccel, bitrate int) string {
 	default:
 		return fmt.Sprintf("videoconvert ! x264enc bitrate=%d speed-preset=ultrafast tune=zerolatency", br)
 	}
+}
+
+func aacEncoderName() string {
+	for _, name := range []string{"faac", "voaacenc", "avenc_aac"} {
+		if gst.Find(name) != nil {
+			return name
+		}
+	}
+	return "faac"
 }
 
 func softwareAV1EncoderStr(bitrate int) string {

@@ -109,6 +109,12 @@ func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, output
 	aCaps, _ := gst.NewElement("capsfilter")
 	aCaps.SetProperty("caps", gst.NewCapsFromString("audio/x-raw,channels=2"))
 	aEnc, _ := gst.NewElement("faac")
+	if aEnc == nil {
+		aEnc, _ = gst.NewElement("voaacenc")
+	}
+	if aEnc == nil {
+		aEnc, _ = gst.NewElement("avenc_aac")
+	}
 	aOutParse, _ := gst.NewElement("aacparse")
 	audioElements = []*gst.Element{aInParse, aDec, aConv, aResample, aCaps, aEnc, aOutParse}
 
