@@ -61,7 +61,7 @@ func clientHeaders(r *http.Request) map[string]string {
 	return out
 }
 
-func setStreamHeaders(w http.ResponseWriter) {
+func setStreamHeaders(w http.ResponseWriter, videoCodec string) {
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-cache, no-store")
@@ -282,7 +282,7 @@ func (h *VODHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer reader.Close()
 
-	setStreamHeaders(w)
+	setStreamHeaders(w, sess.OutputVideoCodec)
 	streamResponse(w, reader)
 }
 

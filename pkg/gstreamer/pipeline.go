@@ -179,9 +179,8 @@ func buildVideoStr(opts PipelineOpts) string {
 
 func buildSinkStr(opts PipelineOpts) string {
 	outCodec := NormalizeCodec(opts.OutputVideoCodec)
-	useMP4 := opts.OutputFormat == OutputMP4 || outCodec == "av1"
 
-	if useMP4 {
+	if opts.OutputFormat == OutputMP4 || outCodec == "av1" {
 		if opts.RecordingPath != "" {
 			return fmt.Sprintf("mp4mux name=mux fragment-duration=500 streamable=true ! filesink location=%s", opts.RecordingPath)
 		}
