@@ -215,12 +215,17 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 			encoder, _ = gst.NewElement("vtenc_h265")
 		case "av1":
 			encoder, _ = gst.NewElement("vtenc_av1")
+			if encoder == nil {
+				return createSoftwareAV1Encoder(bitrate)
+			}
 		default:
 			encoder, _ = gst.NewElement("vtenc_h264")
 		}
-		encoder.SetProperty("bitrate", uint(bitrate))
-		encoder.SetProperty("realtime", true)
-		encoder.SetProperty("allow-frame-reordering", false)
+		if encoder != nil {
+			encoder.SetProperty("bitrate", uint(bitrate))
+			encoder.SetProperty("realtime", true)
+			encoder.SetProperty("allow-frame-reordering", false)
+		}
 	case HWVAAPI:
 		switch codec {
 		case "h265":
@@ -249,6 +254,8 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 		case "h265":
 			encoder, _ = gst.NewElement("x265enc")
 			encoder.SetProperty("speed-preset", 1)
+		case "av1":
+			return createSoftwareAV1Encoder(bitrate)
 		default:
 			encoder, _ = gst.NewElement("x264enc")
 			encoder.SetProperty("speed-preset", 1)
@@ -259,6 +266,37 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 	}
 
 	return []*gst.Element{encoder}
+}
+
+func createSoftwareAV1Encoder(bitrate int) []*gst.Element {
+	conv, _ := gst.NewElement("videoconvert")
+
+	encoder, _ := gst.NewElement("rav1enc")
+	if encoder != nil {
+		encoder.SetProperty("speed-preset", uint(10))
+		encoder.SetProperty("low-latency", true)
+		encoder.SetProperty("bitrate", bitrate*1000)
+		encoder.SetProperty("threads", uint(0))
+		encoder.SetProperty("tile-cols", uint(2))
+		encoder.SetProperty("tile-rows", uint(2))
+		return []*gst.Element{conv, encoder}
+	}
+
+	encoder, _ = gst.NewElement("av1enc")
+	if encoder != nil {
+		encoder.SetProperty("target-bitrate", uint(bitrate))
+		encoder.SetProperty("cpu-used", uint(8))
+		encoder.SetProperty("usage-profile", uint(1))
+		encoder.SetProperty("end-usage", uint(1))
+		encoder.SetProperty("row-mt", true)
+		encoder.SetProperty("threads", uint(0))
+		encoder.SetProperty("tile-columns", uint(2))
+		encoder.SetProperty("tile-rows", uint(2))
+		encoder.SetProperty("lag-in-frames", uint(0))
+		return []*gst.Element{conv, encoder}
+	}
+
+	return []*gst.Element{conv}
 }
 
 func createOutputParser(codec string) []*gst.Element {

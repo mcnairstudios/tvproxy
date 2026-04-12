@@ -330,7 +330,7 @@ func hwEncoder(codec string, hw HWAccel, bitrate int) string {
 			if gst.Find("vtenc_av1") != nil {
 				return fmt.Sprintf("vtenc_av1 bitrate=%d realtime=true allow-frame-reordering=false", br)
 			}
-			return fmt.Sprintf("videoconvert ! av1enc target-bitrate=%d usage-profile=realtime cpu-used=8", br*1000)
+			return softwareAV1EncoderStr(br)
 		default:
 			return fmt.Sprintf("vtenc_h264 bitrate=%d realtime=true allow-frame-reordering=false", br)
 		}
@@ -339,10 +339,17 @@ func hwEncoder(codec string, hw HWAccel, bitrate int) string {
 	case "h265":
 		return fmt.Sprintf("videoconvert ! x265enc bitrate=%d speed-preset=ultrafast", br)
 	case "av1":
-		return fmt.Sprintf("videoconvert ! svtav1enc preset=12 target-bitrate=%d", br)
+		return softwareAV1EncoderStr(br)
 	default:
 		return fmt.Sprintf("videoconvert ! x264enc bitrate=%d speed-preset=ultrafast tune=zerolatency", br)
 	}
+}
+
+func softwareAV1EncoderStr(bitrate int) string {
+	if gst.Find("rav1enc") != nil {
+		return fmt.Sprintf("videoconvert ! rav1enc speed-preset=10 low-latency=true bitrate=%d threads=0 tile-cols=2 tile-rows=2", bitrate*1000)
+	}
+	return fmt.Sprintf("videoconvert ! av1enc cpu-used=8 usage-profile=realtime end-usage=cbr target-bitrate=%d row-mt=true threads=0 tile-columns=2 tile-rows=2 lag-in-frames=0", bitrate)
 }
 
 func audioDecoder(codec string) string {
