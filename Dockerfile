@@ -42,27 +42,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /tvproxy /usr/local/bin/tvproxy
 COPY --from=builder /usr/lib/*/gstreamer-1.0/*tvproxydemux.so /usr/local/lib/gstreamer-1.0/
-COPY --from=builder /usr/lib/*-linux-gnu/libav*.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libsw*.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libpostproc.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libvpx.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libx264.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libx265.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libdav1d.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libaom.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libmp3lame.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libopus.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libvorbis*.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libogg.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libtheoraenc.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libtheoradec.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libfdk-aac.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libOpenCL.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libva*.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libdrm.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libnuma.so* /usr/lib/
-COPY --from=builder /usr/lib/*-linux-gnu/libSvtAv1Enc.so* /usr/lib/
-RUN ldconfig
+RUN --mount=from=builder,source=/usr/lib,target=/builderlib \
+    find /builderlib -name "*.so*" -path "*-linux-gnu*" | \
+    xargs -I{} cp -n {} /usr/lib/ 2>/dev/null; \
+    ldconfig
 COPY pkg/defaults/clients.json /defaults/clients.json
 COPY pkg/defaults/settings.json /defaults/settings.json
 
