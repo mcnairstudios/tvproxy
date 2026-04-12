@@ -29,19 +29,20 @@ func NewHDHRSourceService(
 	hdhrSourceStore store.HDHRSourceStore,
 	streamStore store.StreamStore,
 	channelStore store.ChannelStore,
+	probeCache store.ProbeCache,
 	log zerolog.Logger,
 ) *HDHRSourceService {
 	return &HDHRSourceService{
 		hdhrSourceStore: hdhrSourceStore,
 		streamStore:     streamStore,
 		channelStore:    channelStore,
+		probeCache:      probeCache,
 		log:             log.With().Str("service", "hdhr_source").Logger(),
 		StatusTracker:   NewStatusTracker(),
 	}
 }
 
-func (s *HDHRSourceService) Log() *zerolog.Logger        { return &s.log }
-func (s *HDHRSourceService) SetProbeCache(pc store.ProbeCache) { s.probeCache = pc }
+func (s *HDHRSourceService) Log() *zerolog.Logger { return &s.log }
 
 func (s *HDHRSourceService) CreateSource(ctx context.Context, source *models.HDHRSource) error {
 	return s.hdhrSourceStore.Create(ctx, source)
