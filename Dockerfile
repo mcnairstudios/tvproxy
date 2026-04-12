@@ -42,10 +42,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /tvproxy /usr/local/bin/tvproxy
 COPY --from=builder /usr/lib/*/gstreamer-1.0/*tvproxydemux.so /usr/local/lib/gstreamer-1.0/
-RUN --mount=from=builder,source=/usr/lib,target=/builderlib \
-    find /builderlib -name "*.so*" -path "*-linux-gnu*" | \
-    xargs -I{} cp -n {} /usr/lib/ 2>/dev/null; \
-    ldconfig
+COPY --from=builder /usr/lib/ /usr/lib/builder/
+RUN find /usr/lib/builder -name "*.so*" -exec cp -n {} /usr/lib/ \; 2>/dev/null; \
+    rm -rf /usr/lib/builder; ldconfig
 COPY pkg/defaults/clients.json /defaults/clients.json
 COPY pkg/defaults/settings.json /defaults/settings.json
 
