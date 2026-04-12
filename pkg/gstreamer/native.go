@@ -3,6 +3,7 @@ package gstreamer
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/go-gst/go-gst/gst"
 
@@ -65,7 +66,7 @@ func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, output
 	vQueue, _ := gst.NewElement("queue")
 	aQueue, _ := gst.NewElement("queue")
 
-	outVideo := normalizeCodec(outputVideoCodec)
+	outVideo := NormalizeCodec(outputVideoCodec)
 	if outVideo == "" || outVideo == "default" {
 		outVideo = "copy"
 	}
@@ -126,8 +127,7 @@ func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, output
 
 	gst.ElementLinkMany(mux, sink)
 
-	videoLinked := false
-	audioLinked := false
+	var videoOnce, audioOnce sync.Once
 	demux.Connect("pad-added", func(self *gst.Element, pad *gst.Pad) {
 		caps := pad.GetCurrentCaps()
 		if caps == nil {
@@ -135,12 +135,14 @@ func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, output
 		}
 		name := caps.GetStructureAt(0).Name()
 
-		if strings.HasPrefix(name, "video") && !videoLinked {
-			pad.Link(vQueue.GetStaticPad("sink"))
-			videoLinked = true
-		} else if strings.Contains(name, "audio") && !audioLinked {
-			pad.Link(aQueue.GetStaticPad("sink"))
-			audioLinked = true
+		if strings.HasPrefix(name, "video") {
+			videoOnce.Do(func() {
+				pad.Link(vQueue.GetStaticPad("sink"))
+			})
+		} else if strings.Contains(name, "audio") {
+			audioOnce.Do(func() {
+				pad.Link(aQueue.GetStaticPad("sink"))
+			})
 		}
 	})
 

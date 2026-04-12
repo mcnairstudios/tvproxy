@@ -1056,10 +1056,10 @@ func (m *Manager) runGStreamerNative(ctx context.Context, s *Session, pipelineSt
 	var pipeline *gst.Pipeline
 	var err error
 
-	outCodec := gstreamer.NormalizeCodecExported(s.startOpts.OutputVideoCodec)
+	outCodec := gstreamer.NormalizeCodec(s.startOpts.OutputVideoCodec)
 	srcCodec := ""
 	if s.Video != nil {
-		srcCodec = gstreamer.NormalizeCodecExported(s.Video.Codec)
+		srcCodec = gstreamer.NormalizeCodec(s.Video.Codec)
 	}
 	isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy" || outCodec == srcCodec
 	m.log.Info().Str("session_id", s.ID).Str("out", outCodec).Str("src", srcCodec).Bool("copy", isCopy).Bool("plugins", gstreamer.PluginsAvailable()).Msg("pipeline path selection")

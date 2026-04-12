@@ -85,8 +85,8 @@ func BuildFromProbe(probe *media.ProbeResult, inputURL string, opts PipelineOpts
 }
 
 func buildPipelineStr(opts PipelineOpts) string {
-	outCodec := normalizeCodec(opts.OutputVideoCodec)
-	srcCodec := normalizeCodec(opts.VideoCodec)
+	outCodec := NormalizeCodec(opts.OutputVideoCodec)
+	srcCodec := NormalizeCodec(opts.VideoCodec)
 	isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy" || outCodec == srcCodec
 
 	if PluginsAvailable() && isCopy {
@@ -101,15 +101,15 @@ func buildPluginPipelineStr(opts PipelineOpts) string {
 	parts = append(parts, fmt.Sprintf("tvproxysrc location=%s", opts.InputURL))
 	parts = append(parts, "! tvproxydemux name=d")
 
-	outCodec := normalizeCodec(opts.OutputVideoCodec)
+	outCodec := NormalizeCodec(opts.OutputVideoCodec)
 	if outCodec == "" || outCodec == "default" {
 		outCodec = "copy"
 	}
 
-	if outCodec == "copy" || outCodec == normalizeCodec(opts.VideoCodec) {
+	if outCodec == "copy" || outCodec == NormalizeCodec(opts.VideoCodec) {
 		parts = append(parts, "d.video ! m.video")
 	} else {
-		dec := hwDecoder(normalizeCodec(opts.VideoCodec), opts.HWAccel)
+		dec := hwDecoder(NormalizeCodec(opts.VideoCodec), opts.HWAccel)
 		enc := hwEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)
 		parts = append(parts, fmt.Sprintf("d.video ! %s ! %s ! m.video", dec, enc))
 	}
@@ -159,8 +159,8 @@ func buildSource(opts PipelineOpts) string {
 }
 
 func buildVideoStr(opts PipelineOpts) string {
-	vcodec := normalizeCodec(opts.VideoCodec)
-	outCodec := normalizeCodec(opts.OutputVideoCodec)
+	vcodec := NormalizeCodec(opts.VideoCodec)
+	outCodec := NormalizeCodec(opts.OutputVideoCodec)
 	if outCodec == "" || outCodec == "default" {
 		outCodec = "copy"
 	}
@@ -178,7 +178,7 @@ func buildVideoStr(opts PipelineOpts) string {
 }
 
 func buildSinkStr(opts PipelineOpts) string {
-	outCodec := normalizeCodec(opts.OutputVideoCodec)
+	outCodec := NormalizeCodec(opts.OutputVideoCodec)
 	useMP4 := opts.OutputFormat == OutputMP4 || outCodec == "av1"
 
 	if useMP4 {
@@ -194,8 +194,8 @@ func buildSinkStr(opts PipelineOpts) string {
 }
 
 func buildAudioStr(opts PipelineOpts) string {
-	acodec := normalizeCodec(opts.AudioCodec)
-	outAudio := normalizeCodec(opts.OutputAudioCodec)
+	acodec := NormalizeCodec(opts.AudioCodec)
+	outAudio := NormalizeCodec(opts.OutputAudioCodec)
 	if outAudio == "" || outAudio == "default" {
 		outAudio = "aac"
 	}
@@ -382,11 +382,7 @@ func canCopyAudio(codec string, format OutputFormat) bool {
 	return codec == "aac"
 }
 
-func NormalizeCodecExported(codec string) string {
-	return normalizeCodec(codec)
-}
-
-func normalizeCodec(codec string) string {
+func NormalizeCodec(codec string) string {
 	c := strings.ToLower(codec)
 	switch c {
 	case "hevc":

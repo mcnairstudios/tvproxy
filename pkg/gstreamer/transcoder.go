@@ -40,14 +40,14 @@ func ShouldUseGStreamer(
 		return TranscoderChoice{UseGStreamer: false, Reason: "no video in probe"}
 	}
 
-	vcodec := normalizeCodec(probe.Video.Codec)
+	vcodec := NormalizeCodec(probe.Video.Codec)
 	if vcodec != "h264" && vcodec != "h265" && vcodec != "mpeg2video" {
 		return TranscoderChoice{UseGStreamer: false, Reason: "unsupported video codec: " + vcodec}
 	}
 
 	acodec := ""
 	if len(probe.AudioTracks) > 0 {
-		acodec = normalizeCodec(probe.AudioTracks[0].Codec)
+		acodec = NormalizeCodec(probe.AudioTracks[0].Codec)
 	}
 
 	pipeline := BuildFromProbe(probe, streamURL, PipelineOpts{
