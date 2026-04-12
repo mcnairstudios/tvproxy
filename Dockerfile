@@ -31,6 +31,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     dtv-scan-tables \
+    libavformat59 \
+    libavcodec59 \
+    libavutil57 \
     gstreamer1.0-tools \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
