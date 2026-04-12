@@ -31,9 +31,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     dtv-scan-tables \
-    libavformat59 \
-    libavcodec59 \
-    libavutil57 \
     gstreamer1.0-tools \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
@@ -45,6 +42,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /tvproxy /usr/local/bin/tvproxy
 COPY --from=builder /usr/lib/*/gstreamer-1.0/*tvproxydemux.so /usr/local/lib/gstreamer-1.0/
+COPY --from=builder /usr/lib/*/libavformat.so* /usr/lib/
+COPY --from=builder /usr/lib/*/libavcodec.so* /usr/lib/
+COPY --from=builder /usr/lib/*/libavutil.so* /usr/lib/
+RUN ldconfig
 COPY pkg/defaults/clients.json /defaults/clients.json
 COPY pkg/defaults/settings.json /defaults/settings.json
 
