@@ -382,6 +382,10 @@ func canCopyAudio(codec string, format OutputFormat) bool {
 	return codec == "aac"
 }
 
+func NormalizeCodecExported(codec string) string {
+	return normalizeCodec(codec)
+}
+
 func normalizeCodec(codec string) string {
 	c := strings.ToLower(codec)
 	switch c {

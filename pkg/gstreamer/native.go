@@ -32,7 +32,7 @@ func BuildNativePipeline(name string, probe *media.ProbeResult, opts PipelineOpt
 	return pipeline, nil
 }
 
-func BuildNativeFromOpts(videoCodec, audioCodec, hwAccel, inputURL, outputPath string) (*gst.Pipeline, error) {
+func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, outputPath string) (*gst.Pipeline, error) {
 	pipeline, _ := gst.NewPipeline("tvproxy")
 	isRTSP := strings.HasPrefix(inputURL, "rtsp://") || strings.HasPrefix(inputURL, "rtsps://")
 
@@ -65,7 +65,7 @@ func BuildNativeFromOpts(videoCodec, audioCodec, hwAccel, inputURL, outputPath s
 	vQueue, _ := gst.NewElement("queue")
 	aQueue, _ := gst.NewElement("queue")
 
-	outVideo := normalizeCodec(videoCodec)
+	outVideo := normalizeCodec(outputVideoCodec)
 	if outVideo == "" || outVideo == "default" {
 		outVideo = "copy"
 	}
@@ -74,8 +74,7 @@ func BuildNativeFromOpts(videoCodec, audioCodec, hwAccel, inputURL, outputPath s
 	var videoElements []*gst.Element
 	var audioElements []*gst.Element
 
-	sourceVideo := normalizeCodec(videoCodec)
-	if outVideo == "copy" || outVideo == sourceVideo {
+	if outVideo == "copy" {
 		parser := createOutputParser(outVideo)
 		videoElements = parser
 	} else {
