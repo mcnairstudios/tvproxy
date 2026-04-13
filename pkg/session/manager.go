@@ -1023,7 +1023,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		return
 	}
 
-	m.log.Info().Str("session_id", s.ID).Str("path", path).Msg("pipeline built, setting to PLAYING")
+	m.log.Info().Str("session_id", s.ID).Str("path", path).Str("output", s.FilePath).Msg("pipeline built, setting to PLAYING")
 	s.SetStopPipeline(func() { pipeline.SetState(gst.StateNull) })
 	stateErr := pipeline.SetState(gst.StatePlaying)
 	if stateErr != nil {
