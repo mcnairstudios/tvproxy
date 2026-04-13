@@ -101,7 +101,7 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 	audioElements := buildAudioChain(NormalizeCodec(opts.AudioCodec))
 
 	var mux *gst.Element
-	if isCopy {
+	if opts.OutputFormat == OutputMPEGTS || (isCopy && opts.OutputFormat == "") {
 		mux, _ = gst.NewElement("mpegtsmux")
 	} else {
 		mux, _ = gst.NewElement("mp4mux")

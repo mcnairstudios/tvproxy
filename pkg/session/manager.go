@@ -977,6 +977,11 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		hwAccel = gstreamer.HWVideoToolbox
 	}
 
+	outFormat := gstreamer.OutputMP4
+	if s.startOpts.OutputContainer == "mpegts" {
+		outFormat = gstreamer.OutputMPEGTS
+	}
+
 	opts := gstreamer.PipelineOpts{
 		InputURL:         s.StreamURL,
 		VideoCodec:       srcVideo,
@@ -985,6 +990,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		OutputVideoCodec: s.startOpts.OutputVideoCodec,
 		OutputAudioCodec: s.startOpts.OutputAudioCodec,
 		OutputBitrate:    0,
+		OutputFormat:     outFormat,
 		HWAccel:          hwAccel,
 		RecordingPath:    s.FilePath,
 		IsLive:           probe == nil || probe.Duration == 0,
