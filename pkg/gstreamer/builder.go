@@ -305,6 +305,9 @@ func checkNilElements(elements []*gst.Element) error {
 
 func containerFromURL(url string) string {
 	u := strings.ToLower(url)
+	if idx := strings.Index(u, "?"); idx > 0 {
+		u = u[:idx]
+	}
 	if strings.HasSuffix(u, ".mp4") || strings.HasSuffix(u, ".m4v") {
 		return "mp4"
 	}

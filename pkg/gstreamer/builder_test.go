@@ -18,6 +18,8 @@ func TestBuild_ContainerDetection(t *testing.T) {
 		{"WebM file", "http://server/video.webm", "webm"},
 		{"No extension", "http://server/stream/123", ""},
 		{"HDHR port 5004", "http://192.168.1.186:5004/auto/v101", ""},
+		{"URL encoded MP4", "http://server/stream/tv%2FShow%2Fepisode.mp4", "mp4"},
+		{"URL with query", "http://server/stream.mp4?token=abc", "mp4"},
 	}
 
 	for _, tt := range tests {
