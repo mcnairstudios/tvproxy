@@ -135,6 +135,13 @@ Returns available encoders/decoders detected at runtime via `gst.Find()`:
 Frontend: Settings page queries this on load, populates dropdowns with only available options.
 Priority: after source profile redesign.
 
+## Audio Transcode Channels on Client Stream Profile
+- Add `audio_channels` field to StreamProfile model (0=passthrough, 2=stereo, 6=5.1)
+- Defaults: Browser=2, Phone=2, Plex=0, Jellyfin=0, VLC=0, DLNA=2
+- User can override per-client (DLNA with AVR → set to 0)
+- Wire into buildAudioChain capsfilter instead of hardcoded channels=2
+- The source profile does NOT control this — it's a consumer decision
+
 ## Audio Language Selection in Native MPEG-TS Path
 - Source profile AudioLanguage flows to PipelineOpts but is only used by plugin path (tvproxydemux audio-language property)
 - Native tsdemux path takes first audio pad via pad-added — no language selection
