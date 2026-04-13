@@ -1,5 +1,20 @@
 # Fixes & Ideas (Not on Critical Path)
 
+## What's Working (feature/gstreamer-simplify)
+- Unified pipeline builder: `gstreamer.Build()` with 2 paths (MPEG-TS native, VOD qtdemux)
+- SAT>IP AV1 transcode: stable 30s+ runs, 4000+ kbps
+- VOD H.265→AV1 transcode: sub-10s first byte, 5000+ kbps
+- HDHR H.264 copy: 3.3s first byte
+- VOD copy: 1.1s first byte
+- All 13 test packages pass, 63 gstreamer-specific test cases
+- Dockerfile uses gavinmcnair/gstreamer:1.1 (GStreamer 1.24.12)
+- NVENC, VAAPI LP, QSV, VideoToolbox encoder chains with fallbacks
+- Probe-driven pipeline: ensureProbe() blocks if no cache, source profile as override
+- User-friendly error messages, bitrate/file_size in status endpoint
+- fragment-duration=2000ms (fixes "Could not multiplex" with svtav1enc)
+
+## Remaining Issues (Priority Order)
+
 ## Tuner Contention
 - SAT>IP copy test failed with 0 bytes when tuner was already locked by prior transcode test
 - HDHR copy errored at 5.7s with "Internal data stream error" — likely tuner conflict
