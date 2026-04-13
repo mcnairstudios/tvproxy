@@ -28,10 +28,11 @@
 - For now: transcode uses native tsdemux path (proven working)
 - Future: tvproxydemux could expose a raw/decoded video pad option
 
-## Plugin container-hint / audio-codec-hint
-- Not yet in gavinmcnair/gstreamer:1.1 image
-- Would eliminate typefind latency (~100-200ms) for probed streams
-- Low priority — current plugin works fine for MPEG-TS
+## DONE: Plugin container-hint / audio-codec-hint
+- container-hint, audio-codec-hint, video-codec-hint all implemented in tvproxydemux
+- Built and tested locally — all three properties appear in gst-inspect
+- Need to: rebuild gavinmcnair/gstreamer Docker image with updated plugin
+- Need to: update builder.go to pass hints when using plugin path (currently deferred due to go-gst NewPipelineFromString issue)
 
 ## Stream Source Failover
 - When primary source fails (IPTV connection refused, tuner busy), should try secondary source
