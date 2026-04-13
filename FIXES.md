@@ -64,6 +64,12 @@
   3. For RTSP copy: use plugin path via gst-launch subprocess (plugins work)
 - Affects: SAT>IP copy mode. Browser playback (always transcode) is NOT affected.
 
+## RestartWithSeek is ffmpeg-specific
+- pkg/session/manager.go:485 — manipulates ffmpeg -ss args
+- For GStreamer: either send seek event to pipeline, or create new pipeline with seek offset
+- VOD seeking works differently in GStreamer — use gst_element_seek_simple()
+- Or: for qtdemux, set souphttpsrc Range header for HTTP byte-range seeking
+
 ## go-gst NewPipelineFromString doesn't work with plugin bins
 - `gst-launch-1.0` with tvproxysrc/tvproxydemux/tvproxymux produces output
 - Same pipeline string via go-gst `NewPipelineFromString` produces 0 bytes

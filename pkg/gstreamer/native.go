@@ -223,7 +223,7 @@ func buildAudioChain(srcAudio string) []*gst.Element {
 		return []*gst.Element{aInParse, aDec, aConv, aResample, aCaps, aEnc, aOutParse}
 	case "aac":
 		aInParse, _ := gst.NewElement("aacparse")
-		return []*gst.Element{aInParse, aOutParse}
+		return []*gst.Element{aInParse}
 	case "mp2":
 		aInParse, _ := gst.NewElement("mpegaudioparse")
 		aDec, _ := gst.NewElement("mpg123audiodec")
