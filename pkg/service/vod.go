@@ -278,14 +278,19 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		SkipProbe:         strategy.SkipProbe,
 		MetadataOnly:     strategy.MetadataOnly,
 	}
-	applySourceProfile(&startOpts, s.lookupSourceProfile(ctx, streamID, "", streamURL))
+	sp := s.lookupSourceProfile(ctx, streamID, "", streamURL)
+	applySourceProfile(&startOpts, sp)
 
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, startOpts, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", false, err
 	}
 
-	s.log.Info().Str("channel_id", channelID).Str("profile", profileName).Str("container", sa.Container).Str("user_agent", userAgent).Str("remote", remoteAddr).Msg("viewer started")
+	spName := "none"
+	if sp != nil {
+		spName = sp.Name
+	}
+	s.log.Info().Str("channel_id", channelID).Str("profile", profileName).Str("source_profile", spName).Str("container", sa.Container).Str("user_agent", userAgent).Str("remote", remoteAddr).Msg("viewer started")
 
 	if s.activity != nil {
 		s.activity.Add(ViewerOpts{
