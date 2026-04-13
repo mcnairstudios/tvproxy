@@ -86,6 +86,8 @@ func TestBuildAudioChain(t *testing.T) {
 		{"AC3", "ac3", 6},
 		{"EAC3", "eac3", 6},
 		{"DTS", "dts", 6},
+		{"Opus", "opus", 1},
+		{"Vorbis", "vorbis", 6},
 		{"Empty (default)", "", 7},
 	}
 	for _, tt := range tests {
