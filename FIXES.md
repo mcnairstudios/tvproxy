@@ -37,6 +37,12 @@ curl http://localhost:8080/vod/{channelID}/status
 - User-friendly error messages, bitrate/file_size in status endpoint
 - fragment-duration=2000ms (fixes "Could not multiplex" with svtav1enc)
 
+## Import Saga (Implemented)
+- On M3U refresh, skeleton probe entries created for all new streams
+- `isValidProbe()` check ensures skeletons trigger live probe on first play
+- Background probe scheduler processes all unprobed streams
+- TMDB saga: deferred (M3U service doesn't have TMDB client access yet)
+
 ## Remaining Issues (Priority Order)
 
 ## Tuner Contention
