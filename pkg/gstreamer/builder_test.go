@@ -91,6 +91,51 @@ func TestBuildAudioChain(t *testing.T) {
 	}
 }
 
+func TestBuild_PathSelection(t *testing.T) {
+	tests := []struct {
+		name string
+		opts PipelineOpts
+		want string
+	}{
+		{
+			"RTSP transcode",
+			PipelineOpts{InputURL: "rtsp://server/?freq=545", OutputVideoCodec: "av1", VideoCodec: "h264", RecordingPath: "/tmp/test.mp4"},
+			"rtsp-transcode",
+		},
+		{
+			"RTSP copy",
+			PipelineOpts{InputURL: "rtsp://server/?freq=545", OutputVideoCodec: "copy", VideoCodec: "h264", RecordingPath: "/tmp/test.ts"},
+			"rtsp-copy",
+		},
+		{
+			"VOD MP4 transcode",
+			PipelineOpts{InputURL: "http://server/movie.mp4", OutputVideoCodec: "av1", VideoCodec: "hevc", Container: "mp4", RecordingPath: "/tmp/test.mp4"},
+			"vod-mp4-transcode",
+		},
+		{
+			"VOD MP4 copy",
+			PipelineOpts{InputURL: "http://server/movie.mp4", OutputVideoCodec: "copy", VideoCodec: "hevc", Container: "mp4", RecordingPath: "/tmp/test.mp4"},
+			"vod-mp4-copy",
+		},
+		{
+			"HDHR HTTP transcode",
+			PipelineOpts{InputURL: "http://192.168.1.186:5004/auto/v101", OutputVideoCodec: "av1", VideoCodec: "h264", RecordingPath: "/tmp/test.mp4"},
+			"mpegts-transcode",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, path, err := Build(tt.opts)
+			if err != nil {
+				t.Skipf("Build error (expected on CI without GStreamer): %v", err)
+			}
+			if path != tt.want {
+				t.Errorf("Build path = %q, want %q", path, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuild_MPEGTSDetection(t *testing.T) {
 	tests := []struct {
 		name      string
