@@ -37,6 +37,16 @@
 - The probe scheduler already runs on startup — ensure it covers all channels with streams
 - Consider: priority probe queue when user navigates to a channel without cached data
 
+## Migrate proxy.go to Build()
+- service/proxy.go still uses gst-launch-1.0 subprocess via BuildPipeline()
+- Need Build() variant that outputs to fdsink/appsink instead of filesink
+- Lower priority — proxy path works, VOD path was the broken one
+
+## Migrate hls/session.go and jellyfin/playback.go to Build()
+- Both still use old BuildPipeline() for string pipelines
+- These are secondary paths used by Jellyfin HLS, not browser playback
+- Migrate after main VOD/live paths are fully validated
+
 ## avprobe FormatName Not Populated
 - `ProbeResult.FormatName` is never set by avprobe package
 - Causes container detection to fall back to URL extension matching
