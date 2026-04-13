@@ -214,6 +214,12 @@ func (h *VODHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	video, audioTracks, duration := h.vodService.GetProbeInfo(channelID)
 
+	fileSize := h.vodService.GetFileSize(channelID)
+	var bitrateKbps int64
+	if buffered > 0 {
+		bitrateKbps = fileSize * 8 / int64(buffered) / 1000
+	}
+
 	resp := map[string]any{
 		"buffered":           buffered,
 		"ready":              done,
@@ -225,6 +231,8 @@ func (h *VODHandler) Status(w http.ResponseWriter, r *http.Request) {
 		"output_audio_codec": sess.OutputAudioCodec,
 		"output_container":   sess.OutputContainer,
 		"output_hwaccel":     sess.OutputHWAccel,
+		"file_size":          fileSize,
+		"bitrate_kbps":       bitrateKbps,
 	}
 	if video != nil {
 		resp["video"] = video

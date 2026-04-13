@@ -143,6 +143,26 @@ func buildManualPipelineStr(opts PipelineOpts) string {
 	return strings.Join(parts, " ")
 }
 
+func IsMPEGTS(container, inputURL string) bool {
+	c := strings.ToLower(container)
+	if c == "mpegts" || c == "mpeg-ts" || c == "ts" {
+		return true
+	}
+	url := strings.ToLower(inputURL)
+	if strings.HasSuffix(url, ".ts") || strings.Contains(url, ".ts?") {
+		return true
+	}
+	if strings.Contains(url, ":5004/") {
+		return true
+	}
+	if strings.HasSuffix(url, ".mp4") || strings.HasSuffix(url, ".mkv") ||
+		strings.HasSuffix(url, ".webm") || strings.HasSuffix(url, ".mov") ||
+		strings.HasSuffix(url, ".avi") {
+		return false
+	}
+	return true
+}
+
 func buildSource(opts PipelineOpts) string {
 	switch opts.InputType {
 	case "rtsp":
@@ -402,14 +422,26 @@ func canCopyAudio(codec string, format OutputFormat) bool {
 }
 
 func NormalizeCodec(codec string) string {
-	c := strings.ToLower(codec)
-	switch c {
-	case "hevc":
+	c := strings.ToLower(strings.TrimSpace(codec))
+	switch {
+	case c == "hevc" || c == "h.265 video" || c == "h265 video":
 		return "h265"
-	case "mpeg2", "mpeg2video":
+	case c == "h.264 video" || c == "h264 video":
+		return "h264"
+	case c == "mpeg2" || c == "mpeg2video" || c == "mpeg2 video" || c == "mpeg-2 video":
 		return "mpeg2video"
-	case "aac_latm", "mp4a-latm":
+	case c == "aac_latm" || c == "mp4a-latm" || c == "aac audio (latm)":
 		return "aac_latm"
+	case c == "aac" || c == "aac audio":
+		return "aac"
+	case c == "mp2" || c == "mp2 (mpeg audio layer 2)" || c == "mpeg audio layer 2" || c == "mpeg-1 audio" || c == "mp3" || c == "mpeg audio":
+		return "mp2"
+	case c == "ac3" || c == "ac-3" || c == "a_ac3":
+		return "ac3"
+	case c == "eac3" || c == "e-ac-3" || c == "a_eac3":
+		return "eac3"
+	case c == "av1 video":
+		return "av1"
 	}
 	return c
 }

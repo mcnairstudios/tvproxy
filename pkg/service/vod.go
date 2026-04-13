@@ -361,7 +361,7 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 		Command:          sa.Command,
 		Args:             sa.Args,
 		OutputDir:        s.config.VODOutputDir,
-		MetadataOnly:     sa.Delivery == "hls",
+		MetadataOnly:     false,
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", 0, false, err
@@ -421,6 +421,10 @@ func (s *VODService) GetSession(channelID string) *session.Session {
 
 func (s *VODService) GetBufferedSecs(channelID string) float64 {
 	return s.sessionMgr.GetBufferedSecs(channelID)
+}
+
+func (s *VODService) GetFileSize(channelID string) int64 {
+	return s.sessionMgr.GetFileSize(channelID)
 }
 
 func (s *VODService) IsDone(channelID string) bool {

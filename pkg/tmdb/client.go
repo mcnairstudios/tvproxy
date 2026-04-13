@@ -304,6 +304,40 @@ func (c *Client) Status() SyncStatus {
 	}
 }
 
+func (c *Client) UpdateSearchCacheForName(name, mediaType string, tmdbID int) {
+	clean, year := CleanVODName(name)
+	query := clean
+	if year != "" {
+		query = clean + " (" + year + ")"
+	}
+	searchType := mediaType
+	if mediaType == "series" {
+		searchType = "tv"
+	}
+	cacheKey := SearchCacheKey(query, searchType)
+	c.cache.Set(cacheKey, map[string]any{
+		"results": []any{
+			map[string]any{"id": float64(tmdbID)},
+		},
+	})
+}
+
+func (c *Client) GetMovieByID(tmdbID int) *MovieMeta {
+	return c.meta.GetMovie(tmdbID)
+}
+
+func (c *Client) GetSeriesByID(tmdbID int) *SeriesMeta {
+	return c.meta.GetSeries(tmdbID)
+}
+
+func (c *Client) GetEpisodeByID(tmdbID int, season, episode int) *EpisodeMeta {
+	return c.meta.GetEpisode(tmdbID, season, episode)
+}
+
+func (c *Client) GetCollectionByID(tmdbID int) *CollectionMeta {
+	return c.meta.GetCollection(tmdbID)
+}
+
 func (c *Client) Rematch(tmdbID int, mediaType string) error {
 	if tmdbID == 0 {
 		return fmt.Errorf("tmdb_id required")

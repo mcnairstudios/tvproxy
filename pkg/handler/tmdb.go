@@ -127,9 +127,38 @@ func (h *TMDBHandler) Rematch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	stream, _ := h.streamStore.GetByID(r.Context(), req.StreamID)
+	if stream != nil {
+		lookupName := stream.Name
+		if stream.VODSeries != "" {
+			lookupName = stream.VODSeries
+		}
+		h.client.UpdateSearchCacheForName(lookupName, req.MediaType, req.TMDBID)
+	}
+
 	h.updateRelatedStreams(r.Context(), req.StreamID, req.TMDBID, req.MediaType)
 
-	respondJSON(w, http.StatusOK, map[string]any{"tmdb_id": req.TMDBID})
+	result := map[string]any{"tmdb_id": req.TMDBID}
+	if req.MediaType == "movie" {
+		if m := h.client.GetMovieByID(req.TMDBID); m != nil {
+			result["poster_url"] = tmdb.PosterURL(m.PosterPath)
+			result["overview"] = m.Overview
+			result["rating"] = m.Rating
+			result["year"] = m.Year
+			result["genres"] = m.Genres
+			result["certification"] = m.Certification
+		}
+	} else {
+		if s := h.client.GetSeriesByID(req.TMDBID); s != nil {
+			result["poster_url"] = tmdb.PosterURL(s.PosterPath)
+			result["overview"] = s.Overview
+			result["rating"] = s.Rating
+			result["year"] = s.Year
+			result["genres"] = s.Genres
+			result["certification"] = s.Certification
+		}
+	}
+	respondJSON(w, http.StatusOK, result)
 }
 
 func (h *TMDBHandler) updateRelatedStreams(ctx context.Context, sourceStreamID string, tmdbID int, mediaType string) {

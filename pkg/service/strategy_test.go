@@ -96,8 +96,8 @@ func TestResolveSessionStrategy_VODRemote(t *testing.T) {
 	if s.Category != CategoryVODRemote {
 		t.Errorf("category = %d, want CategoryVODRemote", s.Category)
 	}
-	if !s.MetadataOnly {
-		t.Error("MetadataOnly should be true for remote VOD with HLS delivery")
+	if s.MetadataOnly {
+		t.Error("MetadataOnly should be false for VOD (session manager starts transcoder)")
 	}
 	if s.HLSOutputDir != "" {
 		t.Error("HLSOutputDir should be empty for VOD")
@@ -122,8 +122,8 @@ func TestResolveSessionStrategy_VODLocal(t *testing.T) {
 	if s.Category != CategoryVODLocal {
 		t.Errorf("category = %d, want CategoryVODLocal", s.Category)
 	}
-	if !s.MetadataOnly {
-		t.Error("MetadataOnly should be true for local VOD with HLS delivery")
+	if s.MetadataOnly {
+		t.Error("MetadataOnly should be false for VOD (session manager starts transcoder)")
 	}
 }
 

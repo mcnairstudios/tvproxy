@@ -447,6 +447,20 @@ func (m *Manager) GetBufferedSecs(channelID string) float64 {
 	return s.SeekOffset + s.getBuffered()
 }
 
+func (m *Manager) GetFileSize(channelID string) int64 {
+	m.mu.RLock()
+	s, ok := m.sessions[channelID]
+	m.mu.RUnlock()
+	if !ok {
+		return 0
+	}
+	info, err := os.Stat(s.FilePath)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
 func (m *Manager) GetError(channelID string) error {
 	m.mu.RLock()
 	s, ok := m.sessions[channelID]
@@ -1056,14 +1070,21 @@ func (m *Manager) runGStreamerNative(ctx context.Context, s *Session, pipelineSt
 	if s.Video != nil {
 		srcCodec = gstreamer.NormalizeCodec(s.Video.Codec)
 	}
+	srcAudioCodec := ""
+	if len(s.AudioTracks) > 0 {
+		srcAudioCodec = gstreamer.NormalizeCodec(s.AudioTracks[0].Codec)
+	}
 	isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy" || outCodec == srcCodec
 	m.log.Info().Str("session_id", s.ID).Str("out", outCodec).Str("src", srcCodec).Bool("copy", isCopy).Bool("plugins", gstreamer.PluginsAvailable()).Msg("pipeline path selection")
 
-	if gstreamer.PluginsAvailable() && isCopy {
+	isRTSP := strings.HasPrefix(inputURL, "rtsp://") || strings.HasPrefix(inputURL, "rtsps://")
+	isMPEGTS := isRTSP || gstreamer.IsMPEGTS(s.startOpts.OutputContainer, inputURL)
+	if isMPEGTS && isCopy && gstreamer.PluginsAvailable() {
 		pipeline, err = gst.NewPipelineFromString(pipelineStr)
 	} else {
-		pipeline, err = gstreamer.BuildNativeFromOpts(s.startOpts.OutputVideoCodec, s.startOpts.OutputAudioCodec, s.startOpts.OutputHWAccel, inputURL, s.FilePath)
+		pipeline, err = gstreamer.BuildNativeFromOpts(s.startOpts.OutputVideoCodec, srcAudioCodec, s.startOpts.OutputHWAccel, inputURL, s.FilePath, srcCodec)
 	}
+	m.log.Info().Str("session_id", s.ID).Bool("mpegts", isMPEGTS).Msg("pipeline path selected")
 	if err != nil {
 		s.setError(fmt.Errorf("gstreamer pipeline creation failed: %w", err))
 		return

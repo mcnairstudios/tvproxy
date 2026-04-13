@@ -139,7 +139,7 @@ func vodRemoteStrategy(in StrategyInput, out StrategyOutput) SessionStrategy {
 		Command:         out.Command,
 		FFmpegArgs:      out.Args,
 		SourceInputArgs: buildSourceInputArgs(sp),
-		MetadataOnly:    out.Delivery == "hls",
+		MetadataOnly:    false,
 	}
 	if sp != nil {
 		s.SourceDeinterlace = sp.Deinterlace
@@ -161,7 +161,7 @@ func vodLocalStrategy(in StrategyInput, out StrategyOutput) SessionStrategy {
 		Container:    out.Container,
 		Command:      out.Command,
 		FFmpegArgs:   out.Args,
-		MetadataOnly: out.Delivery == "hls",
+		MetadataOnly: false,
 	}
 	return s
 }

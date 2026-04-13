@@ -238,6 +238,7 @@
   };
 
   var _favoriteIds = null;
+  var _vodLibraryCache = {};
 
   function loadFavorites() {
     return api.get('/api/favorites').then(function(ids) {
@@ -867,10 +868,24 @@
       } else {
         refreshPromise = api.del('/api/tmdb/cache?query=' + encodeURIComponent(show.name) + '&type=tv');
       }
-      refreshPromise.then(function() {
-        overlay.remove();
+      refreshPromise.then(function(resp) {
         toast.success('Refreshing metadata for ' + show.name);
-        if (onRefresh) onRefresh();
+        if (resp && resp.poster_url) {
+          show.episodes.forEach(function(ep) {
+            ep.poster_url = resp.poster_url;
+            if (resp.overview) ep.overview = resp.overview;
+            if (resp.rating) ep.rating = resp.rating;
+            if (resp.year) ep.year = resp.year;
+            if (resp.genres) ep.genres = resp.genres;
+          });
+          backdrop.style.backgroundImage = 'url(' + resp.poster_url + ')';
+          backdrop.style.backgroundSize = 'cover';
+          backdrop.style.backgroundPosition = 'center 20%';
+          _vodLibraryCache = {};
+        } else {
+          overlay.remove();
+          if (onRefresh) onRefresh();
+        }
       }).catch(function() {
         refreshBtn.style.opacity = '1';
         refreshBtn.disabled = false;
@@ -886,9 +901,31 @@
     rematchBtn.onmouseleave = function() { rematchBtn.style.background = 'rgba(0,0,0,0.6)'; };
     rematchBtn.onclick = function() {
       var firstEp = show.episodes[0];
-      if (firstEp) showRematchModal(firstEp.id, 'series', show.name, function() {
-        overlay.remove();
-        if (onRefresh) onRefresh();
+      if (firstEp) showRematchModal(firstEp.id, 'series', show.name, function(resp) {
+        if (resp && resp.poster_url) {
+          show.episodes.forEach(function(ep) {
+            ep.poster_url = resp.poster_url;
+            ep.tmdb_id = resp.tmdb_id;
+            if (resp.overview) ep.overview = resp.overview;
+            if (resp.rating) ep.rating = resp.rating;
+            if (resp.year) ep.year = resp.year;
+            if (resp.genres) ep.genres = resp.genres;
+            if (resp.certification) ep.certification = resp.certification;
+          });
+          var posterImg = backdrop.querySelector('img');
+          if (posterImg) { posterImg.src = resp.poster_url; }
+          else {
+            backdrop.style.backgroundImage = 'url(' + resp.poster_url + ')';
+            backdrop.style.backgroundSize = 'cover';
+            backdrop.style.backgroundPosition = 'center 20%';
+          }
+          if (resp.overview) {
+            var overviewEl = tmdbMeta.querySelector('[data-overview]');
+            if (overviewEl) overviewEl.textContent = resp.overview;
+          }
+          _vodLibraryCache = {};
+        }
+        if (onRefresh) onRefresh(resp);
       });
     };
     backdrop.appendChild(rematchBtn);
@@ -1177,9 +1214,17 @@
       rematchIcon.onmouseenter = function() { rematchIcon.style.background = 'rgba(255,255,255,0.2)'; };
       rematchIcon.onmouseleave = function() { rematchIcon.style.background = 'rgba(0,0,0,0.5)'; };
       rematchIcon.onclick = function() {
-        showRematchModal(opts.vodStreamID, opts.mediaType, opts.title, function() {
-          overlay.remove();
-          if (opts.onRefresh) opts.onRefresh();
+        showRematchModal(opts.vodStreamID, opts.mediaType, opts.title, function(resp) {
+          if (resp && resp.poster_url) {
+            backdrop.style.backgroundImage = 'url(' + resp.poster_url + ')';
+            backdrop.style.backgroundSize = 'cover';
+            backdrop.style.backgroundPosition = 'center 20%';
+            if (resp.overview && descEl) descEl.textContent = resp.overview;
+            _vodLibraryCache = {};
+          } else {
+            overlay.remove();
+            if (opts.onRefresh) opts.onRefresh();
+          }
         });
       };
       actionIcons.appendChild(rematchIcon);
@@ -1233,10 +1278,27 @@
         var mt = opts.mediaType === 'series' ? 'tv' : 'movie';
         rp = api.del('/api/tmdb/cache?query=' + encodeURIComponent(opts.title) + '&type=' + mt);
       }
-      rp.then(function() {
-        overlay.remove();
-        if (opts.onRefresh) opts.onRefresh();
-        else showProgrammeModal(opts);
+      rp.then(function(resp) {
+        if (resp && resp.poster_url) {
+          backdrop.style.backgroundImage = 'url(' + resp.poster_url + ')';
+          backdrop.style.backgroundSize = 'cover';
+          backdrop.style.backgroundPosition = 'center 20%';
+          if (resp.overview) {
+            if (!descEl) {
+              descEl = document.createElement('p');
+              descEl.style.cssText = 'color:#b0b8c8;font-size:15px;line-height:1.7;margin:0;';
+              descArea.appendChild(descEl);
+            }
+            descEl.textContent = resp.overview;
+          }
+          refreshIcon.style.opacity = '1';
+          refreshIcon.disabled = false;
+          _vodLibraryCache = {};
+        } else {
+          overlay.remove();
+          if (opts.onRefresh) opts.onRefresh();
+          else showProgrammeModal(opts);
+        }
       }).catch(function() {
         refreshIcon.style.opacity = '1';
         refreshIcon.disabled = false;
@@ -1273,8 +1335,9 @@
 
     var descArea = document.createElement('div');
     descArea.style.cssText = 'margin-bottom:24px;';
+    var descEl = null;
     if (opts.description) {
-      var descEl = document.createElement('p');
+      descEl = document.createElement('p');
       descEl.style.cssText = 'color:#b0b8c8;font-size:15px;line-height:1.7;margin:0;';
       descEl.textContent = opts.description;
       descArea.appendChild(descEl);
@@ -1491,10 +1554,10 @@
             e.stopPropagation();
             selectBtn.disabled = true;
             selectBtn.textContent = '...';
-            api.post('/api/tmdb/rematch', { stream_id: streamID, tmdb_id: r.id, media_type: mediaType }).then(function() {
+            api.post('/api/tmdb/rematch', { stream_id: streamID, tmdb_id: r.id, media_type: mediaType }).then(function(resp) {
               toast.success('Matched to: ' + title);
               overlay.remove();
-              if (onDone) onDone();
+              if (onDone) onDone(resp);
             }).catch(function() {
               selectBtn.disabled = false;
               selectBtn.textContent = 'Select';
@@ -6251,13 +6314,50 @@
         buildGrid: function(container, items, matchFn) {
           grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:20px;' });
           renderFn = function() {
-            grid.innerHTML = '';
             var filtered = items.filter(function(item) {
               var term = searchInput.value.trim().toLowerCase();
               if (term && cfg.getName(item).toLowerCase().indexOf(term) === -1) return false;
               return matchFn(item, activeFilters);
             });
-            filtered.forEach(function(item) { renderCard(item, grid); });
+            var html = '';
+            filtered.forEach(function(item, idx) {
+              var name = cfg.getName(item);
+              var poster = cfg.getPoster(item);
+              var badge = cfg.getOverlayBadge ? cfg.getOverlayBadge(item) : null;
+              var badges = cfg.getBadges(item);
+              var genres = cfg.getGenres(item);
+              html += '<div data-idx="' + idx + '" style="cursor:pointer;border-radius:12px;overflow:hidden;background:var(--bg-card);border:1px solid var(--border);transition:transform 0.2s,box-shadow 0.2s;" data-sort-name="' + esc(name) + '">';
+              html += '<div style="width:100%;aspect-ratio:2/3;background:linear-gradient(135deg,#1a1a2e,#16213e);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;">';
+              if (poster) {
+                html += '<img src="' + esc(poster) + '" style="width:100%;height:100%;object-fit:cover;" loading="lazy">';
+              } else {
+                html += '<div style="padding:12px;text-align:center;color:#fff;font-size:14px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.5);">' + esc(name) + '</div>';
+              }
+              if (badge) {
+                html += '<div style="position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,0.7);color:#fff;font-size:10px;padding:3px 8px;border-radius:4px;font-weight:600;">' + esc(badge) + '</div>';
+              }
+              html += '</div>';
+              html += '<div style="padding:10px 12px;">';
+              html += '<div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(name) + '</div>';
+              if (badges.length) {
+                html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">';
+                badges.forEach(function(b) { html += '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.08);color:var(--text-muted);">' + esc(b) + '</span>'; });
+                html += '</div>';
+              }
+              if (genres && genres.length) {
+                html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;">';
+                genres.slice(0, 2).forEach(function(g) { html += '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(59,130,246,0.15);color:#60a5fa;">' + esc(g) + '</span>'; });
+                html += '</div>';
+              }
+              html += '</div></div>';
+            });
+            grid.innerHTML = html;
+            grid.querySelectorAll('[data-idx]').forEach(function(card) {
+              var idx = parseInt(card.dataset.idx, 10);
+              card.onmouseenter = function() { card.style.transform = 'scale(1.03)'; card.style.boxShadow = '0 8px 30px rgba(0,0,0,0.3)'; };
+              card.onmouseleave = function() { card.style.transform = ''; card.style.boxShadow = ''; };
+              card.onclick = function() { cfg.onCardClick(filtered[idx]); };
+            });
             countSpan.textContent = filtered.length + ' / ' + items.length + ' titles';
             setupGridKeyJump(grid);
           };
@@ -6269,10 +6369,17 @@
 
     movies: async function(container) {
       container.innerHTML = '';
-      container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading movies...'));
 
       try {
-        var items = await api.get('/api/vod/library?type=movie&source=local');
+        var cacheKey = 'movies_local';
+        var items;
+        if (_vodLibraryCache[cacheKey]) {
+          items = _vodLibraryCache[cacheKey];
+        } else {
+          container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading movies...'));
+          items = await api.get('/api/vod/library?type=movie&source=local');
+          _vodLibraryCache[cacheKey] = items;
+        }
         container.innerHTML = '';
 
         if (items.length === 0) {
@@ -6390,7 +6497,7 @@
               rating: item.rating, genres: item.genres,
               channelName: '', channelID: null, tvgId: null,
               isLive: false, isFuture: false, vodStreamURL: item.url, vodStreamID: item.id,
-              tmdbID: item.tmdb_id, onRefresh: function() { pages.movies(container); },
+              tmdbID: item.tmdb_id, onRefresh: function() { delete _vodLibraryCache['movies_local']; pages.movies(container); },
             });
           },
         });
@@ -6541,10 +6648,17 @@
 
     'tv-series': async function(container) {
       container.innerHTML = '';
-      container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading TV series...'));
 
       try {
-        var items = await api.get('/api/vod/library?type=series&source=local');
+        var cacheKey = 'series_local';
+        var items;
+        if (_vodLibraryCache[cacheKey]) {
+          items = _vodLibraryCache[cacheKey];
+        } else {
+          container.appendChild(h('div', { className: 'loading-page' }, h('div', { className: 'spinner' }), 'Loading TV series...'));
+          items = await api.get('/api/vod/library?type=series&source=local');
+          _vodLibraryCache[cacheKey] = items;
+        }
         container.innerHTML = '';
 
         if (items.length === 0) {
@@ -6715,7 +6829,7 @@
           },
           onCardClick: function(di) {
             if (di.type === 'tv-collection') { showTvCollectionModal(di.collection); return; }
-            showSeriesDetail(di.show, function() { pages['tv-series'](container); });
+            showSeriesDetail(di.show, function() { delete _vodLibraryCache['series_local']; pages['tv-series'](container); });
           },
         });
 
