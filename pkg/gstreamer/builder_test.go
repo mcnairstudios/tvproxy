@@ -205,6 +205,8 @@ func TestBuild_MPEGTSDetection(t *testing.T) {
 		{"VOD .mp4", "http://server/movie.mp4", "mp4", false},
 		{"VOD .mkv", "http://server/movie.mkv", "matroska", false},
 		{"Unknown URL no container", "http://provider/live/123", "", true},
+		{"IPTV no extension", "http://iptv.provider.com/live/user/pass/12345", "", true},
+		{"Query string URL", "http://provider.com/stream?id=123&token=abc", "", true},
 	}
 
 	for _, tt := range tests {
