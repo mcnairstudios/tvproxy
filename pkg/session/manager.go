@@ -676,10 +676,12 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	srcVideo := ""
 	srcAudio := ""
 	container := ""
+	srcWidth := 0
 	if probe != nil {
 		if probe.Video != nil {
 			srcVideo = probe.Video.Codec
 		}
+		srcWidth = probe.Width
 		if len(probe.AudioTracks) > 0 {
 			srcAudio = probe.AudioTracks[0].Codec
 		}
@@ -737,6 +739,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		HTTPRetries:       s.startOpts.HTTPRetries,
 		TSSetTimestamps:   s.startOpts.TSSetTimestamps,
 		EncoderBitrateKbps: s.startOpts.EncoderBitrateKbps,
+		SourceWidth:        srcWidth,
 	}
 
 	m.log.Info().

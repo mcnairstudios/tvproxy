@@ -415,6 +415,9 @@ func bitrate(opts PipelineOpts) int {
 	if opts.EncoderBitrateKbps > 0 {
 		return opts.EncoderBitrateKbps
 	}
+	if opts.SourceWidth > 0 {
+		return scaledBitrate(opts.SourceWidth)
+	}
 	return 6000
 }
 

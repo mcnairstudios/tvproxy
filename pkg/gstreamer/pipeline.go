@@ -64,6 +64,8 @@ type PipelineOpts struct {
 	HTTPRetries       int
 	TSSetTimestamps   bool
 	EncoderBitrateKbps int
+	SourceWidth        int
+	SourceHeight       int
 
 	DualOutput   bool
 }
