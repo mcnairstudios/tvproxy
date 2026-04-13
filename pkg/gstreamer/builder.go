@@ -199,6 +199,13 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 	if opts.UserAgent != "" {
 		src.SetProperty("user-agent", opts.UserAgent)
 	}
+	if len(opts.ExtraHeaders) > 0 {
+		headers := gst.NewStructure("extra-headers")
+		for k, v := range opts.ExtraHeaders {
+			headers.SetValue(k, v)
+		}
+		src.SetProperty("extra-headers", headers)
+	}
 
 	container := strings.ToLower(opts.Container)
 	if container == "" {
