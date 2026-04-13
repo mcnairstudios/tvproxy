@@ -135,8 +135,6 @@ func (s *VODService) transcoderPreference(ctx context.Context) string {
 }
 
 type sessionArgs struct {
-	Command          string
-	Args             string
 	Container        string
 	Delivery         string
 	OutputVideoCodec string
@@ -146,11 +144,11 @@ type sessionArgs struct {
 
 func (s *VODService) composeSessionArgs(ctx context.Context, profileName, streamURL, streamGroup string) sessionArgs {
 	if profileName == "" {
-		return sessionArgs{Command: "ffmpeg", Container: "mp4"}
+		return sessionArgs{Container: "mp4"}
 	}
 	sp, err := s.streamProfileRepo.GetByName(ctx, profileName)
 	if err != nil {
-		return sessionArgs{Command: "ffmpeg", Container: "mp4"}
+		return sessionArgs{Container: "mp4"}
 	}
 
 	globalHW, globalCodec := s.settingsService.ResolveGlobalDefaults(ctx)
@@ -168,8 +166,6 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 	}
 
 	return sessionArgs{
-		Command:          "gst-launch-1.0",
-		Args:             "",
 		Container:        sp.Container,
 		Delivery:         sp.Delivery,
 		OutputVideoCodec: videoCodec,
@@ -203,8 +199,6 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 			AudioCodec: sa.OutputAudioCodec,
 			HWAccel:    sa.OutputHWAccel,
 			Container:  sa.Container,
-			Command:    sa.Command,
-			Args:       sa.Args,
 		},
 		s.config.VODOutputDir,
 	)
@@ -221,8 +215,6 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		OutputContainer:  strategy.Container,
 		OutputHWAccel:    strategy.HWAccel,
 		UseWireGuard:     useWG,
-		Command:          strategy.Command,
-		Args:             strategy.FFmpegArgs,
 		OutputDir:        s.config.VODOutputDir,
 		HLSOutputDir:     strategy.HLSOutputDir,
 		SourceInputArgs:   strategy.SourceInputArgs,
@@ -231,7 +223,6 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		SourceFPSMode:     strategy.SourceFPSMode,
 		SkipProbe:         strategy.SkipProbe,
 		MetadataOnly:     strategy.MetadataOnly,
-		Transcoder:       s.transcoderPreference(ctx),
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", false, err
@@ -289,8 +280,6 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 			AudioCodec: sa.OutputAudioCodec,
 			HWAccel:    sa.OutputHWAccel,
 			Container:  sa.Container,
-			Command:    sa.Command,
-			Args:       sa.Args,
 		},
 		s.config.VODOutputDir,
 	)
@@ -307,8 +296,6 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		OutputContainer:  strategy.Container,
 		OutputHWAccel:    strategy.HWAccel,
 		UseWireGuard:     stream.UseWireGuard,
-		Command:          strategy.Command,
-		Args:             strategy.FFmpegArgs,
 		OutputDir:        s.config.VODOutputDir,
 		HLSOutputDir:     strategy.HLSOutputDir,
 		SourceInputArgs:   strategy.SourceInputArgs,
@@ -318,7 +305,6 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		SkipProbe:         strategy.SkipProbe,
 		KnownDuration:    stream.VODDuration,
 		MetadataOnly:     strategy.MetadataOnly,
-		Transcoder:       s.transcoderPreference(ctx),
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", err
@@ -358,8 +344,6 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 		OutputAudioCodec: sa.OutputAudioCodec,
 		OutputContainer:  sa.Container,
 		OutputHWAccel:    sa.OutputHWAccel,
-		Command:          sa.Command,
-		Args:             sa.Args,
 		OutputDir:        s.config.VODOutputDir,
 		MetadataOnly:     false,
 	}, session.ConsumerViewer)

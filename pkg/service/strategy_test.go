@@ -88,7 +88,6 @@ func TestResolveSessionStrategy_VODRemote(t *testing.T) {
 		VideoCodec: "copy",
 		AudioCodec: "aac",
 		Container:  "mp4",
-		Args:       "-c:v copy -c:a aac",
 	}
 
 	s := resolveSessionStrategy(in, out, "/tmp/recordings")

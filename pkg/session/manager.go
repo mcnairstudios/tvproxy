@@ -1,18 +1,14 @@
 package session
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/go-gst/go-gst/gst"
@@ -44,8 +40,6 @@ type StartOpts struct {
 	UseWireGuard     bool
 	KnownDuration    float64
 	SeekOffset       float64
-	Command           string
-	Args              string
 	OutputDir         string
 	HLSOutputDir      string
 	SourceInputArgs   string
@@ -56,7 +50,6 @@ type StartOpts struct {
 	SourceFPSMode     string
 	SkipProbe         bool
 	MetadataOnly      bool
-	Transcoder        string // "auto", "gstreamer", "ffmpeg"
 }
 
 type Manager struct {
@@ -119,176 +112,6 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 }
 
 
-func (m *Manager) buildArgs(argsStr string, inputURL string, outputPath string, useWireGuard bool, hlsOutputDir string, opts StartOpts) []string {
-	hasTSHeader := false
-	if m.probeCache != nil {
-		if h, _ := m.probeCache.GetTSHeader(media.StreamHash(inputURL)); h != nil {
-			hasTSHeader = true
-		}
-	}
-	pipeInput := media.IsHTTPURL(inputURL) && (useWireGuard || hasTSHeader)
-
-	if hlsOutputDir != "" {
-		if useWireGuard && m.wgClient != nil && media.IsHTTPURL(inputURL) {
-			proxy, err := m.wgProxyMgr.GetOrCreate("default", m.wgClient, m.config, m.log)
-			if err == nil {
-				opts.StreamURL = proxy.ProxyURL(inputURL)
-				pipeInput = false
-				m.log.Info().Str("proxy_url", opts.StreamURL[:60]+"...").Msg("using wg proxy for ffmpeg")
-			}
-		}
-		return m.buildDualOutputArgs(hlsOutputDir, outputPath, pipeInput, opts)
-	}
-
-	var args []string
-	if argsStr == "" {
-		if pipeInput {
-			args = media.ShellSplit("-hide_banner -loglevel warning -nostdin -f mpegts -analyzeduration 1000000 -probesize 1000000 -err_detect ignore_err -fflags +genpts+discardcorrupt -i pipe:0 -map 0:v:0? -map 0:a:0? -c:v copy -c:a aac -ac 2 -b:a 192k -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof {output}")
-		} else {
-			args = media.ShellSplit("-hide_banner -loglevel warning -i {input} -c copy -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof {output}")
-		}
-	} else {
-		args = media.ShellSplit(argsStr)
-	}
-
-	for i, arg := range args {
-		switch arg {
-		case "{input}":
-			if pipeInput {
-				args[i] = "pipe:0"
-			} else {
-				args[i] = inputURL
-			}
-		case "{output}", "pipe:1":
-			args[i] = outputPath
-		}
-	}
-
-	args = append([]string{"-y"}, args...)
-	args = append(args, "-progress", "pipe:2")
-
-	return args
-}
-
-func (m *Manager) buildDualOutputArgs(hlsDir, mp4Path string, pipeInput bool, opts StartOpts) []string {
-	videoCodec := opts.OutputVideoCodec
-	if videoCodec == "" || videoCodec == "default" {
-		videoCodec = "copy"
-	}
-	audioCodec := opts.OutputAudioCodec
-	if audioCodec == "" || audioCodec == "default" {
-		audioCodec = "aac"
-	}
-	hwaccel := opts.OutputHWAccel
-
-	var args []string
-	args = append(args, "-y", "-hide_banner", "-loglevel", "warning", "-nostdin")
-
-	if videoCodec != "copy" && hwaccel != "" && hwaccel != "none" && hwaccel != "default" {
-		switch hwaccel {
-		case "vaapi":
-			args = append(args, "-hwaccel", "vaapi", "-hwaccel_device", "/dev/dri/renderD128", "-hwaccel_output_format", "vaapi")
-		case "qsv":
-			args = append(args, "-hwaccel", "qsv", "-hwaccel_device", "/dev/dri/renderD128", "-hwaccel_output_format", "qsv")
-		case "nvenc", "cuda":
-			args = append(args, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
-		case "videotoolbox":
-			args = append(args, "-hwaccel", "videotoolbox")
-		}
-	}
-
-	if opts.SourceInputArgs != "" {
-		inputParts := media.ShellSplit(opts.SourceInputArgs)
-		args = append(args, inputParts...)
-	} else {
-		args = append(args,
-			"-f", "mpegts",
-			"-analyzeduration", "1000000",
-			"-probesize", "1000000",
-			"-err_detect", "ignore_err",
-			"-fflags", "+genpts+discardcorrupt",
-		)
-	}
-
-	inputArg := opts.StreamURL
-	if pipeInput {
-		inputArg = "pipe:0"
-	}
-	args = append(args,
-		"-i", inputArg,
-		"-map", "0:v:0?",
-		"-map", "0:a:0?",
-	)
-
-	venc := media.MapEncoderHW(videoCodec, hwaccel)
-	if opts.SourceDeinterlace && venc == "copy" {
-		venc = "libx264"
-	}
-	args = append(args, "-c:v", venc)
-
-	var vfParts []string
-	if hwaccel == "vaapi" && strings.Contains(venc, "h264") {
-		vfParts = append(vfParts, "scale_vaapi=format=nv12")
-	}
-	if opts.SourceDeinterlace && venc != "copy" {
-		switch hwaccel {
-		case "vaapi":
-			vfParts = append(vfParts, "deinterlace_vaapi")
-		case "qsv":
-			vfParts = append(vfParts, "vpp_qsv=deinterlace=2")
-		default:
-			vfParts = append(vfParts, "yadif")
-		}
-	}
-	if len(vfParts) > 0 {
-		args = append(args, "-vf", strings.Join(vfParts, ","))
-	}
-	if opts.SourceFPSMode != "" && venc != "copy" {
-		args = append(args, "-fps_mode", opts.SourceFPSMode)
-	}
-
-	if audioCodec == "copy" {
-		args = append(args, "-c:a", "aac", "-ac", "2", "-b:a", "192k")
-	} else {
-		args = append(args, "-c:a", audioCodec, "-ac", "2", "-b:a", "192k")
-	}
-	if opts.SourceAudioResync {
-		args = append(args, "-af", "aresample=async=1000:first_pts=0")
-	}
-
-	args = append(args,
-		"-max_muxing_queue_size", "2048",
-		"-f", "hls",
-		"-hls_time", "6",
-		"-hls_segment_type", "fmp4",
-		"-hls_fmp4_init_filename", "init.mp4",
-		"-start_number", "0",
-		"-hls_playlist_type", "event",
-		"-hls_list_size", "0",
-		"-hls_segment_filename", filepath.Join(hlsDir, "seg%d.mp4"),
-		"-y", filepath.Join(hlsDir, "playlist.m3u8"),
-	)
-
-	mp4AudioCodec := "copy"
-	if opts.SourceAudioCodec == "aac_latm" || opts.SourceAudioCodec == "mp2" || opts.SourceAudioCodec == "mp3" {
-		mp4AudioCodec = "aac"
-	}
-	mp4Args := []string{"-c:v", "copy", "-c:a", mp4AudioCodec}
-	if mp4AudioCodec == "copy" {
-		mp4Args = append(mp4Args, "-bsf:a", "aac_adtstoasc")
-	} else {
-		mp4Args = append(mp4Args, "-ac", "2", "-b:a", "192k")
-	}
-	mp4Args = append(mp4Args,
-		"-f", "mp4",
-		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
-		mp4Path,
-	)
-	args = append(args, mp4Args...)
-
-	args = append(args, "-progress", "pipe:2")
-	return args
-}
 
 const lingerDuration = 30 * time.Second
 
@@ -499,42 +322,12 @@ func (m *Manager) RestartWithSeek(ctx context.Context, channelID string, positio
 	case <-time.After(3 * time.Second):
 	}
 
-	seekStr := fmt.Sprintf("%.1f", position)
-	origArgs := opts.Args
-	if strings.Contains(origArgs, " -ss ") {
-		origArgs = strings.Join(removeSSArgs(strings.Fields(origArgs)), " ")
-	}
-	if opts.StreamURL != "" {
-		origArgs = strings.Replace(origArgs, "{input}", opts.StreamURL, 1)
-		origArgs = strings.Replace(origArgs, "pipe:0", opts.StreamURL, 1)
-	}
-	if idx := strings.Index(origArgs, "-i "); idx >= 0 {
-		opts.Args = origArgs[:idx] + "-ss " + seekStr + " " + origArgs[idx:]
-	}
-
 	opts.KnownDuration = s.Duration
 	opts.SeekOffset = position
 
 	m.log.Info().Str("channel_id", channelID).Float64("position", position).Msg("restarting session with seek")
 
 	m.GetOrCreateWithConsumer(ctx, opts, ConsumerViewer)
-}
-
-func removeSSArgs(args []string) []string {
-	var out []string
-	skip := false
-	for _, a := range args {
-		if a == "-ss" {
-			skip = true
-			continue
-		}
-		if skip {
-			skip = false
-			continue
-		}
-		out = append(out, a)
-	}
-	return out
 }
 
 func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, consumerType string) (*Session, string, error) {
@@ -683,88 +476,6 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 	return s, c.ID, nil
 }
 
-func (m *Manager) resolveTranscoder(opts StartOpts, filePath string) (string, []string) {
-	hwAccel := gstreamer.HWNone
-	switch opts.OutputHWAccel {
-	case "vaapi":
-		hwAccel = gstreamer.HWVAAPI
-	case "qsv":
-		hwAccel = gstreamer.HWQSV
-	case "videotoolbox":
-		hwAccel = gstreamer.HWVideoToolbox
-	}
-
-	transcoder := opts.Transcoder
-	if transcoder == "" {
-		transcoder = "auto"
-	}
-	if transcoder == "ffmpeg" {
-		m.log.Info().Str("channel_id", opts.ChannelID).Msg("using ffmpeg (forced by setting)")
-		args := m.buildArgs(opts.Args, opts.StreamURL, filePath, opts.UseWireGuard, opts.HLSOutputDir, opts)
-		command := opts.Command
-		if command == "" {
-			command = "ffmpeg"
-		}
-		return command, args
-	}
-
-	m.log.Info().Str("stream_url", opts.StreamURL).Str("stream_id", opts.StreamID).Str("channel_id", opts.ChannelID).Msg("resolveTranscoder lookup")
-	choice := gstreamer.ShouldUseGStreamer(m.probeCache, opts.StreamURL, opts.StreamID, hwAccel)
-	if !choice.UseGStreamer && gstreamer.Available() {
-		choice.UseGStreamer = true
-		choice.Reason = "gstreamer available (no probe data, using defaults)"
-	}
-	if choice.UseGStreamer {
-		probe, _ := m.probeCache.GetProbe(media.StreamHash(opts.StreamURL))
-		if probe == nil {
-			probe, _ = m.probeCache.GetProbeByStreamID(opts.StreamID)
-		}
-
-		inputType := "http"
-		if strings.HasPrefix(opts.StreamURL, "rtsp://") {
-			inputType = "rtsp"
-		}
-
-		pipeOpts := gstreamer.PipelineOpts{
-			InputURL:         opts.StreamURL,
-			InputType:        inputType,
-			IsLive:           true,
-			OutputVideoCodec: opts.OutputVideoCodec,
-			OutputAudioCodec: opts.OutputAudioCodec,
-			OutputBitrate:    0,
-			OutputFormat:     gstreamer.OutputMP4,
-			HWAccel:          hwAccel,
-			RecordingPath:    filePath,
-		}
-
-		if opts.HLSOutputDir != "" {
-			pipeOpts.OutputFormat = gstreamer.OutputHLS
-			pipeOpts.HLSDir = opts.HLSOutputDir
-			pipeOpts.HLSSegmentTime = 6
-			pipeOpts.RecordingPath = ""
-		}
-
-		pipeline := gstreamer.BuildFromProbe(probe, opts.StreamURL, pipeOpts)
-		m.log.Info().
-			Str("channel_id", opts.ChannelID).
-			Str("reason", choice.Reason).
-			Str("pipeline", pipeline.PipelineStr).
-			Msg("using gstreamer")
-		return "gstreamer-native", []string{pipeline.PipelineStr}
-	}
-
-	m.log.Info().
-		Str("channel_id", opts.ChannelID).
-		Str("reason", choice.Reason).
-		Msg("using ffmpeg (gstreamer unavailable)")
-
-	args := m.buildArgs(opts.Args, opts.StreamURL, filePath, opts.UseWireGuard, opts.HLSOutputDir, opts)
-	command := opts.Command
-	if command == "" {
-		command = "ffmpeg"
-	}
-	return command, args
-}
 
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
@@ -1141,199 +852,6 @@ func (m *Manager) ensureProbe(ctx context.Context, opts StartOpts) *media.ProbeR
 	return result
 }
 
-func (m *Manager) run(ctx context.Context, s *Session, command string, args []string, inputURL string) {
-	defer s.markDone()
-
-	if command == "gstreamer-native" && len(args) > 0 {
-		m.runGStreamerNative(ctx, s, args[0], inputURL)
-		return
-	}
-
-	isGStreamer := strings.Contains(command, "gst-launch")
-	m.log.Info().Str("session_id", s.ID).Str("command", command).Msg("starting transcoder")
-
-	cmd := exec.CommandContext(ctx, command, args...)
-	cmd.Cancel = func() error {
-		return cmd.Process.Signal(syscall.SIGTERM)
-	}
-	waitDelay := 5 * time.Second
-	if m.config.Settings != nil {
-		waitDelay = m.config.Settings.FFmpeg.WaitDelay
-	}
-	cmd.WaitDelay = waitDelay
-
-	var tsHeader []byte
-	if !isGStreamer && m.probeCache != nil {
-		tsHeader, _ = m.probeCache.GetTSHeader(media.StreamHash(inputURL))
-	}
-
-	var httpResp *http.Response
-	if !isGStreamer && tsHeader != nil && media.IsHTTPURL(inputURL) && s.HLSOutputDir == "" {
-		m.log.Info().Str("session_id", s.ID).Int("header_size", len(tsHeader)).Msg("injecting cached TS header for fast startup")
-		resp, err := httputil.Fetch(ctx, m.clientForSession(s), m.config, inputURL)
-		if err != nil {
-			m.log.Error().Err(err).Msg("upstream connection failed")
-			s.setError(fmt.Errorf("upstream connection failed: %w", err))
-			return
-		}
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			s.setError(fmt.Errorf("upstream returned %d", resp.StatusCode))
-			return
-		}
-		httpResp = resp
-		pr, pw := io.Pipe()
-		cmd.Stdin = pr
-		go func() {
-			pw.Write(tsHeader)
-			io.Copy(pw, resp.Body)
-			pw.Close()
-		}()
-	} else if !isGStreamer && media.IsHTTPURL(inputURL) && s.UseWireGuard && s.HLSOutputDir == "" {
-		m.log.Info().Str("session_id", s.ID).Str("url", inputURL).Msg("routing upstream via wireguard")
-		resp, err := httputil.Fetch(ctx, m.clientForSession(s), m.config, inputURL)
-		if err != nil {
-			m.log.Error().Err(err).Str("session_id", s.ID).Str("url", inputURL).Msg("upstream connection failed")
-			s.setError(fmt.Errorf("upstream connection failed: %w", err))
-			return
-		}
-		if resp.StatusCode != http.StatusOK {
-			httputil.LogUpstreamFailure(m.log, resp, inputURL)
-			resp.Body.Close()
-			m.log.Error().Int("status", resp.StatusCode).Str("session_id", s.ID).Str("url", inputURL).Msg("upstream returned non-200")
-			s.setError(fmt.Errorf("upstream returned %d", resp.StatusCode))
-			return
-		}
-		httpResp = resp
-		cmd.Stdin = resp.Body
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		if httpResp != nil {
-			httpResp.Body.Close()
-		}
-		s.setError(fmt.Errorf("creating stderr pipe: %w", err))
-		return
-	}
-
-	if err := cmd.Start(); err != nil {
-		if httpResp != nil {
-			httpResp.Body.Close()
-		}
-		s.setError(fmt.Errorf("starting ffmpeg: %w", err))
-		return
-	}
-
-	go m.parseProgress(s, stderr)
-
-	if isGStreamer {
-		go m.pollFileProgress(ctx, s)
-	}
-
-	startupDur := 30 * time.Second
-	if m.config.Settings != nil {
-		startupDur = m.config.Settings.FFmpeg.StartupTimeout
-	}
-	startupTimeout := time.AfterFunc(startupDur, func() {
-		if s.getBuffered() == 0 {
-			m.log.Warn().Str("session_id", s.ID).Dur("timeout", startupDur).Msg("transcoder startup timeout, no data received")
-			s.cancel()
-		}
-	})
-
-	waitErr := cmd.Wait()
-	startupTimeout.Stop()
-
-	if httpResp != nil {
-		httpResp.Body.Close()
-	}
-
-	if waitErr != nil && ctx.Err() == nil {
-		stderr := s.LastStderr()
-		if stderr != "" {
-			s.setError(fmt.Errorf("transcoder failed: %w\n%s", waitErr, stderr))
-		} else {
-			s.setError(fmt.Errorf("transcoder failed: %w", waitErr))
-		}
-		if m.probeCache != nil && inputURL != "" {
-			_ = m.probeCache.InvalidateProbe(media.StreamHash(inputURL))
-		}
-	}
-}
-
-func (m *Manager) runGStreamerNative(ctx context.Context, s *Session, pipelineStr string, inputURL string) {
-	m.log.Info().Str("session_id", s.ID).Str("pipeline", pipelineStr).Msg("starting native gstreamer pipeline")
-
-	var pipeline *gst.Pipeline
-	var err error
-
-	outCodec := gstreamer.NormalizeCodec(s.startOpts.OutputVideoCodec)
-	srcCodec := ""
-	if s.Video != nil {
-		srcCodec = gstreamer.NormalizeCodec(s.Video.Codec)
-	}
-	srcAudioCodec := ""
-	if len(s.AudioTracks) > 0 {
-		srcAudioCodec = gstreamer.NormalizeCodec(s.AudioTracks[0].Codec)
-	}
-	isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy" || outCodec == srcCodec
-	m.log.Info().Str("session_id", s.ID).Str("out", outCodec).Str("src", srcCodec).Bool("copy", isCopy).Bool("plugins", gstreamer.PluginsAvailable()).Msg("pipeline path selection")
-
-	isRTSP := strings.HasPrefix(inputURL, "rtsp://") || strings.HasPrefix(inputURL, "rtsps://")
-	isMPEGTS := isRTSP || gstreamer.IsMPEGTS(s.startOpts.OutputContainer, inputURL)
-	if isMPEGTS && isCopy && gstreamer.PluginsAvailable() {
-		pipeline, err = gst.NewPipelineFromString(pipelineStr)
-	} else {
-		pipeline, err = gstreamer.BuildNativeFromOpts(s.startOpts.OutputVideoCodec, srcAudioCodec, s.startOpts.OutputHWAccel, inputURL, s.FilePath, srcCodec)
-	}
-	m.log.Info().Str("session_id", s.ID).Bool("mpegts", isMPEGTS).Msg("pipeline path selected")
-	if err != nil {
-		s.setError(fmt.Errorf("gstreamer pipeline creation failed: %w", err))
-		return
-	}
-
-	s.SetStopPipeline(func() {
-		pipeline.SetState(gst.StateNull)
-	})
-
-	pipeline.SetState(gst.StatePlaying)
-
-	go m.pollFileProgress(ctx, s)
-
-	bus := pipeline.GetBus()
-loop:
-	for {
-		msg := bus.TimedPop(gst.ClockTime(500000000))
-		if ctx.Err() != nil {
-			break loop
-		}
-		if msg == nil {
-			continue
-		}
-		switch msg.Type() {
-		case gst.MessageEOS:
-			m.log.Info().Str("session_id", s.ID).Msg("gstreamer EOS")
-			break loop
-		case gst.MessageError:
-			gstErr := msg.ParseError()
-			errStr := gstErr.Error()
-			if strings.Contains(errStr, "Could not multiplex") || strings.Contains(errStr, "clock problem") {
-				m.log.Warn().Str("session_id", s.ID).Err(gstErr).Msg("gstreamer transient error (continuing)")
-				continue
-			}
-			m.log.Error().Str("session_id", s.ID).Err(gstErr).Msg("gstreamer error")
-			s.setError(fmt.Errorf("gstreamer: %w", gstErr))
-			s.setLastStderr(gstErr.Error())
-			break loop
-		}
-	}
-
-	pipeline.SetState(gst.StateNull)
-	s.SetStopPipeline(nil)
-	m.log.Info().Str("session_id", s.ID).Msg("gstreamer pipeline stopped")
-}
-
 func (m *Manager) pollFileProgress(ctx context.Context, s *Session) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -1351,55 +869,3 @@ func (m *Manager) pollFileProgress(ctx context.Context, s *Session) {
 	}
 }
 
-func (m *Manager) parseProgress(s *Session, r io.Reader) {
-	scanner := bufio.NewScanner(r)
-	var lastErrors []string
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "out_time_us=") {
-			usStr := strings.TrimPrefix(line, "out_time_us=")
-			us, err := strconv.ParseInt(usStr, 10, 64)
-			if err == nil && us > 0 {
-				secs := float64(us) / 1_000_000.0
-				if secs > maxBufferedSecs {
-					m.log.Warn().Str("session_id", s.ID).Float64("secs", secs).Msg("transcoder progress exceeds 48h cap")
-					secs = maxBufferedSecs
-				}
-				s.setBuffered(secs)
-			}
-		} else if !isProgressNoise(line) && line != "" {
-			m.log.Warn().Str("session_id", s.ID).Str("stderr", line).Msg("transcoder output")
-			lastErrors = append(lastErrors, line)
-			if len(lastErrors) > 10 {
-				lastErrors = lastErrors[1:]
-			}
-		}
-	}
-	if len(lastErrors) > 0 {
-		s.setLastStderr(strings.Join(lastErrors, "\n"))
-	}
-}
-
-var progressPrefixes = []string{
-	"progress=", "out_time_ms=", "out_time=", "frame=", "fps=",
-	"stream_", "bitrate=", "total_size=", "speed=", "dup_frames=", "drop_frames=",
-}
-
-func isProgressNoise(line string) bool {
-	for _, p := range progressPrefixes {
-		if strings.HasPrefix(line, p) {
-			return true
-		}
-	}
-	return media.IsFFmpegNoise(line)
-}
-
-func (m *Manager) PreserveTempDir(channelID string) string {
-	m.mu.RLock()
-	s, ok := m.sessions[channelID]
-	m.mu.RUnlock()
-	if !ok {
-		return ""
-	}
-	return s.FilePath
-}

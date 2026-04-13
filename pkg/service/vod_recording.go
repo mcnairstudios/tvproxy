@@ -70,7 +70,6 @@ func (s *VODService) startRecordingInternal(ctx context.Context, sessionKey, tit
 		ProfileName:  session.ConsumerRecording,
 		UseWireGuard: useWG,
 		OutputDir:    s.config.VODOutputDir,
-		Transcoder:   s.transcoderPreference(ctx),
 	}, session.ConsumerRecording)
 	if err != nil {
 		return err

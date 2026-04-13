@@ -32,9 +32,6 @@ type SessionStrategy struct {
 	AudioCodec string
 	HWAccel    string
 	Container  string
-
-	FFmpegArgs string
-	Command    string
 }
 
 type StrategyInput struct {
@@ -56,8 +53,6 @@ type StrategyOutput struct {
 	AudioCodec string
 	HWAccel    string
 	Container  string
-	Command    string
-	Args       string
 }
 
 func classifyStream(in StrategyInput) StreamCategory {
@@ -110,7 +105,6 @@ func liveStrategy(in StrategyInput, out StrategyOutput, cat StreamCategory) Sess
 		AudioCodec:      resolveAudioAction(sourceAudio, out.AudioCodec, out.Container),
 		HWAccel:         out.HWAccel,
 		Container:       out.Container,
-		Command:         out.Command,
 		SourceInputArgs: buildSourceInputArgs(sp),
 	}
 	if sp != nil {
@@ -123,7 +117,6 @@ func liveStrategy(in StrategyInput, out StrategyOutput, cat StreamCategory) Sess
 	}
 
 	s.MetadataOnly = false
-	s.FFmpegArgs = out.Args
 
 	return s
 }
@@ -136,8 +129,6 @@ func vodRemoteStrategy(in StrategyInput, out StrategyOutput) SessionStrategy {
 		AudioCodec:      out.AudioCodec,
 		HWAccel:         out.HWAccel,
 		Container:       out.Container,
-		Command:         out.Command,
-		FFmpegArgs:      out.Args,
 		SourceInputArgs: buildSourceInputArgs(sp),
 		MetadataOnly:    false,
 	}
@@ -159,8 +150,6 @@ func vodLocalStrategy(in StrategyInput, out StrategyOutput) SessionStrategy {
 		AudioCodec:   out.AudioCodec,
 		HWAccel:      out.HWAccel,
 		Container:    out.Container,
-		Command:      out.Command,
-		FFmpegArgs:   out.Args,
 		MetadataOnly: false,
 	}
 	return s
