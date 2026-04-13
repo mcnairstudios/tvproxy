@@ -134,10 +134,8 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 	all = append(all, audioElements...)
 	all = append(all, mux, sink)
 
-	for i, el := range all {
-		if el == nil {
-			return nil, fmt.Errorf("nil element at position %d (missing GStreamer plugin)", i)
-		}
+	if err := checkNilElements(all); err != nil {
+		return nil, err
 	}
 
 	pipeline.AddMany(all...)
@@ -231,10 +229,8 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 	all = append(all, audioElements...)
 	all = append(all, mux, sink)
 
-	for i, el := range all {
-		if el == nil {
-			return nil, fmt.Errorf("nil element at position %d (missing GStreamer plugin)", i)
-		}
+	if err := checkNilElements(all); err != nil {
+		return nil, err
 	}
 
 	pipeline.AddMany(all...)
@@ -268,6 +264,15 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 	})
 
 	return pipeline, nil
+}
+
+func checkNilElements(elements []*gst.Element) error {
+	for i, el := range elements {
+		if el == nil {
+			return fmt.Errorf("pipeline element %d is nil (missing GStreamer plugin — check gst-inspect-1.0)", i)
+		}
+	}
+	return nil
 }
 
 func containerFromURL(url string) string {
