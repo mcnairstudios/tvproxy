@@ -136,6 +136,15 @@ func TestBuild_PathSelection(t *testing.T) {
 	}
 }
 
+func TestBitrate(t *testing.T) {
+	if got := bitrate(PipelineOpts{OutputBitrate: 8000}); got != 8000 {
+		t.Errorf("bitrate with explicit = %d, want 8000", got)
+	}
+	if got := bitrate(PipelineOpts{OutputBitrate: 0}); got != 6000 {
+		t.Errorf("bitrate default = %d, want 6000", got)
+	}
+}
+
 func TestBuild_MPEGTSDetection(t *testing.T) {
 	tests := []struct {
 		name      string
