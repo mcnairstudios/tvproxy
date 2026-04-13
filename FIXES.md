@@ -71,6 +71,13 @@
 - mp4mux with 500ms fragments couldn't handle the timestamp gap
 - 2000ms fragments give enough headroom for the encoder's startup buffering
 
+## Proxy profile session creation returns 500
+- Creating a VOD session with `?profile=Proxy` returns 500 internal server error
+- The Proxy profile is meant for HTTP passthrough (no transcoding)
+- May not be compatible with the VOD session flow (which expects a GStreamer pipeline)
+- Direct/Proxy profiles should probably bypass the session manager entirely
+- The correct path for Proxy: HTTP reverse proxy to the source URL
+
 ## RestartWithSeek is ffmpeg-specific
 - pkg/session/manager.go:485 — manipulates ffmpeg -ss args
 - For GStreamer: either send seek event to pipeline, or create new pipeline with seek offset
