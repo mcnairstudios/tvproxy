@@ -110,6 +110,55 @@ func TestBuildAudioChain(t *testing.T) {
 	}
 }
 
+func TestBuild_EmptyOpts(t *testing.T) {
+	_, path, err := Build(PipelineOpts{InputURL: "http://test/stream", RecordingPath: "/tmp/test.mp4"})
+	if err != nil {
+		t.Skipf("Build error (expected without GStreamer): %v", err)
+	}
+	if path != "mpegts-copy" {
+		t.Errorf("empty opts path = %q, want mpegts-copy", path)
+	}
+}
+
+func TestBuild_VODMKVPath(t *testing.T) {
+	_, path, err := Build(PipelineOpts{
+		InputURL: "http://test/movie.mkv", Container: "matroska",
+		VideoCodec: "h265", OutputVideoCodec: "av1", RecordingPath: "/tmp/test.mp4",
+	})
+	if err != nil {
+		t.Skipf("Build error: %v", err)
+	}
+	if path != "vod-matroska-transcode" {
+		t.Errorf("MKV transcode path = %q, want vod-matroska-transcode", path)
+	}
+}
+
+func TestBuild_FLVPath(t *testing.T) {
+	_, path, err := Build(PipelineOpts{
+		InputURL: "http://test/stream.flv", Container: "flv",
+		VideoCodec: "h264", OutputVideoCodec: "copy", RecordingPath: "/tmp/test.mp4",
+	})
+	if err != nil {
+		t.Skipf("Build error: %v", err)
+	}
+	if path != "vod-flv-copy" {
+		t.Errorf("FLV copy path = %q, want vod-flv-copy", path)
+	}
+}
+
+func TestBuild_RTSPSPath(t *testing.T) {
+	_, path, err := Build(PipelineOpts{
+		InputURL: "rtsps://secure.server/stream",
+		VideoCodec: "h264", OutputVideoCodec: "av1", RecordingPath: "/tmp/test.mp4",
+	})
+	if err != nil {
+		t.Skipf("Build error: %v", err)
+	}
+	if path != "rtsp-transcode" {
+		t.Errorf("RTSPS path = %q, want rtsp-transcode", path)
+	}
+}
+
 func TestNormalizeCodec_PassthroughValues(t *testing.T) {
 	passthrough := []string{"h264", "h265", "av1", "mpeg2video", "aac", "aac_latm", "mp2", "ac3", "eac3", "dts", "opus", "flac", "vorbis", "copy", "default", ""}
 	for _, codec := range passthrough {
