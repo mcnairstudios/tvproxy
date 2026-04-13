@@ -1002,10 +1002,12 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 
 	m.log.Info().
 		Str("session_id", s.ID).
+		Str("channel", s.ChannelName).
 		Str("src_video", srcVideo).
 		Str("src_audio", srcAudio).
 		Str("container", container).
 		Str("out_video", s.startOpts.OutputVideoCodec).
+		Str("out_container", s.startOpts.OutputContainer).
 		Str("hw", s.startOpts.OutputHWAccel).
 		Msg("building pipeline")
 
