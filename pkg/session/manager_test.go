@@ -120,3 +120,19 @@ func TestManager_Shutdown(t *testing.T) {
 	m.Shutdown()
 	assert.Equal(t, 0, len(m.sessions))
 }
+
+func TestFriendlyGstError(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"Could not multiplex stream.", "Stream encoding error — audio/video sync issue"},
+		{"not-negotiated error from element", "Stream format not supported"},
+		{"Service Unavailable", "Source stream unavailable (503)"},
+		{"Server returned 404 Not Found", "Source stream not found (404)"},
+		{"This file contains no valid or supported streams.", "Source contains no playable streams"},
+		{"Internal data stream error.", "Internal pipeline error"},
+		{"some unknown error", "some unknown error"},
+	}
+	for _, tt := range tests {
+		got := friendlyGstError(tt.in)
+		assert.Equal(t, tt.want, got, "for input: %s", tt.in)
+	}
+}
