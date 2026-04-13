@@ -212,9 +212,12 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 		container = containerFromURL(opts.InputURL)
 	}
 	var demux *gst.Element
-	if container == "matroska" || container == "webm" {
+	switch container {
+	case "matroska", "webm":
 		demux, _ = gst.NewElement("matroskademux")
-	} else {
+	case "flv":
+		demux, _ = gst.NewElement("flvdemux")
+	default:
 		demux, _ = gst.NewElement("qtdemux")
 	}
 
@@ -328,6 +331,9 @@ func containerFromURL(url string) string {
 	}
 	if strings.HasSuffix(u, ".ts") {
 		return "mpegts"
+	}
+	if strings.HasSuffix(u, ".flv") {
+		return "flv"
 	}
 	return ""
 }
