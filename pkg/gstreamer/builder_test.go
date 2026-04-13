@@ -175,6 +175,12 @@ func TestBuild_PathSelection(t *testing.T) {
 	}
 }
 
+func TestContainerFromURL_M4V(t *testing.T) {
+	if got := containerFromURL("http://server/video.m4v"); got != "mp4" {
+		t.Errorf("m4v should be mp4, got %q", got)
+	}
+}
+
 func TestNormalizeCodec_EmptyAndUnknown(t *testing.T) {
 	if NormalizeCodec("") != "" {
 		t.Error("empty should return empty")
