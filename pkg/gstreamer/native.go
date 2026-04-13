@@ -313,7 +313,10 @@ func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
 		case "h265":
 			decoder, _ = gst.NewElement("avdec_h265")
 		case "av1":
-			decoder, _ = gst.NewElement("avdec_av1")
+			decoder, _ = gst.NewElement("dav1ddec")
+			if decoder == nil {
+				decoder, _ = gst.NewElement("avdec_av1")
+			}
 		case "mpeg2video":
 			decoder, _ = gst.NewElement("avdec_mpeg2video")
 		default:
@@ -328,7 +331,10 @@ func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
 		case "h265":
 			decoder, _ = gst.NewElement("avdec_h265")
 		case "av1":
-			decoder, _ = gst.NewElement("avdec_av1")
+			decoder, _ = gst.NewElement("dav1ddec")
+			if decoder == nil {
+				decoder, _ = gst.NewElement("avdec_av1")
+			}
 		case "mpeg2video":
 			decoder, _ = gst.NewElement("avdec_mpeg2video")
 		default:
