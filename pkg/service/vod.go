@@ -327,7 +327,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 			StreamID:      streamID,
 			StreamVCodec:  stream.VODVCodec,
 			StreamACodec:  stream.VODACodec,
-			SourceProfile: s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID),
+			SourceProfile: s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID, streamURL),
 		},
 		StrategyOutput{
 			Delivery:   sa.Delivery,
@@ -357,7 +357,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		KnownDuration:    stream.VODDuration,
 		MetadataOnly:     strategy.MetadataOnly,
 	}
-	applySourceProfile(&startOpts2, s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID))
+	applySourceProfile(&startOpts2, s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID, streamURL))
 
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, startOpts2, session.ConsumerViewer)
 	if err != nil {
