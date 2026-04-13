@@ -78,6 +78,13 @@
 - Direct/Proxy profiles should probably bypass the session manager entirely
 - The correct path for Proxy: HTTP reverse proxy to the source URL
 
+## ensureProbe doesn't use WireGuard for probing
+- `ensureProbe()` calls `avprobe.Probe()` which uses libavformat directly (no custom HTTP client)
+- WireGuard-routed sources would fail to probe (connection blocked without WG tunnel)
+- The probe scheduler worker handles this correctly (uses configured HTTP client)
+- `ensureProbe` is only for edge cases (never-probed channels)
+- Fix: use the scheduler's probe method instead of direct avprobe
+
 ## Deinterlace not wired in GStreamer builder
 - Source profile Deinterlace flag exists but not used in builder.go
 - For GStreamer: insert `deinterlace` element after decoder in transcode chain
