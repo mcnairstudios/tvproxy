@@ -136,6 +136,32 @@ func TestBuild_PathSelection(t *testing.T) {
 	}
 }
 
+func TestBuild_CopyDetection(t *testing.T) {
+	tests := []struct {
+		name     string
+		srcCodec string
+		outCodec string
+		wantCopy bool
+	}{
+		{"explicit copy", "h264", "copy", true},
+		{"empty output = copy", "h264", "", true},
+		{"default = copy", "h264", "default", true},
+		{"same codec = copy", "h264", "h264", true},
+		{"different codec = transcode", "h264", "av1", false},
+		{"h265 to av1 = transcode", "h265", "av1", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outCodec := NormalizeCodec(tt.outCodec)
+			srcCodec := NormalizeCodec(tt.srcCodec)
+			isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy" || outCodec == srcCodec
+			if isCopy != tt.wantCopy {
+				t.Errorf("isCopy(src=%q, out=%q) = %v, want %v", tt.srcCodec, tt.outCodec, isCopy, tt.wantCopy)
+			}
+		})
+	}
+}
+
 func TestBitrate(t *testing.T) {
 	if got := bitrate(PipelineOpts{OutputBitrate: 8000}); got != 8000 {
 		t.Errorf("bitrate with explicit = %d, want 8000", got)
