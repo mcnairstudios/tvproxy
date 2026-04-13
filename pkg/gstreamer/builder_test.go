@@ -63,6 +63,34 @@ func TestNormalizeCodec_AllProbeNames(t *testing.T) {
 	}
 }
 
+func TestBuildAudioChain(t *testing.T) {
+	tests := []struct {
+		name     string
+		codec    string
+		wantLen  int
+	}{
+		{"AAC LATM", "aac_latm", 7},
+		{"AAC copy", "aac", 1},
+		{"MP2", "mp2", 7},
+		{"AC3", "ac3", 6},
+		{"EAC3", "eac3", 6},
+		{"Empty (default)", "", 7},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chain := buildAudioChain(tt.codec)
+			if len(chain) != tt.wantLen {
+				t.Errorf("buildAudioChain(%q) length = %d, want %d", tt.codec, len(chain), tt.wantLen)
+			}
+			for i, el := range chain {
+				if el == nil {
+					t.Errorf("buildAudioChain(%q) element %d is nil", tt.codec, i)
+				}
+			}
+		})
+	}
+}
+
 func TestBuild_MPEGTSDetection(t *testing.T) {
 	tests := []struct {
 		name      string
