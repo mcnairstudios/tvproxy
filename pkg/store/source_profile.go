@@ -94,6 +94,33 @@ func (s *SourceProfileStoreImpl) migrateDefaults() {
 		s.saveUnlocked()
 		s.log.Info().Msg("migrated source profiles with new GStreamer defaults")
 	}
+
+	s.ensureProfile("HDHomeRun", models.SourceProfile{
+		Deinterlace: false,
+		AudioChannels: 2,
+		VideoQueueMs: 10000, AudioQueueMs: 10000,
+		HTTPTimeoutSec: 10, HTTPRetries: 1,
+		TSSetTimestamps: true,
+	})
+	s.ensureProfile("VOD", models.SourceProfile{
+		Deinterlace: false,
+		AudioChannels: 0,
+		VideoQueueMs: 10000, AudioQueueMs: 10000,
+		HTTPTimeoutSec: 30, HTTPRetries: 3,
+	})
+}
+
+func (s *SourceProfileStoreImpl) ensureProfile(name string, defaults models.SourceProfile) {
+	for _, p := range s.profiles {
+		if p.Name == name {
+			return
+		}
+	}
+	defaults.ID = uuid.New().String()
+	defaults.Name = name
+	s.profiles = append(s.profiles, defaults)
+	s.saveUnlocked()
+	s.log.Info().Str("name", name).Msg("created missing source profile")
 }
 
 func (s *SourceProfileStoreImpl) Save() error {
