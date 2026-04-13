@@ -213,7 +213,7 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 	aPass, _ := gst.NewElement("aacparse")
 
 	mux, _ := gst.NewElement("mp4mux")
-	mux.SetProperty("fragment-duration", uint(500))
+	mux.SetProperty("fragment-duration", uint(2000))
 	mux.SetProperty("streamable", true)
 	sink, _ := gst.NewElement("filesink")
 	sink.SetProperty("location", opts.RecordingPath)
