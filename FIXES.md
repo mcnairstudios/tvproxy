@@ -1,5 +1,29 @@
 # Fixes & Ideas (Not on Critical Path)
 
+## How to Test This Branch
+
+```bash
+# Build
+CGO_ENABLED=1 go build -o ./tvproxy ./cmd/tvproxy/
+
+# Run (with plugins)
+GST_PLUGIN_PATH=/Users/gavinmcnair/claude/gstreamer-plugin/builddir:/Users/gavinmcnair/claude/tvproxymux/build:/Users/gavinmcnair/claude/tvproxysrc/build \
+TVPROXY_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" \
+TVPROXY_RECORD_DIR=/tmp/recordings \
+TVPROXY_VOD_OUTPUT_DIR=/tmp/recordings \
+TVPROXY_BASE_URL=http://192.168.0.111 \
+./tvproxy
+
+# Test VOD (Browser profile = AV1 transcode)
+curl -X POST http://localhost:8080/stream/{streamID}/vod?profile=Browser
+
+# Test SAT>IP (Browser profile = AV1 transcode)
+curl -X POST http://localhost:8080/channel/{channelID}/vod?profile=Browser
+
+# Check status
+curl http://localhost:8080/vod/{channelID}/status
+```
+
 ## What's Working (feature/gstreamer-simplify)
 - Unified pipeline builder: `gstreamer.Build()` with 2 paths (MPEG-TS native, VOD qtdemux)
 - SAT>IP AV1 transcode: stable 30s+ runs, 4000+ kbps
