@@ -677,11 +677,13 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	srcAudio := ""
 	container := ""
 	srcWidth := 0
+	srcHeight := 0
 	if probe != nil {
 		if probe.Video != nil {
 			srcVideo = probe.Video.Codec
 		}
 		srcWidth = probe.Width
+		srcHeight = probe.Height
 		if len(probe.AudioTracks) > 0 {
 			srcAudio = probe.AudioTracks[0].Codec
 		}
@@ -740,6 +742,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		TSSetTimestamps:   s.startOpts.TSSetTimestamps,
 		EncoderBitrateKbps: s.startOpts.EncoderBitrateKbps,
 		SourceWidth:        srcWidth,
+		SourceHeight:       srcHeight,
 	}
 
 	m.log.Info().
@@ -753,6 +756,8 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Str("hw", s.startOpts.OutputHWAccel).
 		Bool("deinterlace", s.startOpts.Deinterlace).
 		Int("audio_delay", s.startOpts.AudioDelayMs).
+		Int("width", srcWidth).
+		Int("height", srcHeight).
 		Msg("building pipeline")
 
 	pipeline, path, err := gstreamer.Build(opts)
