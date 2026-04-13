@@ -93,6 +93,9 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 		src.SetProperty("location", opts.InputURL)
 		src.SetProperty("do-timestamp", true)
 		src.SetProperty("is-live", true)
+		if opts.UserAgent != "" {
+			src.SetProperty("user-agent", opts.UserAgent)
+		}
 		sourceElements = []*gst.Element{src}
 		linkStart = src
 	}
@@ -183,6 +186,9 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 
 	src, _ := gst.NewElement("souphttpsrc")
 	src.SetProperty("location", opts.InputURL)
+	if opts.UserAgent != "" {
+		src.SetProperty("user-agent", opts.UserAgent)
+	}
 
 	container := strings.ToLower(opts.Container)
 	if container == "" {

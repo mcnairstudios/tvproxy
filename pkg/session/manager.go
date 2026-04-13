@@ -993,6 +993,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 
 	opts := gstreamer.PipelineOpts{
 		InputURL:         s.StreamURL,
+		UserAgent:        m.config.UserAgent,
 		VideoCodec:       srcVideo,
 		AudioCodec:       srcAudio,
 		Container:        container,

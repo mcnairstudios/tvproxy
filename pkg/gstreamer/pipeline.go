@@ -47,6 +47,7 @@ type PipelineOpts struct {
 	HLSSegmentTime  int
 	RecordingPath   string
 
+	UserAgent  string
 	DualOutput bool
 }
 
