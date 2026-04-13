@@ -43,9 +43,10 @@
 - Lower priority — proxy path works, VOD path was the broken one
 
 ## Migrate hls/session.go and jellyfin/playback.go to Build()
-- Both still use old BuildPipeline() for string pipelines
-- These are secondary paths used by Jellyfin HLS, not browser playback
-- Migrate after main VOD/live paths are fully validated
+- Both still use old BuildPipeline() for string pipelines + gst-launch subprocess
+- HLS output requires hlssink2/hlscmafsink elements — different from filesink
+- Need a Build() variant that outputs to HLS dir instead of file
+- Lower priority — Jellyfin HLS works via existing path, browser uses VOD stream
 
 ## avprobe FormatName Not Populated
 - `ProbeResult.FormatName` is never set by avprobe package

@@ -424,9 +424,9 @@ func canCopyAudio(codec string, format OutputFormat) bool {
 func NormalizeCodec(codec string) string {
 	c := strings.ToLower(strings.TrimSpace(codec))
 	switch {
-	case c == "hevc" || c == "h.265 video" || c == "h265 video":
+	case c == "hevc" || c == "h.265 video" || c == "h265 video" || c == "h.265/hevc video" || strings.Contains(c, "h265") || strings.Contains(c, "h.265") || strings.Contains(c, "hevc"):
 		return "h265"
-	case c == "h.264 video" || c == "h264 video":
+	case c == "h.264 video" || c == "h264 video" || strings.Contains(c, "h264") || strings.Contains(c, "h.264"):
 		return "h264"
 	case c == "mpeg2" || c == "mpeg2video" || c == "mpeg2 video" || c == "mpeg-2 video":
 		return "mpeg2video"
