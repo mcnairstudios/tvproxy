@@ -66,6 +66,8 @@ func TestNormalizeCodec_AllProbeNames(t *testing.T) {
 		{"libopus", "opus"},
 		{"flac", "flac"},
 		{"vorbis", "vorbis"},
+		{"mpeg4", "mpeg4"},
+		{"MPEG-4 Visual", "mpeg4"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
