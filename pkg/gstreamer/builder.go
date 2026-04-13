@@ -100,9 +100,14 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 
 	audioElements := buildAudioChain(NormalizeCodec(opts.AudioCodec))
 
-	mux, _ := gst.NewElement("mp4mux")
-	mux.SetProperty("fragment-duration", uint(500))
-	mux.SetProperty("streamable", true)
+	var mux *gst.Element
+	if isCopy {
+		mux, _ = gst.NewElement("mpegtsmux")
+	} else {
+		mux, _ = gst.NewElement("mp4mux")
+		mux.SetProperty("fragment-duration", uint(500))
+		mux.SetProperty("streamable", true)
+	}
 	sink, _ := gst.NewElement("filesink")
 	sink.SetProperty("location", opts.RecordingPath)
 
