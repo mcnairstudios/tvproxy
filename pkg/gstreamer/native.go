@@ -244,10 +244,11 @@ func buildAudioChain(srcAudio string) []*gst.Element {
 		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
 	case "opus":
 		aPass, _ := gst.NewElement("opusparse")
-		if aPass == nil {
-			aPass, _ = gst.NewElement("identity")
+		if aPass != nil {
+			return []*gst.Element{aPass}
 		}
-		return []*gst.Element{aPass}
+		aDec, _ := gst.NewElement("opusdec")
+		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
 	case "flac":
 		aPass, _ := gst.NewElement("flacparse")
 		if aPass == nil {
