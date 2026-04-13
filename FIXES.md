@@ -65,14 +65,11 @@
   3. For RTSP copy: use plugin path via gst-launch subprocess (plugins work)
 - Affects: SAT>IP copy mode. Browser playback (always transcode) is NOT affected.
 
-## Intermittent "Could not multiplex" + EOS on SAT>IP AV1 transcode
-- Pipeline runs for ~53 seconds then gets "Could not multiplex" followed by immediate EOS
-- Isolated test (/private/tmp/satip_av1_test.go) runs 30s without issue
-- Likely cause: audio/video timestamp desync in svtav1enc + mp4mux
-- Or: SAT>IP tuner drops (RTSP connection reset) causing premature EOS
-- The "Could not multiplex" is treated as transient (continue) but EOS kills the pipeline
-- Consider: on EOS, auto-restart the pipeline for live content
-- Consider: use larger queue buffers to handle svtav1enc's internal buffering
+## RESOLVED: "Could not multiplex" on SAT>IP AV1 transcode
+- Fixed by increasing mp4mux fragment-duration from 500ms to 2000ms
+- Root cause: svtav1enc buffers 15+ seconds before first output, audio was 15s ahead of video
+- mp4mux with 500ms fragments couldn't handle the timestamp gap
+- 2000ms fragments give enough headroom for the encoder's startup buffering
 
 ## RestartWithSeek is ffmpeg-specific
 - pkg/session/manager.go:485 — manipulates ffmpeg -ss args

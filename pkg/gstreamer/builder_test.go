@@ -28,6 +28,41 @@ func TestBuild_ContainerDetection(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodec_AllProbeNames(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"h264", "h264"},
+		{"hevc", "h265"},
+		{"mpeg2video", "mpeg2video"},
+		{"aac", "aac"},
+		{"mp2", "mp2"},
+		{"ac3", "ac3"},
+		{"eac3", "eac3"},
+		{"H.264 Video", "h264"},
+		{"H.265 Video", "h265"},
+		{"H.265/HEVC Video", "h265"},
+		{"MPEG-2 Video", "mpeg2video"},
+		{"AV1 Video", "av1"},
+		{"AAC Audio (LATM)", "aac_latm"},
+		{"AAC Audio", "aac"},
+		{"MPEG-1 Audio", "mp2"},
+		{"MP2 (MPEG audio layer 2)", "mp2"},
+		{"AC-3", "ac3"},
+		{"E-AC-3", "eac3"},
+		{"copy", "copy"},
+		{"", ""},
+		{"default", "default"},
+		{"TV(HEVC)", "h265"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got := NormalizeCodec(tt.in)
+			if got != tt.want {
+				t.Errorf("NormalizeCodec(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuild_MPEGTSDetection(t *testing.T) {
 	tests := []struct {
 		name      string
