@@ -192,6 +192,23 @@ func TestBitrate(t *testing.T) {
 	}
 }
 
+func TestContainerFromURL_EdgeCases(t *testing.T) {
+	tests := []struct{ url, want string }{
+		{"http://server/stream.MP4", "mp4"},
+		{"http://server/path/to/file.MKV", "matroska"},
+		{"http://server/live?format=ts", ""},
+		{"", ""},
+		{"rtsp://server/stream", ""},
+		{"http://server/movie.m4v", "mp4"},
+	}
+	for _, tt := range tests {
+		got := containerFromURL(tt.url)
+		if got != tt.want {
+			t.Errorf("containerFromURL(%q) = %q, want %q", tt.url, got, tt.want)
+		}
+	}
+}
+
 func TestBuild_MPEGTSDetection(t *testing.T) {
 	tests := []struct {
 		name      string
