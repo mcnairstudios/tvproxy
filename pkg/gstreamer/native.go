@@ -414,7 +414,10 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 				encoder, _ = gst.NewElement("vaapih265enc")
 			}
 		case "av1":
-			encoder, _ = gst.NewElement("vaav1enc")
+			encoder, _ = gst.NewElement("vaav1lpenc")
+			if encoder == nil {
+				encoder, _ = gst.NewElement("vaav1enc")
+			}
 			if encoder == nil {
 				encoder, _ = gst.NewElement("vaapiav1enc")
 			}
@@ -473,7 +476,10 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 		case "av1":
 			encoder, _ = gst.NewElement("qsvav1enc")
 			if encoder == nil {
+				encoder, _ = gst.NewElement("vaav1lpenc")
+			if encoder == nil {
 				encoder, _ = gst.NewElement("vaav1enc")
+			}
 			}
 			if encoder == nil {
 				return createSoftwareAV1Encoder(bitrate)
