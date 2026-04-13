@@ -991,9 +991,15 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		outFormat = gstreamer.OutputMPEGTS
 	}
 
+	var extraHeaders map[string]string
+	if m.config.BypassHeader != "" && m.config.BypassSecret != "" {
+		extraHeaders = map[string]string{m.config.BypassHeader: m.config.BypassSecret}
+	}
+
 	opts := gstreamer.PipelineOpts{
 		InputURL:         s.StreamURL,
 		UserAgent:        m.config.UserAgent,
+		ExtraHeaders:     extraHeaders,
 		VideoCodec:       srcVideo,
 		AudioCodec:       srcAudio,
 		Container:        container,
