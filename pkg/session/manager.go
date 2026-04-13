@@ -42,12 +42,6 @@ type StartOpts struct {
 	SeekOffset       float64
 	OutputDir         string
 	HLSOutputDir      string
-	SourceInputArgs   string
-	SourceVideoCodec  string
-	SourceAudioCodec  string
-	SourceDeinterlace bool
-	SourceAudioResync bool
-	SourceFPSMode     string
 	SkipProbe         bool
 	MetadataOnly      bool
 }
@@ -675,14 +669,6 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 			srcAudio = probe.AudioTracks[0].Codec
 		}
 		container = probe.FormatName
-	}
-
-	// Source profile overrides (for testing)
-	if s.startOpts.SourceVideoCodec != "" {
-		srcVideo = s.startOpts.SourceVideoCodec
-	}
-	if s.startOpts.SourceAudioCodec != "" {
-		srcAudio = s.startOpts.SourceAudioCodec
 	}
 
 	hwAccel := gstreamer.HWNone

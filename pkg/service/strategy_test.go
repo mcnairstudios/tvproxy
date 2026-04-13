@@ -223,18 +223,6 @@ func TestResolveSessionStrategy_LiveWithSourceProfile(t *testing.T) {
 	if s.AudioCodec != "aac" {
 		t.Errorf("AudioCodec = %q, want aac (mp2 source needs transcode for mp4)", s.AudioCodec)
 	}
-	if !s.SourceDeinterlace {
-		t.Error("SourceDeinterlace should be true")
-	}
-	if !s.SourceAudioResync {
-		t.Error("SourceAudioResync should be true")
-	}
-	if s.SourceFPSMode != "cfr" {
-		t.Errorf("SourceFPSMode = %q, want cfr", s.SourceFPSMode)
-	}
-	if s.SourceInputArgs == "" {
-		t.Error("SourceInputArgs should be set from profile")
-	}
 }
 
 func TestResolveSessionStrategy_SkipProbe(t *testing.T) {

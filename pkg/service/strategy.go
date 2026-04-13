@@ -1,7 +1,6 @@
 package service
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
@@ -23,10 +22,6 @@ type SessionStrategy struct {
 	MetadataOnly      bool
 	SkipProbe         bool
 	HLSOutputDir      string
-	SourceInputArgs   string
-	SourceDeinterlace bool
-	SourceAudioResync bool
-	SourceFPSMode     string
 
 	VideoCodec string
 	AudioCodec string
@@ -105,12 +100,8 @@ func liveStrategy(in StrategyInput, out StrategyOutput, cat StreamCategory) Sess
 		AudioCodec:      resolveAudioAction(sourceAudio, out.AudioCodec, out.Container),
 		HWAccel:         out.HWAccel,
 		Container:       out.Container,
-		SourceInputArgs: buildSourceInputArgs(sp),
 	}
 	if sp != nil {
-		s.SourceDeinterlace = sp.Deinterlace
-		s.SourceAudioResync = sp.AudioResync
-		s.SourceFPSMode = sp.FPSMode
 		if sp.ProbeMode == "none" || sp.ProbeMode == "declared" {
 			s.SkipProbe = true
 		}
@@ -129,13 +120,9 @@ func vodRemoteStrategy(in StrategyInput, out StrategyOutput) SessionStrategy {
 		AudioCodec:      out.AudioCodec,
 		HWAccel:         out.HWAccel,
 		Container:       out.Container,
-		SourceInputArgs: buildSourceInputArgs(sp),
 		MetadataOnly:    false,
 	}
 	if sp != nil {
-		s.SourceDeinterlace = sp.Deinterlace
-		s.SourceAudioResync = sp.AudioResync
-		s.SourceFPSMode = sp.FPSMode
 		if sp.ProbeMode == "none" || sp.ProbeMode == "declared" {
 			s.SkipProbe = true
 		}
@@ -179,37 +166,6 @@ func resolveAudioAction(sourceCodec, clientCodec, outputContainer string) string
 		return "copy"
 	}
 	return clientCodec
-}
-
-func buildSourceInputArgs(sp *models.SourceProfile) string {
-	if sp == nil {
-		return ""
-	}
-	var parts []string
-
-	if sp.RTSPTransport != "" {
-		parts = append(parts, "-rtsp_transport", sp.RTSPTransport)
-	}
-	if sp.InputFormat != "" {
-		parts = append(parts, "-f", sp.InputFormat)
-	}
-	if sp.AnalyzeDuration > 0 {
-		parts = append(parts, "-analyzeduration", fmt.Sprintf("%d", sp.AnalyzeDuration))
-	}
-	if sp.ProbeSize > 0 {
-		parts = append(parts, "-probesize", fmt.Sprintf("%d", sp.ProbeSize))
-	}
-	if sp.MaxDelay > 0 {
-		parts = append(parts, "-max_delay", fmt.Sprintf("%d", sp.MaxDelay))
-	}
-	if sp.ErrDetect != "" {
-		parts = append(parts, "-err_detect", sp.ErrDetect)
-	}
-	if sp.FFlags != "" {
-		parts = append(parts, "-fflags", sp.FFlags)
-	}
-
-	return strings.Join(parts, " ")
 }
 
 func isLocalURL(u string) bool {
