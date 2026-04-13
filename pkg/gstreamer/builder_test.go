@@ -52,6 +52,9 @@ func TestNormalizeCodec_AllProbeNames(t *testing.T) {
 		{"", ""},
 		{"default", "default"},
 		{"TV(HEVC)", "h265"},
+		{"dts", "dts"},
+		{"dca", "dts"},
+		{"DTS-HD", "dts"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -74,6 +77,7 @@ func TestBuildAudioChain(t *testing.T) {
 		{"MP2", "mp2", 7},
 		{"AC3", "ac3", 6},
 		{"EAC3", "eac3", 6},
+		{"DTS", "dts", 6},
 		{"Empty (default)", "", 7},
 	}
 	for _, tt := range tests {
