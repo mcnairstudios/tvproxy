@@ -24,7 +24,6 @@ func BuildNativePipeline(name string, probe *media.ProbeResult, opts PipelineOpt
 		}
 		opts.Container = probe.FormatName
 	}
-	opts.InputURL = opts.InputURL
 	pstr := buildPipelineStr(opts)
 	pipeline, err := gst.NewPipelineFromString(pstr)
 	if err != nil {
