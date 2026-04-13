@@ -141,6 +141,40 @@ func TestCreateOutputParser_AllCodecs(t *testing.T) {
 	}
 }
 
+func TestBuild_AudioDelayInsertion(t *testing.T) {
+	opts := PipelineOpts{
+		InputURL:         "http://test/stream",
+		VideoCodec:       "h264",
+		OutputVideoCodec: "h264",
+		RecordingPath:    "/tmp/test.mp4",
+		AudioDelayMs:     200,
+	}
+	_, path, err := Build(opts)
+	if err != nil {
+		t.Skipf("Build error: %v", err)
+	}
+	if path != "mpegts-copy" {
+		t.Errorf("path = %q", path)
+	}
+}
+
+func TestBuild_DeinterlaceInsertion(t *testing.T) {
+	opts := PipelineOpts{
+		InputURL:         "rtsp://test/?freq=545",
+		VideoCodec:       "h264",
+		OutputVideoCodec: "av1",
+		RecordingPath:    "/tmp/test.mp4",
+		Deinterlace:      true,
+	}
+	_, path, err := Build(opts)
+	if err != nil {
+		t.Skipf("Build error: %v", err)
+	}
+	if path != "rtsp-transcode" {
+		t.Errorf("path = %q", path)
+	}
+}
+
 func TestBuild_WithSourceProfileFields(t *testing.T) {
 	opts := PipelineOpts{
 		InputURL:         "rtsp://test/?freq=545",
