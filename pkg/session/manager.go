@@ -1028,22 +1028,27 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	} else {
 		m.log.Info().Str("session_id", s.ID).Msg("pipeline PLAYING")
 	}
+	isLive := opts.IsLive
 	go m.pollFileProgress(ctx, s)
 
 	bus := pipeline.GetBus()
-loop:
+pipeloop:
 	for {
 		msg := bus.TimedPop(gst.ClockTime(500000000))
 		if ctx.Err() != nil {
-			break loop
+			break pipeloop
 		}
 		if msg == nil {
 			continue
 		}
 		switch msg.Type() {
 		case gst.MessageEOS:
-			m.log.Info().Str("session_id", s.ID).Msg("gstreamer EOS")
-			break loop
+			if isLive {
+				m.log.Warn().Str("session_id", s.ID).Msg("gstreamer EOS on live stream (source dropped)")
+			} else {
+				m.log.Info().Str("session_id", s.ID).Msg("gstreamer EOS (VOD complete)")
+			}
+			break pipeloop
 		case gst.MessageError:
 			gstErr := msg.ParseError()
 			errStr := gstErr.Error()
@@ -1054,7 +1059,7 @@ loop:
 			m.log.Error().Str("session_id", s.ID).Err(gstErr).Msg("gstreamer error")
 			s.setError(fmt.Errorf("gstreamer: %w", gstErr))
 			s.setLastStderr(gstErr.Error())
-			break loop
+			break pipeloop
 		}
 	}
 
