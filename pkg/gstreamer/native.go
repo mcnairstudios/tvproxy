@@ -318,6 +318,21 @@ func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
 		}
 	}
 
+	if decoder == nil {
+		switch codec {
+		case "h264":
+			decoder, _ = gst.NewElement("avdec_h264")
+		case "h265":
+			decoder, _ = gst.NewElement("avdec_h265")
+		case "av1":
+			decoder, _ = gst.NewElement("avdec_av1")
+		case "mpeg2video":
+			decoder, _ = gst.NewElement("avdec_mpeg2video")
+		default:
+			decoder, _ = gst.NewElement("avdec_h264")
+		}
+	}
+
 	return []*gst.Element{parser, decoder}
 }
 
