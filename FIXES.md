@@ -1,0 +1,49 @@
+# Fixes & Ideas (Not on Critical Path)
+
+## Tuner Contention
+- SAT>IP copy test failed with 0 bytes when tuner was already locked by prior transcode test
+- HDHR copy errored at 5.7s with "Internal data stream error" — likely tuner conflict
+- Need proper tuner release between sequential tests (pipeline.SetState(StateNull) + sleep)
+- In production: session manager should wait for tuner release before creating new session on same tuner
+
+## Plugin Static Pad Transcode
+- Attempted linking encode chain to tvproxydemux's static `video` pad — produced 0 bytes
+- The static pad works for copy (plugin→plugin) but not for external encode chains
+- Root cause: likely caps negotiation issue between plugin's internal parser and external decoder
+- For now: transcode uses native tsdemux path (proven working)
+- Future: tvproxydemux could expose a raw/decoded video pad option
+
+## Plugin container-hint / audio-codec-hint
+- Not yet in gavinmcnair/gstreamer:1.1 image
+- Would eliminate typefind latency (~100-200ms) for probed streams
+- Low priority — current plugin works fine for MPEG-TS
+
+## Stream Source Failover
+- When primary source fails (IPTV connection refused, tuner busy), should try secondary source
+- This is in the stream resolution layer (service/vod.go, service/proxy.go), not the pipeline builder
+- Existing channel→stream mapping already supports multiple streams per channel
+- Need: retry logic that picks next stream when first pipeline fails
+
+## Active Stream Tracking
+- Limited tuners per HDHR device, limited connections per IPTV provider
+- Session manager tracks active sessions per channel (existing)
+- Need to ensure tuner/connection count is checked BEFORE starting new pipeline
+- Consider: per-source connection limits in M3U account settings
+
+## Probe Cache Critical for Channel Switching Speed
+- Without cached probe data, channel switching requires a live probe (2-5s delay)
+- The probe cache MUST be pre-populated for all channels via the probe scheduler
+- Channel settings (codec, audio, container) should come from probe cache, not live detection
+- The probe scheduler already runs on startup — ensure it covers all channels with streams
+- Consider: priority probe queue when user navigates to a channel without cached data
+
+## avprobe FormatName Not Populated
+- `ProbeResult.FormatName` is never set by avprobe package
+- Causes container detection to fall back to URL extension matching
+- Should extract format_name from ffprobe/libavformat during probe
+- File: pkg/avprobe/avprobe.go — need to read `format_name` from AVFormatContext
+
+## GLib-GObject-CRITICAL warnings
+- `g_boxed_type_register_static: assertion 'g_type_from_name (name) == 0' failed`
+- Appears on first plugin use — harmless but noisy
+- Likely a type registration race in go-gst bindings

@@ -49,6 +49,7 @@ type StartOpts struct {
 	OutputDir         string
 	HLSOutputDir      string
 	SourceInputArgs   string
+	SourceVideoCodec  string
 	SourceAudioCodec  string
 	SourceDeinterlace bool
 	SourceAudioResync bool
@@ -661,9 +662,7 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 	}
 
 	if !opts.MetadataOnly {
-		command, args := m.resolveTranscoder(opts, filePath)
-
-		go m.run(sessionCtx, s, command, args, opts.StreamURL)
+		go m.runPipeline(sessionCtx, s)
 		if strings.HasPrefix(opts.StreamURL, "rtsp://") || strings.HasPrefix(opts.StreamURL, "rtsps://") {
 			go m.logSignalAsync(s.ID, opts.ChannelID, opts.StreamURL)
 		}
@@ -936,6 +935,154 @@ func (m *Manager) logSignalAsync(sessionID, channelID, streamURL string) {
 		Bool("active", info.Active).
 		Str("server", info.Server).
 		Msg("satip tuner signal at session start")
+}
+
+func (m *Manager) runPipeline(ctx context.Context, s *Session) {
+	defer s.markDone()
+	m.log.Info().Str("session_id", s.ID).Str("channel_id", s.ChannelID).Msg("runPipeline started")
+
+	probe := m.ensureProbe(ctx, s.startOpts)
+	if probe != nil {
+		s.SetProbeInfo(probe.Video, probe.AudioTracks, probe.Duration)
+	}
+
+	srcVideo := ""
+	srcAudio := ""
+	container := ""
+	if probe != nil {
+		if probe.Video != nil {
+			srcVideo = probe.Video.Codec
+		}
+		if len(probe.AudioTracks) > 0 {
+			srcAudio = probe.AudioTracks[0].Codec
+		}
+		container = probe.FormatName
+	}
+
+	// Source profile overrides (for testing)
+	if s.startOpts.SourceVideoCodec != "" {
+		srcVideo = s.startOpts.SourceVideoCodec
+	}
+	if s.startOpts.SourceAudioCodec != "" {
+		srcAudio = s.startOpts.SourceAudioCodec
+	}
+
+	hwAccel := gstreamer.HWNone
+	switch s.startOpts.OutputHWAccel {
+	case "vaapi":
+		hwAccel = gstreamer.HWVAAPI
+	case "qsv":
+		hwAccel = gstreamer.HWQSV
+	case "videotoolbox":
+		hwAccel = gstreamer.HWVideoToolbox
+	}
+
+	opts := gstreamer.PipelineOpts{
+		InputURL:         s.StreamURL,
+		VideoCodec:       srcVideo,
+		AudioCodec:       srcAudio,
+		Container:        container,
+		OutputVideoCodec: s.startOpts.OutputVideoCodec,
+		OutputAudioCodec: s.startOpts.OutputAudioCodec,
+		OutputBitrate:    0,
+		HWAccel:          hwAccel,
+		RecordingPath:    s.FilePath,
+		IsLive:           probe == nil || probe.Duration == 0,
+	}
+
+	m.log.Info().
+		Str("session_id", s.ID).
+		Str("src_video", srcVideo).
+		Str("src_audio", srcAudio).
+		Str("container", container).
+		Str("out_video", s.startOpts.OutputVideoCodec).
+		Str("hw", s.startOpts.OutputHWAccel).
+		Msg("building pipeline")
+
+	pipeline, err := gstreamer.Build(opts)
+	if err != nil {
+		s.setError(fmt.Errorf("pipeline build failed: %w", err))
+		return
+	}
+
+	s.SetStopPipeline(func() { pipeline.SetState(gst.StateNull) })
+	pipeline.SetState(gst.StatePlaying)
+	go m.pollFileProgress(ctx, s)
+
+	bus := pipeline.GetBus()
+loop:
+	for {
+		msg := bus.TimedPop(gst.ClockTime(500000000))
+		if ctx.Err() != nil {
+			break loop
+		}
+		if msg == nil {
+			continue
+		}
+		switch msg.Type() {
+		case gst.MessageEOS:
+			m.log.Info().Str("session_id", s.ID).Msg("gstreamer EOS")
+			break loop
+		case gst.MessageError:
+			gstErr := msg.ParseError()
+			errStr := gstErr.Error()
+			if strings.Contains(errStr, "Could not multiplex") || strings.Contains(errStr, "clock problem") {
+				m.log.Warn().Str("session_id", s.ID).Err(gstErr).Msg("gstreamer transient error (continuing)")
+				continue
+			}
+			m.log.Error().Str("session_id", s.ID).Err(gstErr).Msg("gstreamer error")
+			s.setError(fmt.Errorf("gstreamer: %w", gstErr))
+			s.setLastStderr(gstErr.Error())
+			break loop
+		}
+	}
+
+	pipeline.SetState(gst.StateNull)
+	m.log.Info().Str("session_id", s.ID).Msg("pipeline stopped")
+}
+
+func (m *Manager) ensureProbe(ctx context.Context, opts StartOpts) *media.ProbeResult {
+	if m.probeCache != nil {
+		if opts.StreamID != "" {
+			if cached, _ := m.probeCache.GetProbeByStreamID(opts.StreamID); cached != nil {
+				m.log.Debug().Str("stream_id", opts.StreamID).Msg("probe cache hit (by ID)")
+				return cached
+			}
+		}
+		if opts.StreamURL != "" {
+			if cached, _ := m.probeCache.GetProbe(media.StreamHash(opts.StreamURL)); cached != nil {
+				m.log.Debug().Str("stream_url", opts.StreamURL).Msg("probe cache hit (by URL)")
+				return cached
+			}
+		}
+	}
+
+	m.log.Info().Str("stream_url", opts.StreamURL).Msg("no probe cache — probing now (blocking)")
+	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	result, err := avprobe.Probe(probeCtx, opts.StreamURL, m.config.UserAgent)
+	if err != nil || result == nil {
+		m.log.Warn().Err(err).Str("stream_url", opts.StreamURL).Msg("pre-probe failed")
+		return nil
+	}
+
+	if m.probeCache != nil {
+		if opts.StreamID != "" {
+			m.probeCache.SaveProbeByStreamID(opts.StreamID, result)
+		}
+		m.probeCache.SaveProbe(media.StreamHash(opts.StreamURL), result)
+	}
+
+	videoCodec := ""
+	if result.Video != nil {
+		videoCodec = result.Video.Codec
+	}
+	m.log.Info().
+		Str("video", videoCodec).
+		Str("container", result.FormatName).
+		Msg("pre-probe complete")
+	return result
 }
 
 func (m *Manager) run(ctx context.Context, s *Session, command string, args []string, inputURL string) {
