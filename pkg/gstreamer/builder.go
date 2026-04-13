@@ -17,13 +17,8 @@ func Build(opts PipelineOpts) (*gst.Pipeline, error) {
 	}
 	isMPEGTS := isRTSP || container == "mpegts" || container == "mpeg-ts" || container == "ts" || container == ""
 
-	outCodec := NormalizeCodec(opts.OutputVideoCodec)
 	srcCodec := NormalizeCodec(opts.VideoCodec)
-	isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy" || outCodec == srcCodec
 
-	if isMPEGTS && isCopy && PluginsAvailable() {
-		return buildMPEGTSPluginCopy(opts, srcCodec)
-	}
 	if isMPEGTS {
 		return buildMPEGTSNative(opts, srcCodec, isRTSP)
 	}

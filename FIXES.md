@@ -53,6 +53,21 @@
 - Should extract format_name from ffprobe/libavformat during probe
 - File: pkg/avprobe/avprobe.go — need to read `format_name` from AVFormatContext
 
+## Proxy profile copy mode creates GStreamer session instead of HTTP passthrough
+- Proxy profile with video_codec=copy should use HTTP passthrough, not GStreamer
+- When creating a VOD session with Proxy profile, the session manager builds a native pipeline
+- Copy mode (h264parse → mp4mux) produces 0 bytes for RTSP/SAT>IP sources
+- Root cause unclear — same pattern works in hdhr_mp4.go reference but not in server
+- This only affects non-browser clients (Plex, Jellyfin) using Proxy profile
+- Browser profile (AV1 transcode) works correctly
+
+## go-gst NewPipelineFromString doesn't work with plugin bins
+- `gst-launch-1.0` with tvproxysrc/tvproxydemux/tvproxymux produces output
+- Same pipeline string via go-gst `NewPipelineFromString` produces 0 bytes
+- Root cause: go-gst handles GstBin elements (our plugins) differently than gst-launch
+- Workaround: always use native programmatic pipeline (buildMPEGTSNative)
+- Future: investigate go-gst bin element handling, or use gst-launch subprocess for plugin path
+
 ## GLib-GObject-CRITICAL warnings
 - `g_boxed_type_register_static: assertion 'g_type_from_name (name) == 0' failed`
 - Appears on first plugin use — harmless but noisy

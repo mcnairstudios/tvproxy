@@ -1001,12 +1001,19 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 
 	pipeline, err := gstreamer.Build(opts)
 	if err != nil {
+		m.log.Error().Err(err).Str("session_id", s.ID).Msg("pipeline build failed")
 		s.setError(fmt.Errorf("pipeline build failed: %w", err))
 		return
 	}
 
+	m.log.Info().Str("session_id", s.ID).Msg("pipeline built, setting to PLAYING")
 	s.SetStopPipeline(func() { pipeline.SetState(gst.StateNull) })
-	pipeline.SetState(gst.StatePlaying)
+	stateErr := pipeline.SetState(gst.StatePlaying)
+	if stateErr != nil {
+		m.log.Error().Err(stateErr).Str("session_id", s.ID).Msg("pipeline SetState PLAYING failed")
+	} else {
+		m.log.Info().Str("session_id", s.ID).Msg("pipeline PLAYING")
+	}
 	go m.pollFileProgress(ctx, s)
 
 	bus := pipeline.GetBus()
