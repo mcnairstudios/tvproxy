@@ -53,13 +53,16 @@
 - Should extract format_name from ffprobe/libavformat during probe
 - File: pkg/avprobe/avprobe.go — need to read `format_name` from AVFormatContext
 
-## Proxy profile copy mode creates GStreamer session instead of HTTP passthrough
-- Proxy profile with video_codec=copy should use HTTP passthrough, not GStreamer
-- When creating a VOD session with Proxy profile, the session manager builds a native pipeline
-- Copy mode (h264parse → mp4mux) produces 0 bytes for RTSP/SAT>IP sources
-- Root cause unclear — same pattern works in hdhr_mp4.go reference but not in server
-- This only affects non-browser clients (Plex, Jellyfin) using Proxy profile
-- Browser profile (AV1 transcode) works correctly
+## RTSP copy mode produces 0 bytes with mp4mux
+- RTSP source (rtspsrc ! rtpmp2tdepay) with h264parse → mp4mux produces 0 bytes
+- Same pipeline with HTTP source (souphttpsrc ! tsparse ! tsdemux) works fine (5.4MB)
+- Root cause: RTSP RTP timestamps don't align with what mp4mux expects for copy mode
+- Transcode works on RTSP because decode/encode re-timestamps
+- Options:
+  1. For RTSP copy: use mpegtsmux instead of mp4mux (native TS output)
+  2. For RTSP copy: always transcode to at least re-timestamp (defeats purpose)
+  3. For RTSP copy: use plugin path via gst-launch subprocess (plugins work)
+- Affects: SAT>IP copy mode. Browser playback (always transcode) is NOT affected.
 
 ## go-gst NewPipelineFromString doesn't work with plugin bins
 - `gst-launch-1.0` with tvproxysrc/tvproxydemux/tvproxymux produces output
