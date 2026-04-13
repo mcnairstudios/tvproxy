@@ -255,6 +255,9 @@ func buildAudioChain(srcAudio string) []*gst.Element {
 			return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
 		}
 		return []*gst.Element{aPass}
+	case "vorbis":
+		aDec, _ := gst.NewElement("vorbisdec")
+		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
 	default:
 		aInParse, _ := gst.NewElement("aacparse")
 		aDec, _ := gst.NewElement("avdec_aac_latm")
