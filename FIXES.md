@@ -135,6 +135,12 @@ Returns available encoders/decoders detected at runtime via `gst.Find()`:
 Frontend: Settings page queries this on load, populates dropdowns with only available options.
 Priority: after source profile redesign.
 
+## Audio Language Selection in Native MPEG-TS Path
+- Source profile AudioLanguage flows to PipelineOpts but is only used by plugin path (tvproxydemux audio-language property)
+- Native tsdemux path takes first audio pad via pad-added — no language selection
+- Fix: in pad-added handler, collect all audio pads, check language tags, select preferred
+- This is what tvproxydemux does internally — replicate in native path
+
 ## Import Saga (Implemented)
 - On M3U refresh, skeleton probe entries created for all new streams
 - `isValidProbe()` check ensures skeletons trigger live probe on first play
