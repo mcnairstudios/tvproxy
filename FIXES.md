@@ -81,6 +81,19 @@ curl http://localhost:8080/vod/{channelID}/status
 | fMP4 transcode | mp4mux | fragment-duration=2000 streamable=true |
 | fMP4 VOD | mp4mux | fragment-duration=2000 streamable=true |
 
+## Hardware Acceleration Selection Guide
+
+| Hardware | HWAccel Setting | Best For |
+|----------|----------------|----------|
+| Intel Gen9+ (Skylake→) | `vaapi` | LP encoders (vah264lpenc, vah265lpenc) — zero init overhead |
+| Intel Arc (DG2/A380) | `vaapi` | + vaav1enc (hardware AV1!) |
+| Intel (via oneVPL) | `qsv` | QSV encoders — falls back to VAAPI LP if unavailable |
+| NVIDIA Turing+ | `nvenc` | nvh264enc, nvh265enc, nvav1enc |
+| Apple Silicon | `videotoolbox` | vtdec, vtenc_h264, vtenc_h265, vtenc_av1 (M4+) |
+| Software (any) | `none` | x264enc, x265enc, svtav1enc (preset 12) |
+
+Set in Settings → Encoding Defaults → HWAccel. Source profiles can override per-source for testing.
+
 ## DONE: Plugin container-hint / audio-codec-hint
 - container-hint, audio-codec-hint, video-codec-hint all implemented in tvproxydemux
 - Built and tested locally — all three properties appear in gst-inspect
