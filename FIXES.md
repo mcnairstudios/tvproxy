@@ -78,6 +78,13 @@
 - Direct/Proxy profiles should probably bypass the session manager entirely
 - The correct path for Proxy: HTTP reverse proxy to the source URL
 
+## Multiple simultaneous AV1 transcodes stall on M1
+- Running 2 svtav1enc instances concurrently causes both to stall
+- svtav1enc preset=12 uses all available CPU cores
+- On the A380 with vaav1enc (hardware), this won't be an issue
+- Consider: limit concurrent AV1 transcodes to 1 (or number of hw encoders)
+- Consider: lower preset (higher number = faster but lower quality) for concurrent sessions
+
 ## ensureProbe doesn't use WireGuard for probing
 - `ensureProbe()` calls `avprobe.Probe()` which uses libavformat directly (no custom HTTP client)
 - WireGuard-routed sources would fail to probe (connection blocked without WG tunnel)
