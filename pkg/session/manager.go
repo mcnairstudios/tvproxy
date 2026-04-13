@@ -1009,14 +1009,14 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Str("hw", s.startOpts.OutputHWAccel).
 		Msg("building pipeline")
 
-	pipeline, err := gstreamer.Build(opts)
+	pipeline, path, err := gstreamer.Build(opts)
 	if err != nil {
 		m.log.Error().Err(err).Str("session_id", s.ID).Msg("pipeline build failed")
 		s.setError(fmt.Errorf("pipeline build failed: %w", err))
 		return
 	}
 
-	m.log.Info().Str("session_id", s.ID).Msg("pipeline built, setting to PLAYING")
+	m.log.Info().Str("session_id", s.ID).Str("path", path).Msg("pipeline built, setting to PLAYING")
 	s.SetStopPipeline(func() { pipeline.SetState(gst.StateNull) })
 	stateErr := pipeline.SetState(gst.StatePlaying)
 	if stateErr != nil {

@@ -8,7 +8,7 @@ import (
 	"github.com/go-gst/go-gst/gst"
 )
 
-func Build(opts PipelineOpts) (*gst.Pipeline, error) {
+func Build(opts PipelineOpts) (*gst.Pipeline, string, error) {
 	container := strings.ToLower(opts.Container)
 	isRTSP := strings.HasPrefix(opts.InputURL, "rtsp://") || strings.HasPrefix(opts.InputURL, "rtsps://")
 
@@ -18,11 +18,27 @@ func Build(opts PipelineOpts) (*gst.Pipeline, error) {
 	isMPEGTS := isRTSP || container == "mpegts" || container == "mpeg-ts" || container == "ts" || container == ""
 
 	srcCodec := NormalizeCodec(opts.VideoCodec)
+	outCodec := NormalizeCodec(opts.OutputVideoCodec)
+	isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy" || outCodec == srcCodec
 
 	if isMPEGTS {
-		return buildMPEGTSNative(opts, srcCodec, isRTSP)
+		mode := "transcode"
+		if isCopy {
+			mode = "copy"
+		}
+		path := fmt.Sprintf("mpegts-%s", mode)
+		if isRTSP {
+			path = "rtsp-" + mode
+		}
+		p, err := buildMPEGTSNative(opts, srcCodec, isRTSP)
+		return p, path, err
 	}
-	return buildNonMPEGTSNative(opts, srcCodec)
+	mode := "transcode"
+	if isCopy {
+		mode = "copy"
+	}
+	p, err := buildNonMPEGTSNative(opts, srcCodec)
+	return p, fmt.Sprintf("vod-%s-%s", container, mode), err
 }
 
 func buildMPEGTSPluginCopy(opts PipelineOpts, srcCodec string) (*gst.Pipeline, error) {
