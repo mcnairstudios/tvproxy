@@ -343,14 +343,27 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 	case HWVAAPI:
 		switch codec {
 		case "h265":
-			encoder, _ = gst.NewElement("vaapih265enc")
+			encoder, _ = gst.NewElement("vah265lpenc")
+			if encoder == nil {
+				encoder, _ = gst.NewElement("vaapih265enc")
+			}
 		case "av1":
-			encoder, _ = gst.NewElement("vaapiav1enc")
+			encoder, _ = gst.NewElement("vaav1enc")
+			if encoder == nil {
+				encoder, _ = gst.NewElement("vaapiav1enc")
+			}
+			if encoder == nil {
+				return createSoftwareAV1Encoder(bitrate)
+			}
 		default:
-			encoder, _ = gst.NewElement("vaapih264enc")
-			encoder.SetProperty("tune", uint(3))
+			encoder, _ = gst.NewElement("vah264lpenc")
+			if encoder == nil {
+				encoder, _ = gst.NewElement("vaapih264enc")
+			}
 		}
-		encoder.SetProperty("bitrate", uint(bitrate))
+		if encoder != nil {
+			encoder.SetProperty("bitrate", uint(bitrate))
+		}
 	case HWQSV:
 		switch codec {
 		case "h265":
