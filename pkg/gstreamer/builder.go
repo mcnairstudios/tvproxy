@@ -210,7 +210,14 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 		videoElements = append(videoElements, createOutputParser(outCodec)...)
 	}
 
-	aPass, _ := gst.NewElement("aacparse")
+	srcAudio := NormalizeCodec(opts.AudioCodec)
+	var audioElements []*gst.Element
+	if srcAudio == "aac" || srcAudio == "" {
+		aPass, _ := gst.NewElement("aacparse")
+		audioElements = []*gst.Element{aPass}
+	} else {
+		audioElements = buildAudioChain(srcAudio)
+	}
 
 	mux, _ := gst.NewElement("mp4mux")
 	mux.SetProperty("fragment-duration", uint(2000))
@@ -221,7 +228,8 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 	var all []*gst.Element
 	all = append(all, src, demux, vQueue, aQueue)
 	all = append(all, videoElements...)
-	all = append(all, aPass, mux, sink)
+	all = append(all, audioElements...)
+	all = append(all, mux, sink)
 
 	for i, el := range all {
 		if el == nil {
@@ -237,7 +245,10 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 	vChain = append(vChain, mux)
 	gst.ElementLinkMany(vChain...)
 
-	gst.ElementLinkMany(aQueue, aPass, mux)
+	aChain := []*gst.Element{aQueue}
+	aChain = append(aChain, audioElements...)
+	aChain = append(aChain, mux)
+	gst.ElementLinkMany(aChain...)
 	gst.ElementLinkMany(mux, sink)
 
 	var videoOnce, audioOnce sync.Once
