@@ -111,6 +111,36 @@ func TestBuildAudioChain(t *testing.T) {
 	}
 }
 
+func TestCreateHWDecoder_SoftwareFallback(t *testing.T) {
+	gst.Init(nil)
+	for _, codec := range []string{"h264", "h265", "av1", "mpeg2video", "mpeg4"} {
+		elements := createHWDecoder(codec, HWNone)
+		if len(elements) != 2 {
+			t.Errorf("createHWDecoder(%q, HWNone) returned %d elements, want 2", codec, len(elements))
+			continue
+		}
+		for i, el := range elements {
+			if el == nil {
+				t.Errorf("createHWDecoder(%q, HWNone) element %d is nil", codec, i)
+			}
+		}
+	}
+}
+
+func TestCreateOutputParser_AllCodecs(t *testing.T) {
+	gst.Init(nil)
+	for _, codec := range []string{"h264", "h265", "av1", "mpeg2video", "mpeg4"} {
+		elements := createOutputParser(codec)
+		if len(elements) != 1 {
+			t.Errorf("createOutputParser(%q) returned %d elements, want 1", codec, len(elements))
+			continue
+		}
+		if elements[0] == nil {
+			t.Errorf("createOutputParser(%q) returned nil parser", codec)
+		}
+	}
+}
+
 func TestBuild_EmptyOpts(t *testing.T) {
 	_, path, err := Build(PipelineOpts{InputURL: "http://test/stream", RecordingPath: "/tmp/test.mp4"})
 	if err != nil {
