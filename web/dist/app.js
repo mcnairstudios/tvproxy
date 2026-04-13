@@ -7393,6 +7393,63 @@
           ),
         ));
 
+        const capabilitiesContent = h('div', { style: 'padding: 16px; font-size: 15px' });
+        capabilitiesContent.appendChild(h('p', { style: 'color: var(--text-muted); font-size: 13px' }, 'Loading...'));
+        const capabilitiesSection = h('div', { className: 'table-container', style: 'margin-top: 24px' },
+          h('div', { className: 'table-header' }, h('h3', null, 'Platform Capabilities')),
+          capabilitiesContent,
+        );
+        container.appendChild(capabilitiesSection);
+
+        (async () => {
+          try {
+            const caps = await api.get('/api/gstreamer/capabilities');
+            if (!caps || !caps.video_encoders) throw new Error('No capability data');
+            capabilitiesContent.innerHTML = '';
+
+            if (caps.hwaccel) {
+              const hwRow = h('div', { style: 'margin-bottom: 12px; display: flex; align-items: center; gap: 10px' },
+                h('label', { style: 'margin: 0; min-width: 160px; font-weight: 500' }, 'Detected platform:'),
+                h('span', { style: 'padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 500; background: var(--accent); color: #fff' }, caps.hwaccel.toUpperCase()),
+              );
+              capabilitiesContent.appendChild(hwRow);
+            }
+
+            if (caps.video_encoders && caps.video_encoders.length > 0) {
+              const label = h('label', { style: 'margin: 0 0 8px 0; display: block; font-weight: 500' }, 'Video encoders:');
+              capabilitiesContent.appendChild(label);
+              const badgeWrap = h('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px' });
+              caps.video_encoders.forEach(function(enc) {
+                const bg = enc.hw ? '#2ea043' : '#6e7681';
+                const badge = h('span', {
+                  style: 'padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; color: #fff; background:' + bg,
+                  title: enc.name + ' (' + enc.codec + ', ' + (enc.hw ? 'hardware' : 'software') + ')',
+                }, enc.name);
+                badgeWrap.appendChild(badge);
+              });
+              capabilitiesContent.appendChild(badgeWrap);
+            }
+
+            if (caps.audio_encoders && caps.audio_encoders.length > 0) {
+              const audioLabel = h('label', { style: 'margin: 12px 0 8px 0; display: block; font-weight: 500' }, 'Audio encoders:');
+              capabilitiesContent.appendChild(audioLabel);
+              const audioBadgeWrap = h('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px' });
+              caps.audio_encoders.forEach(function(enc) {
+                const bg = enc.hw ? '#2ea043' : '#6e7681';
+                const badge = h('span', {
+                  style: 'padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; color: #fff; background:' + bg,
+                  title: enc.name + ' (' + enc.codec + ', ' + (enc.hw ? 'hardware' : 'software') + ')',
+                }, enc.name);
+                audioBadgeWrap.appendChild(badge);
+              });
+              capabilitiesContent.appendChild(audioBadgeWrap);
+            }
+          } catch (e) {
+            capabilitiesContent.innerHTML = '';
+            capabilitiesContent.appendChild(h('p', { style: 'color: var(--text-muted); font-size: 13px' }, 'Could not load platform capabilities. The GStreamer capability endpoint may not be available.'));
+          }
+        })();
+
         const dlnaEnabled = (Array.isArray(settings) ? settings : []).some(s => s.key === 'dlna_enabled' && s.value === 'true');
         const dlnaToggle = h('input', { type: 'checkbox', id: 'setting-dlna-enabled' });
         dlnaToggle.checked = dlnaEnabled;
