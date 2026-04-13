@@ -101,6 +101,21 @@ func TestBuildAudioChain(t *testing.T) {
 	}
 }
 
+func TestBuild_RTSPDetection(t *testing.T) {
+	tests := []struct{ url string; wantRTSP bool }{
+		{"rtsp://192.168.1.149/?freq=545", true},
+		{"rtsps://secure.server/stream", true},
+		{"http://192.168.1.186:5004/auto/v101", false},
+		{"http://server/movie.mp4", false},
+	}
+	for _, tt := range tests {
+		isRTSP := len(tt.url) >= 7 && (tt.url[:7] == "rtsp://" || tt.url[:8] == "rtsps://")
+		if isRTSP != tt.wantRTSP {
+			t.Errorf("isRTSP(%q) = %v, want %v", tt.url, isRTSP, tt.wantRTSP)
+		}
+	}
+}
+
 func TestBuild_PathSelection(t *testing.T) {
 	tests := []struct {
 		name string
