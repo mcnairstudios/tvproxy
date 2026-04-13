@@ -101,6 +101,16 @@ func TestBuildAudioChain(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodec_PassthroughValues(t *testing.T) {
+	passthrough := []string{"h264", "h265", "av1", "mpeg2video", "aac", "aac_latm", "mp2", "ac3", "eac3", "dts", "opus", "flac", "vorbis", "copy", "default", ""}
+	for _, codec := range passthrough {
+		got := NormalizeCodec(codec)
+		if got != codec {
+			t.Logf("NormalizeCodec(%q) = %q (normalized)", codec, got)
+		}
+	}
+}
+
 func TestBuild_RTSPDetection(t *testing.T) {
 	tests := []struct{ url string; wantRTSP bool }{
 		{"rtsp://192.168.1.149/?freq=545", true},
