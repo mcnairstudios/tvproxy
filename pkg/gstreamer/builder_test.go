@@ -197,6 +197,22 @@ func TestContainerFromURL_SpecialCases(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodec_CaseInsensitive(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"H264", "h264"},
+		{"HEVC", "h265"},
+		{"AV1", "av1"},
+		{"AAC", "aac"},
+		{"OPUS", "opus"},
+	}
+	for _, tt := range tests {
+		got := NormalizeCodec(tt.in)
+		if got != tt.want {
+			t.Errorf("NormalizeCodec(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestNormalizeCodec_EmptyAndUnknown(t *testing.T) {
 	if NormalizeCodec("") != "" {
 		t.Error("empty should return empty")
