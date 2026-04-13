@@ -216,7 +216,7 @@ func (h *VODHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	fileSize := h.vodService.GetFileSize(channelID)
 	var bitrateKbps int64
-	if buffered > 0 {
+	if buffered > 1 && fileSize > 0 {
 		bitrateKbps = fileSize * 8 / int64(buffered) / 1000
 	}
 
