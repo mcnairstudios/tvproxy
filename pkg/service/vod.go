@@ -156,6 +156,8 @@ func (s *VODService) autoSelectSourceProfile(ctx context.Context, streamURL stri
 	switch {
 	case strings.HasPrefix(streamURL, "rtsp://"):
 		names = []string{"SAT>IP"}
+	case strings.Contains(streamURL, ":5004/"):
+		names = []string{"HDHomeRun", "IPTV"}
 	case hasVideoFileExtension(streamURL):
 		names = []string{"VOD", "TVProxy-streams"}
 	default:
