@@ -2,6 +2,8 @@ package gstreamer
 
 import (
 	"testing"
+
+	"github.com/go-gst/go-gst/gst"
 )
 
 func TestBuild_ContainerDetection(t *testing.T) {
@@ -163,6 +165,21 @@ func TestBuild_CopyDetection(t *testing.T) {
 				t.Errorf("isCopy(src=%q, out=%q) = %v, want %v", tt.srcCodec, tt.outCodec, isCopy, tt.wantCopy)
 			}
 		})
+	}
+}
+
+func TestCheckNilElements(t *testing.T) {
+	gst.Init(nil)
+	a, _ := gst.NewElement("fakesink")
+	b, _ := gst.NewElement("fakesink")
+	if err := checkNilElements([]*gst.Element{a, b}); err != nil {
+		t.Errorf("checkNilElements with valid elements: %v", err)
+	}
+	if err := checkNilElements([]*gst.Element{a, nil, b}); err == nil {
+		t.Error("checkNilElements should fail with nil element")
+	}
+	if err := checkNilElements([]*gst.Element{}); err != nil {
+		t.Errorf("checkNilElements with empty slice: %v", err)
 	}
 }
 
