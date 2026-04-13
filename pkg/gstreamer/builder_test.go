@@ -20,6 +20,7 @@ func TestBuild_ContainerDetection(t *testing.T) {
 		{"HDHR port 5004", "http://192.168.1.186:5004/auto/v101", ""},
 		{"URL encoded MP4", "http://server/stream/tv%2FShow%2Fepisode.mp4", "mp4"},
 		{"URL with query", "http://server/stream.mp4?token=abc", "mp4"},
+		{"FLV stream", "http://provider/live/stream.flv", "flv"},
 	}
 
 	for _, tt := range tests {
