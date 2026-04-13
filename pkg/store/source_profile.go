@@ -89,6 +89,10 @@ func (s *SourceProfileStoreImpl) migrateDefaults() {
 			if p.HTTPRetries == 0 { p.HTTPRetries = 1; changed = true }
 			if !p.TSSetTimestamps { p.TSSetTimestamps = true; changed = true }
 		}
+		if p.Name == "TVProxy-streams" {
+			if p.HTTPTimeoutSec == 0 { p.HTTPTimeoutSec = 10; changed = true }
+			if p.HTTPRetries == 0 { p.HTTPRetries = 2; changed = true }
+		}
 	}
 	if changed {
 		s.saveUnlocked()
