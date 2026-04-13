@@ -748,6 +748,8 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Str("out_video", s.startOpts.OutputVideoCodec).
 		Str("out_container", s.startOpts.OutputContainer).
 		Str("hw", s.startOpts.OutputHWAccel).
+		Bool("deinterlace", s.startOpts.Deinterlace).
+		Int("audio_delay", s.startOpts.AudioDelayMs).
 		Msg("building pipeline")
 
 	pipeline, path, err := gstreamer.Build(opts)

@@ -52,14 +52,19 @@ func buildMPEGTSPluginCopy(opts PipelineOpts, srcCodec string) (*gst.Pipeline, e
 		audioMode = "copy"
 	}
 
+	audioLang := ""
+	if opts.AudioLanguage != "" {
+		audioLang = " audio-language=" + opts.AudioLanguage
+	}
+
 	pipeStr := fmt.Sprintf(
 		"tvproxysrc location=%s is-live=true"+
-			" ! tvproxydemux name=d container-hint=mpegts video-codec-hint=%s audio-codec-hint=%s audio-codec=%s"+
+			" ! tvproxydemux name=d container-hint=mpegts video-codec-hint=%s audio-codec-hint=%s audio-codec=%s%s"+
 			" d.video ! m.video"+
 			" d.audio ! m.audio"+
 			" tvproxymux name=m output-format=mp4"+
 			" ! filesink location=%s",
-		opts.InputURL, srcCodec, srcAudio, audioMode, opts.RecordingPath)
+		opts.InputURL, srcCodec, srcAudio, audioMode, audioLang, opts.RecordingPath)
 
 	return gst.NewPipelineFromString(pipeStr)
 }
