@@ -41,7 +41,9 @@ curl http://localhost:8080/vod/{channelID}/status
 - On M3U refresh, skeleton probe entries created for all new streams
 - `isValidProbe()` check ensures skeletons trigger live probe on first play
 - Background probe scheduler processes all unprobed streams
-- TMDB saga: deferred (M3U service doesn't have TMDB client access yet)
+- TMDB saga: deferred — inject TMDB client into M3UService, call Sync() after import
+  - On M3U refresh, collect VOD items (movies/series) and queue for TMDB lookup
+  - This would populate posters/metadata immediately instead of waiting for library browse
 
 ## Remaining Issues (Priority Order)
 
