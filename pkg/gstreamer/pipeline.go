@@ -433,6 +433,8 @@ func NormalizeCodec(codec string) string {
 		return "h264"
 	case c == "mpeg2" || c == "mpeg2video" || c == "mpeg2 video" || c == "mpeg-2 video":
 		return "mpeg2video"
+	case c == "mpeg4" || c == "mpeg4video" || c == "mpeg-4 video" || strings.Contains(c, "mpeg-4 visual"):
+		return "mpeg4"
 	case c == "aac_latm" || c == "mp4a-latm" || c == "aac audio (latm)":
 		return "aac_latm"
 	case c == "aac" || c == "aac audio":
