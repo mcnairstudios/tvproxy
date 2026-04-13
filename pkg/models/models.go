@@ -167,7 +167,6 @@ type SourceProfile struct {
 	DeinterlaceMethod string `json:"deinterlace_method,omitempty"`
 
 	AudioDelayMs   int    `json:"audio_delay_ms"`
-	AudioChannels  int    `json:"audio_channels"`
 	AudioLanguage  string `json:"audio_language,omitempty"`
 
 	VideoQueueMs   int `json:"video_queue_ms"`

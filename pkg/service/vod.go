@@ -113,7 +113,6 @@ func applySourceProfile(opts *session.StartOpts, sp *models.SourceProfile) {
 	opts.Deinterlace = sp.Deinterlace
 	opts.DeinterlaceMethod = sp.DeinterlaceMethod
 	opts.AudioDelayMs = sp.AudioDelayMs
-	opts.AudioChannels = sp.AudioChannels
 	opts.AudioLanguage = sp.AudioLanguage
 	opts.VideoQueueMs = sp.VideoQueueMs
 	opts.AudioQueueMs = sp.AudioQueueMs

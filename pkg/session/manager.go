@@ -48,7 +48,6 @@ type StartOpts struct {
 	Deinterlace       bool
 	DeinterlaceMethod string
 	AudioDelayMs      int
-	AudioChannels     int
 	AudioLanguage     string
 	VideoQueueMs      int
 	AudioQueueMs      int
@@ -736,7 +735,6 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Deinterlace:       s.startOpts.Deinterlace,
 		DeinterlaceMethod: s.startOpts.DeinterlaceMethod,
 		AudioDelayMs:      s.startOpts.AudioDelayMs,
-		AudioChannels:     s.startOpts.AudioChannels,
 		AudioLanguage:     s.startOpts.AudioLanguage,
 		VideoQueueMs:      s.startOpts.VideoQueueMs,
 		AudioQueueMs:      s.startOpts.AudioQueueMs,

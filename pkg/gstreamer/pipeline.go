@@ -53,7 +53,6 @@ type PipelineOpts struct {
 	Deinterlace       bool
 	DeinterlaceMethod string
 	AudioDelayMs      int
-	AudioChannels     int
 	AudioLanguage     string
 	VideoQueueMs      int
 	AudioQueueMs      int

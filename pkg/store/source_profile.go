@@ -70,10 +70,6 @@ func (s *SourceProfileStoreImpl) migrateDefaults() {
 			p.AudioQueueMs = 10000
 			changed = true
 		}
-		if p.AudioChannels == 0 && p.Name != "VOD" && p.Name != "TVProxy-streams" {
-			p.AudioChannels = 2
-			changed = true
-		}
 		if p.Name == "SAT>IP" && p.RTSPProtocols == "" {
 			p.RTSPProtocols = "tcp"
 			p.TSSetTimestamps = true
@@ -101,14 +97,12 @@ func (s *SourceProfileStoreImpl) migrateDefaults() {
 
 	s.ensureProfile("HDHomeRun", models.SourceProfile{
 		Deinterlace: false,
-		AudioChannels: 2,
 		VideoQueueMs: 10000, AudioQueueMs: 10000,
 		HTTPTimeoutSec: 10, HTTPRetries: 1,
 		TSSetTimestamps: true,
 	})
 	s.ensureProfile("VOD", models.SourceProfile{
 		Deinterlace: false,
-		AudioChannels: 0,
 		VideoQueueMs: 10000, AudioQueueMs: 10000,
 		HTTPTimeoutSec: 30, HTTPRetries: 3,
 	})
@@ -221,7 +215,6 @@ func (s *SourceProfileStoreImpl) SeedDefaults() {
 		{
 			ID: uuid.New().String(), Name: "IPTV",
 			Deinterlace: false,
-			AudioDelayMs: 0, AudioChannels: 2,
 			VideoQueueMs: 10000, AudioQueueMs: 10000,
 			HTTPTimeoutSec: 30, HTTPRetries: 3,
 			TSSetTimestamps: true,
@@ -229,7 +222,6 @@ func (s *SourceProfileStoreImpl) SeedDefaults() {
 		{
 			ID: uuid.New().String(), Name: "SAT>IP",
 			Deinterlace: true, DeinterlaceMethod: "auto",
-			AudioDelayMs: 0, AudioChannels: 2, AudioLanguage: "eng",
 			VideoQueueMs: 10000, AudioQueueMs: 10000,
 			RTSPLatency: 0, RTSPProtocols: "tcp", RTSPBufferMode: 0,
 			TSSetTimestamps: true,
@@ -237,7 +229,6 @@ func (s *SourceProfileStoreImpl) SeedDefaults() {
 		{
 			ID: uuid.New().String(), Name: "HDHomeRun",
 			Deinterlace: false,
-			AudioDelayMs: 0, AudioChannels: 2,
 			VideoQueueMs: 10000, AudioQueueMs: 10000,
 			HTTPTimeoutSec: 10, HTTPRetries: 1,
 			TSSetTimestamps: true,
@@ -245,7 +236,6 @@ func (s *SourceProfileStoreImpl) SeedDefaults() {
 		{
 			ID: uuid.New().String(), Name: "VOD",
 			Deinterlace: false,
-			AudioDelayMs: 0, AudioChannels: 0,
 			VideoQueueMs: 10000, AudioQueueMs: 10000,
 			HTTPTimeoutSec: 30, HTTPRetries: 3,
 		},

@@ -5752,7 +5752,6 @@
         { key: 'name', label: 'Name' },
         { key: 'deinterlace', label: 'Deinterlace', render: item => item.deinterlace ? h('span', { className: 'badge badge-info' }, 'Yes') : '' },
         { key: 'audio_delay_ms', label: 'Audio Delay', render: item => item.audio_delay_ms ? item.audio_delay_ms + 'ms' : '0' },
-        { key: 'audio_channels', label: 'Audio Ch', render: item => item.audio_channels || 'Original' },
         { key: 'rtsp_protocols', label: 'RTSP', render: item => item.rtsp_protocols || '' },
         { key: 'http_timeout_sec', label: 'Timeout', render: item => item.http_timeout_sec ? item.http_timeout_sec + 's' : '' },
       ],
@@ -5769,7 +5768,6 @@
 
         { key: '_section_audio', label: 'Audio', type: 'section' },
         { key: 'audio_delay_ms', label: 'Audio Delay (ms)', type: 'number', default: 0, help: 'Positive = delay audio. Use to fix lip sync when encoder has startup latency (e.g. AV1 encoder buffers ~15 seconds). Try 0-500ms.' },
-        { key: 'audio_channels', label: 'Audio Transcode Channels', type: 'select', options: [
           { value: 0, label: 'Preserve Original' },
           { value: 2, label: 'Stereo (2ch)' },
           { value: 6, label: '5.1 Surround (6ch)' },
