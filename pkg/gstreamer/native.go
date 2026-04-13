@@ -545,6 +545,10 @@ func createOutputParser(codec string) []*gst.Element {
 		parser.SetProperty("config-interval", -1)
 	case "av1":
 		parser, _ = gst.NewElement("av1parse")
+	case "mpeg2video":
+		parser, _ = gst.NewElement("mpegvideoparse")
+	case "mpeg4":
+		parser, _ = gst.NewElement("mpeg4videoparse")
 	default:
 		parser, _ = gst.NewElement("h264parse")
 		parser.SetProperty("config-interval", -1)
