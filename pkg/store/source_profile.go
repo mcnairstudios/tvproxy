@@ -53,7 +53,46 @@ func (s *SourceProfileStoreImpl) Load() error {
 	s.profiles = profiles
 	s.mu.Unlock()
 	s.log.Info().Int("count", len(profiles)).Msg("loaded source profiles from json")
+	s.migrateDefaults()
 	return nil
+}
+
+func (s *SourceProfileStoreImpl) migrateDefaults() {
+	changed := false
+	for i := range s.profiles {
+		p := &s.profiles[i]
+		if p.VideoQueueMs == 0 {
+			p.VideoQueueMs = 10000
+			changed = true
+		}
+		if p.AudioQueueMs == 0 {
+			p.AudioQueueMs = 10000
+			changed = true
+		}
+		if p.AudioChannels == 0 && p.Name != "VOD" && p.Name != "TVProxy-streams" {
+			p.AudioChannels = 2
+			changed = true
+		}
+		if p.Name == "SAT>IP" && p.RTSPProtocols == "" {
+			p.RTSPProtocols = "tcp"
+			p.TSSetTimestamps = true
+			changed = true
+		}
+		if p.Name == "IPTV" {
+			if p.HTTPTimeoutSec == 0 { p.HTTPTimeoutSec = 30; changed = true }
+			if p.HTTPRetries == 0 { p.HTTPRetries = 3; changed = true }
+			if !p.TSSetTimestamps { p.TSSetTimestamps = true; changed = true }
+		}
+		if p.Name == "HDHomeRun" {
+			if p.HTTPTimeoutSec == 0 { p.HTTPTimeoutSec = 10; changed = true }
+			if p.HTTPRetries == 0 { p.HTTPRetries = 1; changed = true }
+			if !p.TSSetTimestamps { p.TSSetTimestamps = true; changed = true }
+		}
+	}
+	if changed {
+		s.saveUnlocked()
+		s.log.Info().Msg("migrated source profiles with new GStreamer defaults")
+	}
 }
 
 func (s *SourceProfileStoreImpl) Save() error {

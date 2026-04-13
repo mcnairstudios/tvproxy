@@ -104,6 +104,12 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 		src.SetProperty("location", opts.InputURL)
 		src.SetProperty("do-timestamp", true)
 		src.SetProperty("is-live", true)
+		if opts.HTTPTimeoutSec > 0 {
+			src.SetProperty("timeout", uint(opts.HTTPTimeoutSec))
+		}
+		if opts.HTTPRetries > 0 {
+			src.SetProperty("retries", opts.HTTPRetries)
+		}
 		if opts.UserAgent != "" {
 			src.SetProperty("user-agent", opts.UserAgent)
 		}
@@ -158,6 +164,13 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 	}
 
 	audioElements := buildAudioChain(NormalizeCodec(opts.AudioCodec))
+	if opts.AudioDelayMs > 0 {
+		delayQueue, _ := gst.NewElement("queue")
+		if delayQueue != nil {
+			delayQueue.SetProperty("min-threshold-time", uint64(opts.AudioDelayMs)*1000000)
+			audioElements = append([]*gst.Element{delayQueue}, audioElements...)
+		}
+	}
 
 	var mux *gst.Element
 	if opts.OutputFormat == OutputMPEGTS || (isCopy && opts.OutputFormat == "") {
@@ -221,6 +234,9 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 
 	src, _ := gst.NewElement("souphttpsrc")
 	src.SetProperty("location", opts.InputURL)
+	if opts.HTTPTimeoutSec > 0 {
+		src.SetProperty("timeout", uint(opts.HTTPTimeoutSec))
+	}
 	if opts.UserAgent != "" {
 		src.SetProperty("user-agent", opts.UserAgent)
 	}
@@ -260,6 +276,15 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 		videoElements = createOutputParser(srcCodec)
 	} else {
 		videoElements = append(videoElements, createHWDecoder(srcCodec, hw)...)
+		if opts.Deinterlace {
+			di, _ := gst.NewElement("vadeinterlace")
+			if di == nil {
+				di, _ = gst.NewElement("deinterlace")
+			}
+			if di != nil {
+				videoElements = append(videoElements, di)
+			}
+		}
 		videoElements = append(videoElements, createHWEncoder(outCodec, hw, bitrate(opts))...)
 		videoElements = append(videoElements, createOutputParser(outCodec)...)
 	}
