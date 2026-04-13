@@ -113,7 +113,7 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 			src.SetProperty("timeout", uint(opts.HTTPTimeoutSec))
 		}
 		if opts.HTTPRetries > 0 {
-			src.SetProperty("retries", opts.HTTPRetries)
+			src.SetProperty("retries", uint(opts.HTTPRetries))
 		}
 		if opts.UserAgent != "" {
 			src.SetProperty("user-agent", opts.UserAgent)
