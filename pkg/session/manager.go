@@ -1062,13 +1062,13 @@ func (m *Manager) ensureProbe(ctx context.Context, opts StartOpts) *media.ProbeR
 	if m.probeCache != nil {
 		if opts.StreamID != "" {
 			if cached, _ := m.probeCache.GetProbeByStreamID(opts.StreamID); cached != nil {
-				m.log.Debug().Str("stream_id", opts.StreamID).Msg("probe cache hit (by ID)")
+				m.log.Debug().Str("stream_id", opts.StreamID).Float64("duration", cached.Duration).Msg("probe cache hit (by ID)")
 				return cached
 			}
 		}
 		if opts.StreamURL != "" {
 			if cached, _ := m.probeCache.GetProbe(media.StreamHash(opts.StreamURL)); cached != nil {
-				m.log.Debug().Str("stream_url", opts.StreamURL).Msg("probe cache hit (by URL)")
+				m.log.Debug().Str("stream_url", opts.StreamURL).Float64("duration", cached.Duration).Msg("probe cache hit (by URL)")
 				return cached
 			}
 		}
