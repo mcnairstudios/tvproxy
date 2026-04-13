@@ -79,53 +79,33 @@ func resolveSessionStrategy(in StrategyInput, out StrategyOutput, outputDir stri
 }
 
 func liveStrategy(in StrategyInput, out StrategyOutput, cat StreamCategory) SessionStrategy {
-	sp := in.SourceProfile
-
 	sourceVideo := "h264"
 	sourceAudio := "aac"
 	if in.StreamVCodec != "" {
 		sourceVideo = strings.ToLower(in.StreamVCodec)
-	} else if sp != nil && sp.VideoCodec != "" {
-		sourceVideo = sp.VideoCodec
 	}
 	if in.StreamACodec != "" {
 		sourceAudio = strings.ToLower(in.StreamACodec)
-	} else if sp != nil && sp.AudioCodec != "" {
-		sourceAudio = sp.AudioCodec
 	}
 
-	s := SessionStrategy{
-		Category:        cat,
-		VideoCodec:      resolveVideoAction(sourceVideo, out.VideoCodec),
-		AudioCodec:      resolveAudioAction(sourceAudio, out.AudioCodec, out.Container),
-		HWAccel:         out.HWAccel,
-		Container:       out.Container,
+	return SessionStrategy{
+		Category:     cat,
+		VideoCodec:   resolveVideoAction(sourceVideo, out.VideoCodec),
+		AudioCodec:   resolveAudioAction(sourceAudio, out.AudioCodec, out.Container),
+		HWAccel:      out.HWAccel,
+		Container:    out.Container,
+		MetadataOnly: false,
 	}
-	if sp != nil {
-		if sp.ProbeMode == "none" || sp.ProbeMode == "declared" {
-			s.SkipProbe = true
-		}
-	}
-
-	s.MetadataOnly = false
-
-	return s
 }
 
 func vodRemoteStrategy(in StrategyInput, out StrategyOutput) SessionStrategy {
-	sp := in.SourceProfile
 	s := SessionStrategy{
-		Category:        CategoryVODRemote,
-		VideoCodec:      out.VideoCodec,
-		AudioCodec:      out.AudioCodec,
-		HWAccel:         out.HWAccel,
-		Container:       out.Container,
-		MetadataOnly:    false,
-	}
-	if sp != nil {
-		if sp.ProbeMode == "none" || sp.ProbeMode == "declared" {
-			s.SkipProbe = true
-		}
+		Category:     CategoryVODRemote,
+		VideoCodec:   out.VideoCodec,
+		AudioCodec:   out.AudioCodec,
+		HWAccel:      out.HWAccel,
+		Container:    out.Container,
+		MetadataOnly: false,
 	}
 	return s
 }

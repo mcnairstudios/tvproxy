@@ -110,6 +110,31 @@ audio_channels: 0              # 0 = preserve original
 - The builder reads profile fields and applies them to element properties
 - Profile is selected by: (1) channel override, (2) M3U account default, (3) auto-detect from URL
 
+## Output Codec Settings: Platform-Filtered Available Codecs
+
+The Settings → Encoding Defaults codec dropdown should show only codecs available on the current platform:
+
+### API endpoint: GET /api/gstreamer/capabilities
+Returns available encoders/decoders detected at runtime via `gst.Find()`:
+```json
+{
+  "video_encoders": [
+    {"id": "vaav1lpenc", "name": "AV1 (Intel VA-API LP)", "codec": "av1", "hw": true},
+    {"id": "vah265lpenc", "name": "H.265 (Intel VA-API LP)", "codec": "h265", "hw": true},
+    {"id": "vah264lpenc", "name": "H.264 (Intel VA-API LP)", "codec": "h264", "hw": true},
+    {"id": "svtav1enc", "name": "AV1 (SVT-AV1 Software)", "codec": "av1", "hw": false},
+    {"id": "x265enc", "name": "H.265 (x265 Software)", "codec": "h265", "hw": false},
+    {"id": "x264enc", "name": "H.264 (x264 Software)", "codec": "h264", "hw": false}
+  ],
+  "video_decoders": [...],
+  "audio_encoders": [...],
+  "hwaccel": "vaapi"  // detected platform
+}
+```
+
+Frontend: Settings page queries this on load, populates dropdowns with only available options.
+Priority: after source profile redesign.
+
 ## Import Saga (Implemented)
 - On M3U refresh, skeleton probe entries created for all new streams
 - `isValidProbe()` check ensures skeletons trigger live probe on first play

@@ -49,6 +49,22 @@ type PipelineOpts struct {
 
 	UserAgent    string
 	ExtraHeaders map[string]string
+
+	Deinterlace       bool
+	DeinterlaceMethod string
+	AudioDelayMs      int
+	AudioChannels     int
+	AudioLanguage     string
+	VideoQueueMs      int
+	AudioQueueMs      int
+	RTSPLatency       int
+	RTSPProtocols     string
+	RTSPBufferMode    int
+	HTTPTimeoutSec    int
+	HTTPRetries       int
+	TSSetTimestamps   bool
+	EncoderBitrateKbps int
+
 	DualOutput   bool
 }
 

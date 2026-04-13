@@ -106,6 +106,26 @@ func (s *VODService) resolveStreamForChannel(ctx context.Context, channelID stri
 	return "", "", "", "", "", false, fmt.Errorf("no active streams for channel %s", channelID)
 }
 
+func applySourceProfile(opts *session.StartOpts, sp *models.SourceProfile) {
+	if sp == nil {
+		return
+	}
+	opts.Deinterlace = sp.Deinterlace
+	opts.DeinterlaceMethod = sp.DeinterlaceMethod
+	opts.AudioDelayMs = sp.AudioDelayMs
+	opts.AudioChannels = sp.AudioChannels
+	opts.AudioLanguage = sp.AudioLanguage
+	opts.VideoQueueMs = sp.VideoQueueMs
+	opts.AudioQueueMs = sp.AudioQueueMs
+	opts.RTSPLatency = sp.RTSPLatency
+	opts.RTSPProtocols = sp.RTSPProtocols
+	opts.RTSPBufferMode = sp.RTSPBufferMode
+	opts.HTTPTimeoutSec = sp.HTTPTimeoutSec
+	opts.HTTPRetries = sp.HTTPRetries
+	opts.TSSetTimestamps = sp.TSSetTimestamps
+	opts.EncoderBitrateKbps = sp.EncoderBitrateKbps
+}
+
 func (s *VODService) lookupSourceProfile(ctx context.Context, m3uAccountID, satipSourceID string) *models.SourceProfile {
 	if s.sourceProfileStore == nil {
 		return nil
@@ -203,7 +223,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		s.config.VODOutputDir,
 	)
 
-	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
+	startOpts := session.StartOpts{
 		ChannelID:        channelID,
 		StreamID:         streamID,
 		StreamURL:        streamURL,
@@ -219,7 +239,10 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		HLSOutputDir:     strategy.HLSOutputDir,
 		SkipProbe:         strategy.SkipProbe,
 		MetadataOnly:     strategy.MetadataOnly,
-	}, session.ConsumerViewer)
+	}
+	applySourceProfile(&startOpts, s.lookupSourceProfile(ctx, streamID, ""))
+
+	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, startOpts, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", false, err
 	}
@@ -280,7 +303,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		s.config.VODOutputDir,
 	)
 
-	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
+	startOpts2 := session.StartOpts{
 		ChannelID:        streamID,
 		StreamID:         streamID,
 		StreamURL:        streamURL,
@@ -297,7 +320,10 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		SkipProbe:         strategy.SkipProbe,
 		KnownDuration:    stream.VODDuration,
 		MetadataOnly:     strategy.MetadataOnly,
-	}, session.ConsumerViewer)
+	}
+	applySourceProfile(&startOpts2, s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID))
+
+	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, startOpts2, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", err
 	}

@@ -44,6 +44,21 @@ type StartOpts struct {
 	HLSOutputDir      string
 	SkipProbe         bool
 	MetadataOnly      bool
+
+	Deinterlace       bool
+	DeinterlaceMethod string
+	AudioDelayMs      int
+	AudioChannels     int
+	AudioLanguage     string
+	VideoQueueMs      int
+	AudioQueueMs      int
+	RTSPLatency       int
+	RTSPProtocols     string
+	RTSPBufferMode    int
+	HTTPTimeoutSec    int
+	HTTPRetries       int
+	TSSetTimestamps   bool
+	EncoderBitrateKbps int
 }
 
 type Manager struct {
@@ -707,6 +722,21 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		HWAccel:          hwAccel,
 		RecordingPath:    s.FilePath,
 		IsLive:           probe == nil || probe.Duration == 0,
+
+		Deinterlace:       s.startOpts.Deinterlace,
+		DeinterlaceMethod: s.startOpts.DeinterlaceMethod,
+		AudioDelayMs:      s.startOpts.AudioDelayMs,
+		AudioChannels:     s.startOpts.AudioChannels,
+		AudioLanguage:     s.startOpts.AudioLanguage,
+		VideoQueueMs:      s.startOpts.VideoQueueMs,
+		AudioQueueMs:      s.startOpts.AudioQueueMs,
+		RTSPLatency:       s.startOpts.RTSPLatency,
+		RTSPProtocols:     s.startOpts.RTSPProtocols,
+		RTSPBufferMode:    s.startOpts.RTSPBufferMode,
+		HTTPTimeoutSec:    s.startOpts.HTTPTimeoutSec,
+		HTTPRetries:       s.startOpts.HTTPRetries,
+		TSSetTimestamps:   s.startOpts.TSSetTimestamps,
+		EncoderBitrateKbps: s.startOpts.EncoderBitrateKbps,
 	}
 
 	m.log.Info().

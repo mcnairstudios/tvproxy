@@ -160,25 +160,33 @@ type Logo struct {
 }
 
 type SourceProfile struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	ProbeMode       string    `json:"probe_mode"`
-	Transport       string    `json:"transport"`
-	VideoCodec      string    `json:"video_codec"`
-	AudioCodec      string    `json:"audio_codec"`
-	Container       string    `json:"container"`
-	Deinterlace     bool      `json:"deinterlace"`
-	AnalyzeDuration int       `json:"analyze_duration"`
-	ProbeSize       int       `json:"probe_size"`
-	MaxDelay        int       `json:"max_delay,omitempty"`
-	FFlags          string    `json:"fflags"`
-	ErrDetect       string    `json:"err_detect"`
-	InputFormat     string    `json:"input_format,omitempty"`
-	RTSPTransport   string    `json:"rtsp_transport,omitempty"`
-	AudioResync     bool      `json:"audio_resync"`
-	FPSMode         string    `json:"fps_mode,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+
+	Deinterlace       bool   `json:"deinterlace"`
+	DeinterlaceMethod string `json:"deinterlace_method,omitempty"`
+
+	AudioDelayMs   int    `json:"audio_delay_ms"`
+	AudioChannels  int    `json:"audio_channels"`
+	AudioLanguage  string `json:"audio_language,omitempty"`
+
+	VideoQueueMs   int `json:"video_queue_ms"`
+	AudioQueueMs   int `json:"audio_queue_ms"`
+
+	RTSPLatency    int    `json:"rtsp_latency"`
+	RTSPProtocols  string `json:"rtsp_protocols,omitempty"`
+	RTSPBufferMode int    `json:"rtsp_buffer_mode"`
+
+	HTTPTimeoutSec int    `json:"http_timeout_sec"`
+	HTTPRetries    int    `json:"http_retries"`
+	HTTPUserAgent  string `json:"http_user_agent,omitempty"`
+
+	TSSetTimestamps bool `json:"ts_set_timestamps"`
+
+	EncoderBitrateKbps int `json:"encoder_bitrate_kbps"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type StreamProfile struct {

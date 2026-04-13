@@ -76,9 +76,17 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 	if isRTSP {
 		src, _ := gst.NewElement("rtspsrc")
 		src.SetProperty("location", opts.InputURL)
-		src.SetProperty("latency", uint(0))
-		src.SetProperty("protocols", uint(4))
-		src.SetProperty("buffer-mode", uint(0))
+		rtspLatency := uint(0)
+		if opts.RTSPLatency > 0 {
+			rtspLatency = uint(opts.RTSPLatency)
+		}
+		src.SetProperty("latency", rtspLatency)
+		rtspProto := uint(4)
+		if opts.RTSPProtocols == "udp" {
+			rtspProto = 1
+		}
+		src.SetProperty("protocols", rtspProto)
+		src.SetProperty("buffer-mode", uint(opts.RTSPBufferMode))
 		if opts.UserAgent != "" {
 			src.SetProperty("user-agent", opts.UserAgent)
 		}
@@ -111,13 +119,21 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 	}
 
 	tsparse, _ := gst.NewElement("tsparse")
-	tsparse.SetProperty("set-timestamps", true)
+	tsparse.SetProperty("set-timestamps", opts.TSSetTimestamps || true)
 	demux, _ := gst.NewElement("tsdemux")
 
+	vQueueMs := uint64(10000000000)
+	if opts.VideoQueueMs > 0 {
+		vQueueMs = uint64(opts.VideoQueueMs) * 1000000
+	}
+	aQueueMs := uint64(10000000000)
+	if opts.AudioQueueMs > 0 {
+		aQueueMs = uint64(opts.AudioQueueMs) * 1000000
+	}
 	vQueue, _ := gst.NewElement("queue")
-	vQueue.SetProperty("max-size-time", uint64(10000000000))
+	vQueue.SetProperty("max-size-time", vQueueMs)
 	aQueue, _ := gst.NewElement("queue")
-	aQueue.SetProperty("max-size-time", uint64(10000000000))
+	aQueue.SetProperty("max-size-time", aQueueMs)
 
 	hw := opts.HWAccel
 	outCodec := NormalizeCodec(opts.OutputVideoCodec)
@@ -128,6 +144,15 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 		videoElements = createOutputParser(srcCodec)
 	} else {
 		videoElements = append(videoElements, createHWDecoder(srcCodec, hw)...)
+		if opts.Deinterlace {
+			di, _ := gst.NewElement("vadeinterlace")
+			if di == nil {
+				di, _ = gst.NewElement("deinterlace")
+			}
+			if di != nil {
+				videoElements = append(videoElements, di)
+			}
+		}
 		videoElements = append(videoElements, createHWEncoder(outCodec, hw, bitrate(opts))...)
 		videoElements = append(videoElements, createOutputParser(outCodec)...)
 	}
@@ -341,6 +366,9 @@ func containerFromURL(url string) string {
 func bitrate(opts PipelineOpts) int {
 	if opts.OutputBitrate > 0 {
 		return opts.OutputBitrate
+	}
+	if opts.EncoderBitrateKbps > 0 {
+		return opts.EncoderBitrateKbps
 	}
 	return 6000
 }
