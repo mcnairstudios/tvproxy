@@ -424,14 +424,14 @@ func bitrate(opts PipelineOpts) int {
 func scaledBitrate(width int) int {
 	switch {
 	case width >= 3840:
-		return 20000
+		return 8000
 	case width >= 2560:
-		return 12000
-	case width >= 1920:
 		return 6000
-	case width >= 1280:
+	case width >= 1920:
 		return 4000
+	case width >= 1280:
+		return 2500
 	default:
-		return 2000
+		return 1500
 	}
 }

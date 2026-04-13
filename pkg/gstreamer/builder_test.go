@@ -408,23 +408,23 @@ func TestBitrate(t *testing.T) {
 	if got := bitrate(PipelineOpts{OutputBitrate: 0}); got != 6000 {
 		t.Errorf("bitrate default = %d, want 6000", got)
 	}
-	if got := bitrate(PipelineOpts{SourceWidth: 3840}); got != 20000 {
-		t.Errorf("bitrate 4K = %d, want 20000", got)
+	if got := bitrate(PipelineOpts{SourceWidth: 3840}); got != 8000 {
+		t.Errorf("bitrate 4K = %d, want 8000", got)
 	}
-	if got := bitrate(PipelineOpts{SourceWidth: 1920}); got != 6000 {
-		t.Errorf("bitrate 1080p = %d, want 6000", got)
+	if got := bitrate(PipelineOpts{SourceWidth: 1920}); got != 4000 {
+		t.Errorf("bitrate 1080p = %d, want 4000", got)
 	}
-	if got := bitrate(PipelineOpts{SourceWidth: 1280}); got != 4000 {
-		t.Errorf("bitrate 720p = %d, want 4000", got)
+	if got := bitrate(PipelineOpts{SourceWidth: 1280}); got != 2500 {
+		t.Errorf("bitrate 720p = %d, want 2500", got)
 	}
-	if got := bitrate(PipelineOpts{SourceWidth: 720}); got != 2000 {
-		t.Errorf("bitrate SD = %d, want 2000", got)
+	if got := bitrate(PipelineOpts{SourceWidth: 720}); got != 1500 {
+		t.Errorf("bitrate SD = %d, want 1500", got)
 	}
 }
 
 func TestScaledBitrate(t *testing.T) {
 	tests := []struct{ width, want int }{
-		{3840, 20000}, {2560, 12000}, {1920, 6000}, {1280, 4000}, {720, 2000}, {0, 2000},
+		{3840, 8000}, {2560, 6000}, {1920, 4000}, {1280, 2500}, {720, 1500}, {0, 1500},
 	}
 	for _, tt := range tests {
 		if got := scaledBitrate(tt.width); got != tt.want {
