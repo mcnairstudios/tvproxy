@@ -503,7 +503,7 @@
 
 
   const channelsCache = new DataCache({
-    label: 'Channels',
+    label: 'Audio Ch',
     loader: async () => {
       const [channels, nowMap] = await Promise.all([
         api.get('/api/channels', { cache: 'no-store' }),
@@ -786,7 +786,7 @@
     { id: 'dashboard', label: 'Dashboard', icon: '\u2302', tip: 'Overview of your TVProxy system status', adminOnly: true },
     { id: 'now-playing', label: 'Activity', icon: '\u25B6', tip: 'Active users and streams', adminOnly: true },
     { section: 'Content' },
-    { id: 'channels', label: 'Channels', icon: '\ud83d\udcfa', tip: 'Define your custom channels and assign streams and EPG data' },
+    { id: 'channels', label: 'Audio Ch', icon: '\ud83d\udcfa', tip: 'Define your custom channels and assign streams and EPG data' },
     { id: 'movies', label: 'Movies', icon: '\uD83C\uDFAC', tip: 'Browse movie library' },
     { id: 'tv-series', label: 'TV Series', icon: '\uD83D\uDCFA', tip: 'Browse TV series library' },
     { id: 'iptv-movies', label: 'IPTV Movies', icon: '\uD83C\uDF1F', tip: 'Browse IPTV movie library', xtreamOnly: true },
@@ -2554,7 +2554,7 @@
         { label: 'HDHR Streams', value: hdhrSources.reduce(function(s, h) { return s + (h.stream_count || 0); }, 0), icon: '\ud83d\udcf6', page: 'hdhr-sources' },
         { label: 'Movies', value: movieCount.toLocaleString(), icon: '\uD83C\uDFAC', page: 'movies' },
         { label: 'TV Series', value: seriesCount.toLocaleString(), icon: '\uD83D\uDCFA', page: 'tv-series' },
-        { label: 'Channels', value: channels.length, icon: '\ud83d\udcfa', page: 'channels' },
+        { label: 'Audio Ch', value: channels.length, icon: '\ud83d\udcfa', page: 'channels' },
         { label: 'Channel Groups', value: groups.length, icon: '\ud83d\udcc2', page: 'channels' },
         { label: 'EPG Sources', value: epgSources.length, icon: '\ud83d\udcc5', page: 'epg-sources' },
         { label: 'HDHomeRun Emu', value: devices.length, icon: '\ud83d\udce1', page: 'hdhr-devices' },
@@ -5214,7 +5214,7 @@
     }),
 
     channels: buildCrudPage({
-      title: 'Channels',
+      title: 'Audio Ch',
       singular: 'Channel',
       apiPath: '/api/channels',
       cache: channelsCache,
@@ -5662,7 +5662,7 @@
           if (group.jellyfin_enabled) {
             var jfBadge = h('div', { style: 'display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:8px;' });
             jfBadge.appendChild(h('span', { style: 'font-size:12px;font-weight:600;color:#3b82f6' }, 'Jellyfin'));
-            jfBadge.appendChild(h('span', { style: 'font-size:12px;color:var(--text-muted)' }, jellyfinStyles[group.jellyfin_type] || 'Channels'));
+            jfBadge.appendChild(h('span', { style: 'font-size:12px;color:var(--text-muted)' }, jellyfinStyles[group.jellyfin_type] || 'Audio Ch'));
             card.appendChild(jfBadge);
           }
 
@@ -5752,7 +5752,7 @@
         { key: 'name', label: 'Name' },
         { key: 'deinterlace', label: 'Deinterlace', render: item => item.deinterlace ? h('span', { className: 'badge badge-info' }, 'Yes') : '' },
         { key: 'audio_delay_ms', label: 'Audio Delay', render: item => item.audio_delay_ms ? item.audio_delay_ms + 'ms' : '0' },
-        { key: 'audio_channels', label: 'Channels', render: item => item.audio_channels || 'Original' },
+        { key: 'audio_channels', label: 'Audio Ch', render: item => item.audio_channels || 'Original' },
         { key: 'rtsp_protocols', label: 'RTSP', render: item => item.rtsp_protocols || '' },
         { key: 'http_timeout_sec', label: 'Timeout', render: item => item.http_timeout_sec ? item.http_timeout_sec + 's' : '' },
       ],
@@ -5769,7 +5769,7 @@
 
         { key: '_section_audio', label: 'Audio', type: 'section' },
         { key: 'audio_delay_ms', label: 'Audio Delay (ms)', type: 'number', default: 0, help: 'Positive = delay audio. Use to fix lip sync when encoder has startup latency (e.g. AV1 encoder buffers ~15 seconds). Try 0-500ms.' },
-        { key: 'audio_channels', label: 'Audio Channels', type: 'select', options: [
+        { key: 'audio_channels', label: 'Audio Transcode Channels', type: 'select', options: [
           { value: 0, label: 'Preserve Original' },
           { value: 2, label: 'Stereo (2ch)' },
           { value: 6, label: '5.1 Surround (6ch)' },
