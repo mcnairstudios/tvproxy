@@ -52,6 +52,35 @@ curl http://localhost:8080/vod/{channelID}/status
 - For now: transcode uses native tsdemux path (proven working)
 - Future: tvproxydemux could expose a raw/decoded video pad option
 
+## Codec → GStreamer Element Reference
+
+### Video (parser → decoder → encoder → output parser)
+| Codec | Parser | Decoder (VT/VA/NV/SW) | Encoder (VT/VA/NV/SW) |
+|-------|--------|----------------------|----------------------|
+| h264 | h264parse | vtdec / vah264dec / nvh264dec / avdec_h264 | vtenc_h264 / vah264lpenc / nvh264enc / x264enc |
+| h265 | h265parse | vtdec / vah265dec / nvh265dec / avdec_h265 | vtenc_h265 / vah265lpenc / nvh265enc / x265enc |
+| av1 | av1parse | dav1ddec / avdec_av1 | vtenc_av1 / vaav1enc / nvav1enc / svtav1enc |
+| mpeg2 | mpegvideoparse | avdec_mpeg2video | — (always transcode to h264/h265/av1) |
+
+### Audio (parser → decoder → encoder → output parser)
+| Codec | Chain |
+|-------|-------|
+| aac_latm | aacparse → avdec_aac_latm → audioconvert → audioresample → faac → aacparse |
+| aac | aacparse (passthrough) |
+| mp2 | mpegaudioparse → mpg123audiodec → audioconvert → audioresample → faac → aacparse |
+| ac3 | avdec_ac3 → audioconvert → audioresample → faac → aacparse |
+| eac3 | avdec_eac3 → audioconvert → audioresample → faac → aacparse |
+| dts | avdec_dca → audioconvert → audioresample → faac → aacparse |
+| opus | opusparse (passthrough) |
+| flac | flacparse (passthrough) or flacdec → transcode |
+
+### Muxer Selection
+| Scenario | Muxer | Properties |
+|----------|-------|-----------|
+| MPEG-TS copy | mpegtsmux | (none) |
+| fMP4 transcode | mp4mux | fragment-duration=2000 streamable=true |
+| fMP4 VOD | mp4mux | fragment-duration=2000 streamable=true |
+
 ## DONE: Plugin container-hint / audio-codec-hint
 - container-hint, audio-codec-hint, video-codec-hint all implemented in tvproxydemux
 - Built and tested locally — all three properties appear in gst-inspect
