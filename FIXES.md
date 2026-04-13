@@ -128,6 +128,21 @@
 - VOD seeking works differently in GStreamer — use gst_element_seek_simple()
 - Or: for qtdemux, set souphttpsrc Range header for HTTP byte-range seeking
 
+## Future: hlscmafsink for browser playback (CMAF fMP4 HLS)
+- `hlscmafsink` is available in gavinmcnair/gstreamer:1.1 (Rust gst-plugins-rs)
+- Outputs CMAF fMP4 HLS segments instead of single file + tail reader
+- Benefits: lower latency (chunked TE), native Safari HLS, better seeking
+- Requires: new Build() sink type (HLSDir instead of RecordingPath)
+- Frontend: hls.js for Chrome, native HLS for Safari
+- This is the proper long-term solution for browser playback
+
+## Future: webrtcsink for sub-second latency
+- `webrtcsink` is available in gavinmcnair/gstreamer:1.1
+- Sub-second latency WebRTC streaming to browsers
+- Requires: signalling server (WebSocket), ICE/STUN/TURN handling
+- Would be transformative for live TV channel surfing (instant channel switch)
+- Complex to implement but the elements are ready
+
 ## WebM output needs Opus audio (not AAC)
 - WebM container requires Opus audio, not AAC
 - If output format is WebM, audio chain should use opusenc instead of faac
