@@ -808,16 +808,20 @@ func friendlyGstError(err string) string {
 	}
 }
 
+func isValidProbe(p *media.ProbeResult) bool {
+	return p != nil && (p.Video != nil || len(p.AudioTracks) > 0 || p.Duration > 0)
+}
+
 func (m *Manager) ensureProbe(ctx context.Context, opts StartOpts) *media.ProbeResult {
 	if m.probeCache != nil {
 		if opts.StreamID != "" {
-			if cached, _ := m.probeCache.GetProbeByStreamID(opts.StreamID); cached != nil {
+			if cached, _ := m.probeCache.GetProbeByStreamID(opts.StreamID); isValidProbe(cached) {
 				m.log.Debug().Str("stream_id", opts.StreamID).Float64("duration", cached.Duration).Msg("probe cache hit (by ID)")
 				return cached
 			}
 		}
 		if opts.StreamURL != "" {
-			if cached, _ := m.probeCache.GetProbe(media.StreamHash(opts.StreamURL)); cached != nil {
+			if cached, _ := m.probeCache.GetProbe(media.StreamHash(opts.StreamURL)); isValidProbe(cached) {
 				m.log.Debug().Str("stream_url", opts.StreamURL).Float64("duration", cached.Duration).Msg("probe cache hit (by URL)")
 				return cached
 			}
