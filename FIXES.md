@@ -6,7 +6,7 @@
 - VOD H.265→AV1 transcode: sub-10s first byte, 5000+ kbps
 - HDHR H.264 copy: 3.3s first byte
 - VOD copy: 1.1s first byte
-- All 13 test packages pass, 63 gstreamer-specific test cases
+- All 13 test packages pass, 70+ gstreamer-specific test cases
 - Dockerfile uses gavinmcnair/gstreamer:1.1 (GStreamer 1.24.12)
 - NVENC, VAAPI LP, QSV, VideoToolbox encoder chains with fallbacks
 - Probe-driven pipeline: ensureProbe() blocks if no cache, source profile as override
