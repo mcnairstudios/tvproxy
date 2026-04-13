@@ -585,7 +585,11 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 		return nil, "", fmt.Errorf("creating session dir: %w", err)
 	}
 
-	fileName := media.SanitizeFilename(opts.StreamName, time.Now()) + ".mp4"
+	ext := ".mp4"
+	if opts.OutputContainer == "mpegts" {
+		ext = ".ts"
+	}
+	fileName := media.SanitizeFilename(opts.StreamName, time.Now()) + ext
 	filePath := filepath.Join(tempDir, fileName)
 
 	sessionCtx, cancel := context.WithCancel(context.Background())
