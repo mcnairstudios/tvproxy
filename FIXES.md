@@ -37,6 +37,79 @@ curl http://localhost:8080/vod/{channelID}/status
 - User-friendly error messages, bitrate/file_size in status endpoint
 - fragment-duration=2000ms (fixes "Could not multiplex" with svtav1enc)
 
+## Source Profile Redesign: GStreamer Tuning Bible
+
+The source profile should capture EVERYTHING that differs between source types as GStreamer pipeline properties. Codec/container detection is handled by probe — the profile handles *behavior*.
+
+### DVB/SAT>IP Profile (default for RTSP sources)
+```
+# Source element (rtspsrc)
+rtsp_latency: 0               # rtspsrc latency (ms)
+rtsp_protocols: tcp            # tcp, udp, udp-mcast
+rtsp_buffer_mode: 0            # 0=none, 1=slave, 2=buffer, 3=auto
+rtsp_retry: 5                  # connection retry count
+
+# Demux/Parse
+ts_set_timestamps: true        # tsparse set-timestamps
+deinterlace: false             # insert vadeinterlace/deinterlace element
+deinterlace_method: auto       # auto, bob, weave, adaptive
+
+# Audio
+audio_delay_ms: 0              # ms offset to sync audio with video (positive = delay audio)
+audio_channels: 2              # target channel count (stereo downmix)
+audio_language: ""             # preferred ISO 639 language code
+
+# Queues/Buffering  
+video_queue_time_ms: 10000     # max-size-time on video queue
+audio_queue_time_ms: 10000     # max-size-time on audio queue
+
+# Encoder tuning
+encoder_bitrate_kbps: 0        # 0 = auto (scale by resolution)
+encoder_preset: 12             # svtav1enc preset / vtenc speed
+```
+
+### IPTV/HTTP Profile (default for HTTP sources)
+```
+# Source element (souphttpsrc)
+http_timeout_sec: 30           # connection timeout
+http_retries: 3                # retry count
+http_user_agent: ""            # override (empty = global default)
+http_extra_headers: {}         # bypass headers, auth tokens
+
+# Demux/Parse
+ts_set_timestamps: true        # tsparse set-timestamps
+deinterlace: false             # most IPTV is progressive
+
+# Audio
+audio_delay_ms: 0              # usually 0 for IPTV
+audio_channels: 2              # stereo downmix
+audio_language: ""             # preferred language
+
+# Queues/Buffering
+video_queue_time_ms: 10000     # max-size-time
+audio_queue_time_ms: 10000     # max-size-time
+```
+
+### HDHR Profile (default for port 5004 sources)
+```
+# Same as IPTV/HTTP but with HDHR-specific defaults
+http_timeout_sec: 10           # HDHR is local network, faster timeout
+ts_set_timestamps: true
+```
+
+### VOD Profile (default for .mp4/.mkv URLs)
+```
+# No is-live, no timestamps
+# qtdemux handles everything
+audio_channels: 0              # 0 = preserve original
+```
+
+### Implementation
+- Each source type has a built-in default profile (not stored in DB)
+- Users can create custom profiles that override specific fields
+- The builder reads profile fields and applies them to element properties
+- Profile is selected by: (1) channel override, (2) M3U account default, (3) auto-detect from URL
+
 ## Import Saga (Implemented)
 - On M3U refresh, skeleton probe entries created for all new streams
 - `isValidProbe()` check ensures skeletons trigger live probe on first play
