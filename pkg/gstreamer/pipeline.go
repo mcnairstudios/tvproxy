@@ -441,6 +441,8 @@ func NormalizeCodec(codec string) string {
 		return "ac3"
 	case c == "eac3" || c == "e-ac-3" || c == "a_eac3":
 		return "eac3"
+	case c == "dts" || c == "dca" || c == "dts-hd" || strings.Contains(c, "dts"):
+		return "dts"
 	case c == "av1 video":
 		return "av1"
 	}
