@@ -121,7 +121,7 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 		mux, _ = gst.NewElement("mpegtsmux")
 	} else {
 		mux, _ = gst.NewElement("mp4mux")
-		mux.SetProperty("fragment-duration", uint(500))
+		mux.SetProperty("fragment-duration", uint(2000))
 		mux.SetProperty("streamable", true)
 	}
 	sink, _ := gst.NewElement("filesink")
