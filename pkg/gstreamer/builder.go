@@ -41,6 +41,10 @@ func Build(opts PipelineOpts) (*gst.Pipeline, string, error) {
 	return p, fmt.Sprintf("vod-%s-%s", container, mode), err
 }
 
+// buildMPEGTSPluginCopy builds a string pipeline using tvproxy plugins.
+// NOTE: Currently not called — go-gst NewPipelineFromString produces 0 bytes with plugin bins.
+// The pipeline works with gst-launch-1.0 CLI. When the go-gst issue is resolved, this path
+// can be re-enabled for fastest MPEG-TS copy (bypasses tsdemux pad-added entirely).
 func buildMPEGTSPluginCopy(opts PipelineOpts, srcCodec string) (*gst.Pipeline, error) {
 	srcAudio := NormalizeCodec(opts.AudioCodec)
 	audioMode := "aac"
@@ -50,12 +54,12 @@ func buildMPEGTSPluginCopy(opts PipelineOpts, srcCodec string) (*gst.Pipeline, e
 
 	pipeStr := fmt.Sprintf(
 		"tvproxysrc location=%s is-live=true"+
-			" ! tvproxydemux name=d video-codec-hint=%s audio-codec=%s"+
+			" ! tvproxydemux name=d container-hint=mpegts video-codec-hint=%s audio-codec-hint=%s audio-codec=%s"+
 			" d.video ! m.video"+
 			" d.audio ! m.audio"+
 			" tvproxymux name=m output-format=mp4"+
 			" ! filesink location=%s",
-		opts.InputURL, srcCodec, audioMode, opts.RecordingPath)
+		opts.InputURL, srcCodec, srcAudio, audioMode, opts.RecordingPath)
 
 	return gst.NewPipelineFromString(pipeStr)
 }
