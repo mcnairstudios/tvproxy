@@ -130,7 +130,7 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 	}
 
 	tsparse, _ := gst.NewElement("tsparse")
-	tsparse.SetProperty("set-timestamps", opts.TSSetTimestamps || true)
+	tsparse.SetProperty("set-timestamps", opts.TSSetTimestamps)
 	demux, _ := gst.NewElement("tsdemux")
 
 	vQueueMs := uint64(10000000000)
