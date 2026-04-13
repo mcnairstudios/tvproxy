@@ -178,9 +178,20 @@ func TestBuild_PathSelection(t *testing.T) {
 	}
 }
 
-func TestContainerFromURL_M4V(t *testing.T) {
-	if got := containerFromURL("http://server/video.m4v"); got != "mp4" {
-		t.Errorf("m4v should be mp4, got %q", got)
+func TestContainerFromURL_SpecialCases(t *testing.T) {
+	tests := []struct{ url, want string }{
+		{"http://server/video.m4v", "mp4"},
+		{"http://server/video.mov", "mp4"},
+		{"http://server/video.avi", "avi"},
+		{"http://server/stream.flv", "flv"},
+		{"http://server/stream.mp4?token=abc&quality=high", "mp4"},
+		{"http://server/stream.mkv#t=10", "matroska"},
+	}
+	for _, tt := range tests {
+		got := containerFromURL(tt.url)
+		if got != tt.want {
+			t.Errorf("containerFromURL(%q) = %q, want %q", tt.url, got, tt.want)
+		}
 	}
 }
 
