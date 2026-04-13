@@ -122,6 +122,7 @@ func applySourceProfile(opts *session.StartOpts, sp *models.SourceProfile) {
 	opts.RTSPBufferMode = sp.RTSPBufferMode
 	opts.HTTPTimeoutSec = sp.HTTPTimeoutSec
 	opts.HTTPRetries = sp.HTTPRetries
+	opts.HTTPUserAgent = sp.HTTPUserAgent
 	opts.TSSetTimestamps = sp.TSSetTimestamps
 	opts.EncoderBitrateKbps = sp.EncoderBitrateKbps
 }

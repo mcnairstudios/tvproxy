@@ -57,6 +57,7 @@ type StartOpts struct {
 	RTSPBufferMode    int
 	HTTPTimeoutSec    int
 	HTTPRetries       int
+	HTTPUserAgent     string
 	TSSetTimestamps   bool
 	EncoderBitrateKbps int
 }
@@ -712,9 +713,14 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		extraHeaders = map[string]string{m.config.BypassHeader: m.config.BypassSecret}
 	}
 
+	userAgent := m.config.UserAgent
+	if s.startOpts.HTTPUserAgent != "" {
+		userAgent = s.startOpts.HTTPUserAgent
+	}
+
 	opts := gstreamer.PipelineOpts{
 		InputURL:         s.StreamURL,
-		UserAgent:        m.config.UserAgent,
+		UserAgent:        userAgent,
 		ExtraHeaders:     extraHeaders,
 		VideoCodec:       srcVideo,
 		AudioCodec:       srcAudio,
