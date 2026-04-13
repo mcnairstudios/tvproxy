@@ -304,6 +304,7 @@ func main() {
 		func() string { v, _ := settingsService.Get(ctx, "tmdb_api_key"); return v },
 		log,
 	)
+	gstreamerHandler := handler.NewGStreamerHandler()
 	tmdbHandler := handler.NewTMDBHandler(tmdbClient, streamStore)
 	wgMultiHandler := handler.NewMultiWireGuardHandler(wgMultiService, wgProfileStore, log)
 	wgMultiHandler.SetPool(wgPool)
@@ -334,6 +335,7 @@ func main() {
 		wireguard:      handler.NewWireGuardHandler(wgService, log),
 		wireguardMulti: wgMultiHandler,
 		tmdb:           tmdbHandler,
+		gstreamer:      gstreamerHandler,
 		logoCache:      logoCache,
 		log:            log,
 	}, authMW)

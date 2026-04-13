@@ -16,6 +16,7 @@ import (
 type SourceProfileStore interface {
 	List(ctx context.Context) ([]models.SourceProfile, error)
 	GetByID(ctx context.Context, id string) (*models.SourceProfile, error)
+	GetByName(ctx context.Context, name string) (*models.SourceProfile, error)
 	Create(ctx context.Context, profile *models.SourceProfile) error
 	Update(ctx context.Context, profile *models.SourceProfile) error
 	Delete(ctx context.Context, id string) error
@@ -126,6 +127,18 @@ func (s *SourceProfileStoreImpl) GetByID(_ context.Context, id string) (*models.
 		}
 	}
 	return nil, fmt.Errorf("source profile not found")
+}
+
+func (s *SourceProfileStoreImpl) GetByName(_ context.Context, name string) (*models.SourceProfile, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := range s.profiles {
+		if s.profiles[i].Name == name {
+			p := s.profiles[i]
+			return &p, nil
+		}
+	}
+	return nil, fmt.Errorf("source profile %q not found", name)
 }
 
 func (s *SourceProfileStoreImpl) Create(_ context.Context, profile *models.SourceProfile) error {

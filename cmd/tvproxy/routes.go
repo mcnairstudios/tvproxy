@@ -42,6 +42,7 @@ type routeHandlers struct {
 	wireguard      *handler.WireGuardHandler
 	wireguardMulti *handler.MultiWireGuardHandler
 	tmdb           *handler.TMDBHandler
+	gstreamer      *handler.GStreamerHandler
 	logoCache      *logocache.Cache
 	log            zerolog.Logger
 }
@@ -309,6 +310,8 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 			r.Get("/multi/status", h.wireguardMulti.Status)
 			r.Get("/pool", h.wireguardMulti.PoolStatus)
 		})
+
+		r.Get("/api/gstreamer/capabilities", h.gstreamer.Capabilities)
 	})
 
 	r.Get("/logo", h.logoCache.ServeHTTP)

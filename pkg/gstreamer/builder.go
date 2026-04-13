@@ -262,10 +262,18 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 		demux, _ = gst.NewElement("qtdemux")
 	}
 
+	vodVQueueMs := uint64(10000000000)
+	if opts.VideoQueueMs > 0 {
+		vodVQueueMs = uint64(opts.VideoQueueMs) * 1000000
+	}
+	vodAQueueMs := uint64(10000000000)
+	if opts.AudioQueueMs > 0 {
+		vodAQueueMs = uint64(opts.AudioQueueMs) * 1000000
+	}
 	vQueue, _ := gst.NewElement("queue")
-	vQueue.SetProperty("max-size-time", uint64(10000000000))
+	vQueue.SetProperty("max-size-time", vodVQueueMs)
 	aQueue, _ := gst.NewElement("queue")
-	aQueue.SetProperty("max-size-time", uint64(10000000000))
+	aQueue.SetProperty("max-size-time", vodAQueueMs)
 
 	hw := opts.HWAccel
 	outCodec := NormalizeCodec(opts.OutputVideoCodec)
@@ -296,6 +304,13 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 		audioElements = []*gst.Element{aPass}
 	} else {
 		audioElements = buildAudioChain(srcAudio)
+	}
+	if opts.AudioDelayMs > 0 {
+		delayQueue, _ := gst.NewElement("queue")
+		if delayQueue != nil {
+			delayQueue.SetProperty("min-threshold-time", uint64(opts.AudioDelayMs)*1000000)
+			audioElements = append([]*gst.Element{delayQueue}, audioElements...)
+		}
 	}
 
 	mux, _ := gst.NewElement("mp4mux")

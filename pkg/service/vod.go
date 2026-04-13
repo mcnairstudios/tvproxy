@@ -126,7 +126,7 @@ func applySourceProfile(opts *session.StartOpts, sp *models.SourceProfile) {
 	opts.EncoderBitrateKbps = sp.EncoderBitrateKbps
 }
 
-func (s *VODService) lookupSourceProfile(ctx context.Context, m3uAccountID, satipSourceID string) *models.SourceProfile {
+func (s *VODService) lookupSourceProfile(ctx context.Context, m3uAccountID, satipSourceID, streamURL string) *models.SourceProfile {
 	if s.sourceProfileStore == nil {
 		return nil
 	}
@@ -144,7 +144,43 @@ func (s *VODService) lookupSourceProfile(ctx context.Context, m3uAccountID, sati
 			}
 		}
 	}
+	return s.autoSelectSourceProfile(ctx, streamURL)
+}
+
+func (s *VODService) autoSelectSourceProfile(ctx context.Context, streamURL string) *models.SourceProfile {
+	if streamURL == "" {
+		return nil
+	}
+
+	var names []string
+	switch {
+	case strings.HasPrefix(streamURL, "rtsp://"):
+		names = []string{"SAT>IP"}
+	case hasVideoFileExtension(streamURL):
+		names = []string{"VOD", "TVProxy-streams"}
+	default:
+		names = []string{"IPTV"}
+	}
+
+	for _, name := range names {
+		if sp, err := s.sourceProfileStore.GetByName(ctx, name); err == nil {
+			return sp
+		}
+	}
 	return nil
+}
+
+func hasVideoFileExtension(u string) bool {
+	lower := strings.ToLower(u)
+	if idx := strings.IndexByte(lower, '?'); idx != -1 {
+		lower = lower[:idx]
+	}
+	for _, ext := range []string{".mp4", ".mkv", ".webm", ".mov", ".avi"} {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *VODService) transcoderPreference(ctx context.Context) string {
@@ -211,7 +247,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 			SatIPSource:   strings.HasPrefix(streamURL, "rtsp://"),
 			StreamGroup:   streamGroup,
 			StreamID:      streamID,
-			SourceProfile: s.lookupSourceProfile(ctx, streamID, ""),
+			SourceProfile: s.lookupSourceProfile(ctx, streamID, "", streamURL),
 		},
 		StrategyOutput{
 			Delivery:   sa.Delivery,
@@ -240,7 +276,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		SkipProbe:         strategy.SkipProbe,
 		MetadataOnly:     strategy.MetadataOnly,
 	}
-	applySourceProfile(&startOpts, s.lookupSourceProfile(ctx, streamID, ""))
+	applySourceProfile(&startOpts, s.lookupSourceProfile(ctx, streamID, "", streamURL))
 
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, startOpts, session.ConsumerViewer)
 	if err != nil {
