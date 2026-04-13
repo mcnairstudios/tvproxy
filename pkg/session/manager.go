@@ -946,6 +946,9 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	m.log.Info().Str("session_id", s.ID).Str("channel_id", s.ChannelID).Msg("runPipeline started")
 
 	probe := m.ensureProbe(ctx, s.startOpts)
+	if ctx.Err() != nil {
+		return
+	}
 	if probe != nil {
 		s.SetProbeInfo(probe.Video, probe.AudioTracks, probe.Duration)
 	}
