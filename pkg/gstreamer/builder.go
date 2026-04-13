@@ -79,6 +79,9 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 		src.SetProperty("latency", uint(0))
 		src.SetProperty("protocols", uint(4))
 		src.SetProperty("buffer-mode", uint(0))
+		if opts.UserAgent != "" {
+			src.SetProperty("user-agent", opts.UserAgent)
+		}
 		depay, _ := gst.NewElement("rtpmp2tdepay")
 		src.Connect("pad-added", func(self *gst.Element, pad *gst.Pad) {
 			sinkPad := depay.GetStaticPad("sink")
