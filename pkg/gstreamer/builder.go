@@ -308,6 +308,9 @@ func containerFromURL(url string) string {
 	if idx := strings.Index(u, "?"); idx > 0 {
 		u = u[:idx]
 	}
+	if idx := strings.Index(u, "#"); idx > 0 {
+		u = u[:idx]
+	}
 	if strings.HasSuffix(u, ".mp4") || strings.HasSuffix(u, ".m4v") {
 		return "mp4"
 	}
