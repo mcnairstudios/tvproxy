@@ -265,9 +265,15 @@ func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
 	case HWVAAPI:
 		switch codec {
 		case "h264":
-			decoder, _ = gst.NewElement("vaapih264dec")
+			decoder, _ = gst.NewElement("vah264dec")
+			if decoder == nil {
+				decoder, _ = gst.NewElement("vaapih264dec")
+			}
 		case "h265":
-			decoder, _ = gst.NewElement("vaapih265dec")
+			decoder, _ = gst.NewElement("vah265dec")
+			if decoder == nil {
+				decoder, _ = gst.NewElement("vaapih265dec")
+			}
 		default:
 			decoder, _ = gst.NewElement("vaapidecode")
 		}
