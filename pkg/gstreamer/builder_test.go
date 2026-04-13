@@ -57,6 +57,10 @@ func TestNormalizeCodec_AllProbeNames(t *testing.T) {
 		{"dts", "dts"},
 		{"dca", "dts"},
 		{"DTS-HD", "dts"},
+		{"opus", "opus"},
+		{"libopus", "opus"},
+		{"flac", "flac"},
+		{"vorbis", "vorbis"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
