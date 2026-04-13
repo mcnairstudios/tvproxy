@@ -24,6 +24,7 @@ const (
 	HWVAAPI        HWAccel = "vaapi"
 	HWQSV          HWAccel = "qsv"
 	HWVideoToolbox HWAccel = "videotoolbox"
+	HWNVENC        HWAccel = "nvenc"
 )
 
 type PipelineOpts struct {

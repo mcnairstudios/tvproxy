@@ -979,6 +979,8 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		hwAccel = gstreamer.HWQSV
 	case "videotoolbox":
 		hwAccel = gstreamer.HWVideoToolbox
+	case "nvenc":
+		hwAccel = gstreamer.HWNVENC
 	}
 
 	outFormat := gstreamer.OutputMP4

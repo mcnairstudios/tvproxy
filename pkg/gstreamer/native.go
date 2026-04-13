@@ -277,6 +277,17 @@ func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
 		default:
 			decoder, _ = gst.NewElement("vaapidecode")
 		}
+	case HWNVENC:
+		switch codec {
+		case "h264":
+			decoder, _ = gst.NewElement("nvh264dec")
+		case "h265":
+			decoder, _ = gst.NewElement("nvh265dec")
+		case "av1":
+			decoder, _ = gst.NewElement("nvav1dec")
+		default:
+			decoder, _ = gst.NewElement("nvh264dec")
+		}
 	case HWQSV:
 		switch codec {
 		case "h264":
@@ -366,6 +377,21 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 			if encoder == nil {
 				encoder, _ = gst.NewElement("vaapih264enc")
 			}
+		}
+		if encoder != nil {
+			encoder.SetProperty("bitrate", uint(bitrate))
+		}
+	case HWNVENC:
+		switch codec {
+		case "h265":
+			encoder, _ = gst.NewElement("nvh265enc")
+		case "av1":
+			encoder, _ = gst.NewElement("nvav1enc")
+			if encoder == nil {
+				return createSoftwareAV1Encoder(bitrate)
+			}
+		default:
+			encoder, _ = gst.NewElement("nvh264enc")
 		}
 		if encoder != nil {
 			encoder.SetProperty("bitrate", uint(bitrate))
