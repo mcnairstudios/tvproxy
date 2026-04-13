@@ -165,7 +165,16 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 	src, _ := gst.NewElement("souphttpsrc")
 	src.SetProperty("location", opts.InputURL)
 
-	demux, _ := gst.NewElement("qtdemux")
+	container := strings.ToLower(opts.Container)
+	if container == "" {
+		container = containerFromURL(opts.InputURL)
+	}
+	var demux *gst.Element
+	if container == "matroska" || container == "webm" {
+		demux, _ = gst.NewElement("matroskademux")
+	} else {
+		demux, _ = gst.NewElement("qtdemux")
+	}
 
 	vQueue, _ := gst.NewElement("queue")
 	vQueue.SetProperty("max-size-time", uint64(10000000000))
