@@ -443,6 +443,12 @@ func NormalizeCodec(codec string) string {
 		return "eac3"
 	case c == "dts" || c == "dca" || c == "dts-hd" || strings.Contains(c, "dts"):
 		return "dts"
+	case c == "opus" || c == "libopus":
+		return "opus"
+	case c == "flac":
+		return "flac"
+	case c == "vorbis" || c == "libvorbis":
+		return "vorbis"
 	case c == "av1 video":
 		return "av1"
 	}

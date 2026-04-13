@@ -242,6 +242,19 @@ func buildAudioChain(srcAudio string) []*gst.Element {
 	case "dts":
 		aDec, _ := gst.NewElement("avdec_dca")
 		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+	case "opus":
+		aPass, _ := gst.NewElement("opusparse")
+		if aPass == nil {
+			aPass, _ = gst.NewElement("identity")
+		}
+		return []*gst.Element{aPass}
+	case "flac":
+		aPass, _ := gst.NewElement("flacparse")
+		if aPass == nil {
+			aDec, _ := gst.NewElement("flacdec")
+			return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+		}
+		return []*gst.Element{aPass}
 	default:
 		aInParse, _ := gst.NewElement("aacparse")
 		aDec, _ := gst.NewElement("avdec_aac_latm")
