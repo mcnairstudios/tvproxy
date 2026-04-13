@@ -78,6 +78,12 @@
 - Direct/Proxy profiles should probably bypass the session manager entirely
 - The correct path for Proxy: HTTP reverse proxy to the source URL
 
+## Deinterlace not wired in GStreamer builder
+- Source profile Deinterlace flag exists but not used in builder.go
+- For GStreamer: insert `deinterlace` element after decoder in transcode chain
+- Or: use `vavpp` (VAAPI) / `vtdec deinterlace=true` (VideoToolbox) for hardware deinterlace
+- tvproxydemux detects interlaced content (video-interlaced property) — could auto-insert
+
 ## RestartWithSeek is ffmpeg-specific
 - pkg/session/manager.go:485 — manipulates ffmpeg -ss args
 - For GStreamer: either send seek event to pipeline, or create new pipeline with seek offset
