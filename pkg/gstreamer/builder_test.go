@@ -175,6 +175,15 @@ func TestBuild_PathSelection(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodec_EmptyAndUnknown(t *testing.T) {
+	if NormalizeCodec("") != "" {
+		t.Error("empty should return empty")
+	}
+	if NormalizeCodec("totally_unknown_codec") != "totally_unknown_codec" {
+		t.Error("unknown codec should pass through")
+	}
+}
+
 func TestBuild_CopyDetection(t *testing.T) {
 	tests := []struct {
 		name     string
