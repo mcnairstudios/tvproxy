@@ -1057,7 +1057,8 @@ pipeloop:
 				continue
 			}
 			m.log.Error().Str("session_id", s.ID).Err(gstErr).Msg("gstreamer error")
-			s.setError(fmt.Errorf("gstreamer: %w", gstErr))
+			userErr := friendlyGstError(errStr)
+			s.setError(fmt.Errorf("%s", userErr))
 			s.setLastStderr(gstErr.Error())
 			break pipeloop
 		}
@@ -1065,6 +1066,25 @@ pipeloop:
 
 	pipeline.SetState(gst.StateNull)
 	m.log.Info().Str("session_id", s.ID).Msg("pipeline stopped")
+}
+
+func friendlyGstError(err string) string {
+	switch {
+	case strings.Contains(err, "Could not multiplex"):
+		return "Stream encoding error — audio/video sync issue"
+	case strings.Contains(err, "not-negotiated"):
+		return "Stream format not supported"
+	case strings.Contains(err, "Service Unavailable"):
+		return "Source stream unavailable (503)"
+	case strings.Contains(err, "Not Found"):
+		return "Source stream not found (404)"
+	case strings.Contains(err, "no valid or supported streams"):
+		return "Source contains no playable streams"
+	case strings.Contains(err, "Internal data stream"):
+		return "Internal pipeline error"
+	default:
+		return err
+	}
 }
 
 func (m *Manager) ensureProbe(ctx context.Context, opts StartOpts) *media.ProbeResult {
