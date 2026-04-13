@@ -108,6 +108,14 @@
 - `ensureProbe` is only for edge cases (never-probed channels)
 - Fix: use the scheduler's probe method instead of direct avprobe
 
+## Auto-recovery for live stream pipeline drops
+- When live pipeline EOS's (source drop) or errors, auto-restart the pipeline
+- Keep the same session/consumers, just rebuild the GStreamer pipeline
+- Add retry count and backoff (max 3 retries, 2s between)
+- Output file should be appended or a new file created
+- Frontend tail reader should handle the file change seamlessly
+- This would make live TV viewing resilient to brief source interruptions
+
 ## Deinterlace not wired in GStreamer builder
 - Source profile Deinterlace flag exists but not used in builder.go
 - For GStreamer: insert `deinterlace` element after decoder in transcode chain
