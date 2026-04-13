@@ -54,6 +54,8 @@ func TestNormalizeCodec_AllProbeNames(t *testing.T) {
 		{"", ""},
 		{"default", "default"},
 		{"TV(HEVC)", "h265"},
+		{"AVC", "h264"},
+		{"MPEG-4 AVC", "h264"},
 		{"dts", "dts"},
 		{"dca", "dts"},
 		{"DTS-HD", "dts"},
