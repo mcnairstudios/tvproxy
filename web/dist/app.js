@@ -4052,10 +4052,12 @@
       };
 
       var basePath = '/vod/' + dvrObj.id + '/mse/';
+      var initAc = new AbortController();
+      setTimeout(function() { initAc.abort(); }, 15000);
       Promise.all([
-        fetch(basePath + 'video/init').then(function(r) { return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; }); }),
-        fetch(basePath + 'audio/init').then(function(r) { return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; }); }),
-        fetch(basePath + 'debug').then(function(r) { return r.json(); })
+        fetch(basePath + 'video/init', {signal: initAc.signal}).then(function(r) { return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; }); }),
+        fetch(basePath + 'audio/init', {signal: initAc.signal}).then(function(r) { return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; }); }),
+        fetch(basePath + 'debug', {signal: initAc.signal}).then(function(r) { return r.json(); })
       ]).then(function(results) {
         var videoInit = results[0];
         var audioInit = results[1];

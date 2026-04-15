@@ -4,6 +4,10 @@ wireguard/
 *.db-wal
 *.db-shm
 *.gob
+*.bolt
+*.dat
+*.bak
+recordings/
 .git/
 static/
 tvproxy
