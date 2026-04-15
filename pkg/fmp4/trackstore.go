@@ -52,7 +52,7 @@ func NewTrackStore(isVideo bool, videoCodec string) *TrackStore {
 		trackID:     1,
 		timescale:   90000,
 		LastPTS:     -1,
-		maxSegments: 300,
+		maxSegments: 60,
 	}
 	if !isVideo {
 		ts.timescale = 48000
