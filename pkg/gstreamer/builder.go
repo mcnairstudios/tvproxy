@@ -193,63 +193,93 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 		}
 	}
 
-	var muxSink []*gst.Element
-	if opts.HLSDir != "" {
-		hlsSink, _ := gst.NewElement("hlscmafsink")
-		if hlsSink != nil {
-			hlsSink.SetProperty("playlist-location", opts.HLSDir+"/playlist.m3u8")
-			hlsSink.SetProperty("location", opts.HLSDir+"/segment%05d.m4s")
-			hlsSink.SetProperty("init-location", opts.HLSDir+"/init%05d.mp4")
-			hlsSink.SetProperty("target-duration", uint(6))
-			hlsSink.SetProperty("playlist-length", uint(0))
-			hlsSink.SetProperty("playlist-type", 1)
-			hlsSink.SetProperty("send-keyframe-requests", true)
-			hlsSink.SetProperty("enable-endlist", true)
-			muxSink = []*gst.Element{hlsSink}
-		}
-	}
-	if len(muxSink) == 0 {
-		var mux *gst.Element
-		if opts.OutputFormat == OutputMPEGTS || (isCopy && opts.OutputFormat == "") {
-			mux, _ = gst.NewElement("mpegtsmux")
-		} else {
-			mux, _ = gst.NewElement("mp4mux")
-			mux.SetProperty("fragment-duration", uint(2000))
-			mux.SetProperty("streamable", true)
-		}
-		sink, _ := gst.NewElement("filesink")
-		sink.SetProperty("location", opts.RecordingPath)
-		muxSink = []*gst.Element{mux, sink}
-	}
-
 	var all []*gst.Element
 	all = append(all, sourceElements...)
 	all = append(all, tsparse, demux, vQueue, aQueue)
 	all = append(all, videoElements...)
 	all = append(all, audioElements...)
-	all = append(all, muxSink...)
 
-	if err := checkNilElements(all); err != nil {
-		return nil, err
-	}
+	if opts.UseAppSink {
+		vCaps, _ := gst.NewElement("capsfilter")
+		vCaps.SetProperty("caps", gst.NewCapsFromString("video/x-h265,stream-format=byte-stream,alignment=au;video/x-h264,stream-format=byte-stream,alignment=au"))
+		vSink, _ := gst.NewElement("appsink")
+		vSink.Set("name", "videosink")
+		vSink.SetProperty("emit-signals", true)
+		vSink.SetProperty("sync", false)
 
-	pipeline.AddMany(all...)
-	gst.ElementLinkMany(linkStart, tsparse, demux)
+		aCaps, _ := gst.NewElement("capsfilter")
+		aCaps.SetProperty("caps", gst.NewCapsFromString("audio/mpeg,mpegversion=4,stream-format=raw"))
+		aSink, _ := gst.NewElement("appsink")
+		aSink.Set("name", "audiosink")
+		aSink.SetProperty("emit-signals", true)
+		aSink.SetProperty("sync", false)
 
-	muxEl := muxSink[0]
+		all = append(all, vCaps, vSink, aCaps, aSink)
+		if err := checkNilElements(all); err != nil {
+			return nil, err
+		}
+		pipeline.AddMany(all...)
+		gst.ElementLinkMany(linkStart, tsparse, demux)
 
-	vChain := []*gst.Element{vQueue}
-	vChain = append(vChain, videoElements...)
-	vChain = append(vChain, muxEl)
-	gst.ElementLinkMany(vChain...)
+		vChain := []*gst.Element{vQueue}
+		vChain = append(vChain, videoElements...)
+		vChain = append(vChain, vCaps, vSink)
+		gst.ElementLinkMany(vChain...)
 
-	aChain := []*gst.Element{aQueue}
-	aChain = append(aChain, audioElements...)
-	aChain = append(aChain, muxEl)
-	gst.ElementLinkMany(aChain...)
+		aChain := []*gst.Element{aQueue}
+		aChain = append(aChain, audioElements...)
+		aChain = append(aChain, aCaps, aSink)
+		gst.ElementLinkMany(aChain...)
+	} else {
+		var muxSink []*gst.Element
+		if opts.HLSDir != "" {
+			hlsSink, _ := gst.NewElement("hlscmafsink")
+			if hlsSink != nil {
+				hlsSink.SetProperty("playlist-location", opts.HLSDir+"/playlist.m3u8")
+				hlsSink.SetProperty("location", opts.HLSDir+"/segment%05d.m4s")
+				hlsSink.SetProperty("init-location", opts.HLSDir+"/init%05d.mp4")
+				hlsSink.SetProperty("target-duration", uint(6))
+				hlsSink.SetProperty("playlist-length", uint(0))
+				hlsSink.SetProperty("playlist-type", 1)
+				hlsSink.SetProperty("send-keyframe-requests", true)
+				hlsSink.SetProperty("enable-endlist", true)
+				muxSink = []*gst.Element{hlsSink}
+			}
+		}
+		if len(muxSink) == 0 {
+			var mux *gst.Element
+			if opts.OutputFormat == OutputMPEGTS || (isCopy && opts.OutputFormat == "") {
+				mux, _ = gst.NewElement("mpegtsmux")
+			} else {
+				mux, _ = gst.NewElement("mp4mux")
+				mux.SetProperty("fragment-duration", uint(2000))
+				mux.SetProperty("streamable", true)
+			}
+			sink, _ := gst.NewElement("filesink")
+			sink.SetProperty("location", opts.RecordingPath)
+			muxSink = []*gst.Element{mux, sink}
+		}
+		all = append(all, muxSink...)
+		if err := checkNilElements(all); err != nil {
+			return nil, err
+		}
+		pipeline.AddMany(all...)
+		gst.ElementLinkMany(linkStart, tsparse, demux)
 
-	if len(muxSink) == 2 {
-		gst.ElementLinkMany(muxSink[0], muxSink[1])
+		muxEl := muxSink[0]
+		vChain := []*gst.Element{vQueue}
+		vChain = append(vChain, videoElements...)
+		vChain = append(vChain, muxEl)
+		gst.ElementLinkMany(vChain...)
+
+		aChain := []*gst.Element{aQueue}
+		aChain = append(aChain, audioElements...)
+		aChain = append(aChain, muxEl)
+		gst.ElementLinkMany(aChain...)
+
+		if len(muxSink) == 2 {
+			gst.ElementLinkMany(muxSink[0], muxSink[1])
+		}
 	}
 
 	var videoOnce, audioOnce sync.Once
@@ -376,57 +406,87 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 		}
 	}
 
-	var muxSink []*gst.Element
-	if opts.HLSDir != "" {
-		hlsSink, _ := gst.NewElement("hlscmafsink")
-		if hlsSink != nil {
-			hlsSink.SetProperty("playlist-location", opts.HLSDir+"/playlist.m3u8")
-			hlsSink.SetProperty("location", opts.HLSDir+"/segment%05d.m4s")
-			hlsSink.SetProperty("init-location", opts.HLSDir+"/init%05d.mp4")
-			hlsSink.SetProperty("target-duration", uint(6))
-			hlsSink.SetProperty("playlist-length", uint(0))
-			hlsSink.SetProperty("playlist-type", 1)
-			hlsSink.SetProperty("send-keyframe-requests", true)
-			hlsSink.SetProperty("enable-endlist", true)
-			muxSink = []*gst.Element{hlsSink}
-		}
-	}
-	if len(muxSink) == 0 {
-		mux, _ := gst.NewElement("mp4mux")
-		mux.SetProperty("fragment-duration", uint(2000))
-		mux.SetProperty("streamable", true)
-		sink, _ := gst.NewElement("filesink")
-		sink.SetProperty("location", opts.RecordingPath)
-		muxSink = []*gst.Element{mux, sink}
-	}
-
 	var all []*gst.Element
 	all = append(all, src, demux, vQueue, aQueue)
 	all = append(all, videoElements...)
 	all = append(all, audioElements...)
-	all = append(all, muxSink...)
 
-	if err := checkNilElements(all); err != nil {
-		return nil, err
-	}
+	if opts.UseAppSink {
+		vCaps, _ := gst.NewElement("capsfilter")
+		vCaps.SetProperty("caps", gst.NewCapsFromString("video/x-h265,stream-format=byte-stream,alignment=au;video/x-h264,stream-format=byte-stream,alignment=au"))
+		vSink, _ := gst.NewElement("appsink")
+		vSink.Set("name", "videosink")
+		vSink.SetProperty("emit-signals", true)
+		vSink.SetProperty("sync", false)
 
-	pipeline.AddMany(all...)
-	gst.ElementLinkMany(src, demux)
+		aCaps, _ := gst.NewElement("capsfilter")
+		aCaps.SetProperty("caps", gst.NewCapsFromString("audio/mpeg,mpegversion=4,stream-format=raw"))
+		aSink, _ := gst.NewElement("appsink")
+		aSink.Set("name", "audiosink")
+		aSink.SetProperty("emit-signals", true)
+		aSink.SetProperty("sync", false)
 
-	muxEl := muxSink[0]
+		all = append(all, vCaps, vSink, aCaps, aSink)
+		if err := checkNilElements(all); err != nil {
+			return nil, err
+		}
+		pipeline.AddMany(all...)
+		gst.ElementLinkMany(src, demux)
 
-	vChain := []*gst.Element{vQueue}
-	vChain = append(vChain, videoElements...)
-	vChain = append(vChain, muxEl)
-	gst.ElementLinkMany(vChain...)
+		vChain := []*gst.Element{vQueue}
+		vChain = append(vChain, videoElements...)
+		vChain = append(vChain, vCaps, vSink)
+		gst.ElementLinkMany(vChain...)
 
-	aChain := []*gst.Element{aQueue}
-	aChain = append(aChain, audioElements...)
-	aChain = append(aChain, muxEl)
-	gst.ElementLinkMany(aChain...)
+		aChain := []*gst.Element{aQueue}
+		aChain = append(aChain, audioElements...)
+		aChain = append(aChain, aCaps, aSink)
+		gst.ElementLinkMany(aChain...)
+	} else {
+		var muxSink []*gst.Element
+		if opts.HLSDir != "" {
+			hlsSink, _ := gst.NewElement("hlscmafsink")
+			if hlsSink != nil {
+				hlsSink.SetProperty("playlist-location", opts.HLSDir+"/playlist.m3u8")
+				hlsSink.SetProperty("location", opts.HLSDir+"/segment%05d.m4s")
+				hlsSink.SetProperty("init-location", opts.HLSDir+"/init%05d.mp4")
+				hlsSink.SetProperty("target-duration", uint(6))
+				hlsSink.SetProperty("playlist-length", uint(0))
+				hlsSink.SetProperty("playlist-type", 1)
+				hlsSink.SetProperty("send-keyframe-requests", true)
+				hlsSink.SetProperty("enable-endlist", true)
+				muxSink = []*gst.Element{hlsSink}
+			}
+		}
+		if len(muxSink) == 0 {
+			mux, _ := gst.NewElement("mp4mux")
+			mux.SetProperty("fragment-duration", uint(2000))
+			mux.SetProperty("streamable", true)
+			sink, _ := gst.NewElement("filesink")
+			sink.SetProperty("location", opts.RecordingPath)
+			muxSink = []*gst.Element{mux, sink}
+		}
+		all = append(all, muxSink...)
+		if err := checkNilElements(all); err != nil {
+			return nil, err
+		}
+		pipeline.AddMany(all...)
+		gst.ElementLinkMany(src, demux)
 
-	if len(muxSink) == 2 {
-		gst.ElementLinkMany(muxSink[0], muxSink[1])
+		muxEl := muxSink[0]
+		vChain := []*gst.Element{vQueue}
+		vChain = append(vChain, videoElements...)
+		vChain = append(vChain, muxEl)
+		gst.ElementLinkMany(vChain...)
+
+		aChain := []*gst.Element{aQueue}
+		aChain = append(aChain, audioElements...)
+		aChain = append(aChain, muxEl)
+		gst.ElementLinkMany(aChain...)
+
+		if len(muxSink) == 2 {
+			gst.ElementLinkMany(muxSink[0], muxSink[1])
+		}
 	}
 
 	var videoOnce, audioOnce sync.Once
@@ -515,8 +575,6 @@ func buildVODTvproxyvod(opts PipelineOpts, srcCodec string) (*gst.Pipeline, erro
 			vodEl.SetProperty("seek-position", int64(opts.SeekOffset*1e9))
 		}
 	}
-
-	return pipeline, nil
 
 	return pipeline, nil
 }

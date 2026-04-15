@@ -69,6 +69,7 @@ type PipelineOpts struct {
 
 	DualOutput   bool
 	SeekOffset   float64
+	UseAppSink   bool
 }
 
 type Pipeline struct {

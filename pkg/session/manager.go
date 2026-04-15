@@ -17,6 +17,7 @@ import (
 
 	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
 	"github.com/gavinmcnair/tvproxy/pkg/config"
+	"github.com/gavinmcnair/tvproxy/pkg/fmp4"
 	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/media"
@@ -325,6 +326,11 @@ func (m *Manager) RestartWithSeek(ctx context.Context, channelID string, positio
 	s, ok := m.sessions[channelID]
 	m.mu.RUnlock()
 	if !ok {
+		return
+	}
+
+	if s.Seek(position) {
+		m.log.Info().Str("channel_id", channelID).Float64("position", position).Msg("CGO seek (pipeline stays running)")
 		return
 	}
 
@@ -772,6 +778,8 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Str("output_file", s.FilePath).
 		Msg("building pipeline")
 
+	opts.UseAppSink = s.startOpts.ProfileName == "Browser"
+
 	pipeline, path, err := gstreamer.Build(opts)
 	if err != nil {
 		m.log.Error().Err(err).Str("session_id", s.ID).Msg("pipeline build failed")
@@ -781,6 +789,33 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 
 	m.log.Info().Str("session_id", s.ID).Str("path", path).Str("output", s.FilePath).Msg("pipeline built")
 	s.SetStopPipeline(func() { pipeline.SetState(gst.StateNull) })
+
+	if opts.UseAppSink {
+		outCodec := gstreamer.NormalizeCodec(opts.OutputVideoCodec)
+		if outCodec == "" || outCodec == "copy" || outCodec == "default" {
+			outCodec = gstreamer.NormalizeCodec(opts.VideoCodec)
+		}
+		s.VideoStore = fmp4.NewTrackStore(true, outCodec)
+		s.AudioStore = fmp4.NewTrackStore(false, "")
+
+		if err := fmp4.SetupVideoSink(pipeline, s.VideoStore); err != nil {
+			m.log.Error().Err(err).Msg("failed to setup video appsink")
+		}
+		if err := fmp4.SetupAudioSink(pipeline, s.AudioStore); err != nil {
+			m.log.Error().Err(err).Msg("failed to setup audio appsink")
+		}
+
+		go fmp4.RunSegmentFlusher(ctx, s.VideoStore, s.AudioStore)
+
+		s.SetSeekFunc(func(position float64) {
+			posNs := int64(position * 1e9)
+			newGen := s.seekGen.Add(1)
+			s.VideoStore.Reset(newGen, posNs)
+			s.AudioStore.Reset(newGen, posNs)
+			ok := fmp4.SeekPipeline(pipeline, posNs)
+			m.log.Info().Bool("ok", ok).Float64("position", position).Int64("gen", newGen).Msg("CGO seek")
+		})
+	}
 
 	stateErr := pipeline.SetState(gst.StatePlaying)
 	if stateErr != nil {
@@ -801,6 +836,13 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 
 	isLive := opts.IsLive
 	go m.pollFileProgress(ctx, s)
+
+	if s.VideoStore != nil {
+		<-ctx.Done()
+		m.log.Info().Str("session_id", s.ID).Msg("appsink session ended")
+		pipeline.SetState(gst.StateNull)
+		return
+	}
 
 	if !isLive {
 		<-ctx.Done()

@@ -18,6 +18,7 @@ require (
 )
 
 require (
+	github.com/Eyevinn/mp4ff v0.51.0 // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/asticode/go-astikit v0.30.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect

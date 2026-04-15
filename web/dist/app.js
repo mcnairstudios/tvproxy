@@ -3909,6 +3909,16 @@
     let retryTimeout = null;
     let statsInterval = null;
     const audioOnly = isAudioOnly(streamTracks, streamGroup);
+    var mseWorker = null;
+    var mseMediaSource = null;
+    var mseVideoSb = null;
+    var mseAudioSb = null;
+    var mseVideoSeq = 0;
+    var mseAudioSeq = 0;
+    var mseAppendQueues = { video: [], audio: [] };
+    var mseAppending = { video: false, audio: false };
+    var mseSeekTarget = 0;
+    var mseDuration = 0;
 
 
     function cleanup() {
@@ -3922,6 +3932,7 @@
       if (ctrlUpdateTimer) { clearInterval(ctrlUpdateTimer); ctrlUpdateTimer = null; }
       if (signalInterval) { clearInterval(signalInterval); signalInterval = null; }
       if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
+      mseCleanup();
       if (hlsInstance) {
         if (hlsInstance && hlsInstance.destroy) hlsInstance.destroy();
         hlsInstance = null;
@@ -3939,6 +3950,154 @@
       }
     }
     activePlayerCleanup = cleanup;
+
+    function detectVideoCodec(buf) {
+      var d = new Uint8Array(buf);
+      for (var i = 0; i < d.length - 8; i++) {
+        if (d[i] === 0x68 && d[i+1] === 0x76 && d[i+2] === 0x63 && d[i+3] === 0x43) {
+          var profileIdc = d[i+5] & 0x1F;
+          var tierFlag = (d[i+5] >> 5) & 1;
+          var levelIdc = d[i+16];
+          var tier = tierFlag ? 'H' : 'L';
+          return 'hvc1.' + profileIdc + '.' + '4.' + tier + String(levelIdc);
+        }
+        if (d[i] === 0x61 && d[i+1] === 0x76 && d[i+2] === 0x63 && d[i+3] === 0x43) {
+          var hex = function(n) { return n.toString(16).padStart(2, '0'); };
+          return 'avc1.' + hex(d[i+5]) + hex(d[i+6]) + hex(d[i+7]);
+        }
+      }
+      return 'hvc1.1.4.L153';
+    }
+
+    function mseWaitUpdate(sb) {
+      return new Promise(function(resolve, reject) {
+        if (!sb.updating) { resolve(); return; }
+        sb.addEventListener('updateend', resolve, {once: true});
+        sb.addEventListener('error', function() { reject(new Error('append error')); }, {once: true});
+      });
+    }
+
+    function mseProcessQueue(track) {
+      var sb = track === 'video' ? mseVideoSb : mseAudioSb;
+      if (!sb || mseAppending[track]) return;
+      mseAppending[track] = true;
+      function next() {
+        if (mseAppendQueues[track].length === 0) { mseAppending[track] = false; return; }
+        var data = mseAppendQueues[track].shift();
+        try {
+          mseWaitUpdate(sb).then(function() {
+            sb.appendBuffer(data);
+            return mseWaitUpdate(sb);
+          }).then(next).catch(function(e) {
+            console.error(track + ' append error:', e);
+            mseAppending[track] = false;
+          });
+        } catch(e) {
+          console.error(track + ' append error:', e);
+          mseAppending[track] = false;
+        }
+      }
+      next();
+    }
+
+    function mseCleanup() {
+      if (mseWorker) { mseWorker.postMessage({type: 'stop'}); mseWorker.terminate(); mseWorker = null; }
+      mseAppendQueues.video = [];
+      mseAppendQueues.audio = [];
+      mseAppending.video = false;
+      mseAppending.audio = false;
+      if (mseMediaSource && mseMediaSource.readyState === 'open') {
+        try { mseMediaSource.endOfStream(); } catch(e) {}
+      }
+      mseMediaSource = null;
+      mseVideoSb = null;
+      mseAudioSb = null;
+      mseVideoSeq = 0;
+      mseAudioSeq = 0;
+    }
+
+    function startMSEPlayback(vidEl, dvrObj, seekPos) {
+      if (mseWorker) { mseWorker.postMessage({type: 'stop'}); mseWorker.terminate(); }
+      mseAppendQueues.video = [];
+      mseAppendQueues.audio = [];
+      mseAppending.video = false;
+      mseAppending.audio = false;
+      mseVideoSeq = 0;
+      mseAudioSeq = 0;
+      mseSeekTarget = seekPos || 0;
+
+      if (mseMediaSource && mseMediaSource.readyState === 'open') {
+        try { mseMediaSource.endOfStream(); } catch(e) {}
+      }
+
+      mseWorker = new Worker('/vod/mse-worker.js');
+      mseWorker.onmessage = function(e) {
+        var msg = e.data;
+        if (msg.type === 'segment') {
+          if (msg.track === 'video') mseVideoSeq = msg.seq + 1;
+          if (msg.track === 'audio') mseAudioSeq = msg.seq + 1;
+          mseAppendQueues[msg.track].push(msg.data);
+          mseProcessQueue(msg.track);
+          if (msg.track === 'video' && mseVideoSeq === 4) {
+            if (mseVideoSb && mseVideoSb.buffered.length > 0) {
+              vidEl.currentTime = mseVideoSb.buffered.start(0);
+            } else {
+              vidEl.currentTime = mseSeekTarget;
+            }
+            vidEl.play().catch(function(e) { console.error('play:', e); });
+          }
+        } else if (msg.type === 'error') {
+          console.error(msg.track + ' worker error:', msg.msg);
+        }
+      };
+
+      var basePath = '/vod/' + dvrObj.id + '/mse/';
+      Promise.all([
+        fetch(basePath + 'video/init').then(function(r) { return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; }); }),
+        fetch(basePath + 'audio/init').then(function(r) { return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; }); }),
+        fetch(basePath + 'debug').then(function(r) { return r.json(); })
+      ]).then(function(results) {
+        var videoInit = results[0];
+        var audioInit = results[1];
+        var debugInfo = results[2];
+
+        mseDuration = debugInfo.duration || dvrObj.duration || 0;
+        var videoCodec = detectVideoCodec(videoInit.buf);
+        var videoMime = 'video/mp4; codecs="' + videoCodec + '"';
+        var audioMime = 'audio/mp4; codecs="mp4a.40.2"';
+
+        mseMediaSource = new MediaSource();
+        vidEl.src = URL.createObjectURL(mseMediaSource);
+
+        mseMediaSource.addEventListener('sourceopen', function() {
+          mseMediaSource.duration = mseDuration;
+          mseVideoSb = mseMediaSource.addSourceBuffer(videoMime);
+          mseAudioSb = mseMediaSource.addSourceBuffer(audioMime);
+          mseVideoSb.mode = 'segments';
+          mseAudioSb.mode = 'segments';
+
+          mseVideoSb.addEventListener('error', function() { console.error('mseVideoSb ERROR'); });
+          mseAudioSb.addEventListener('error', function() { console.error('mseAudioSb ERROR'); });
+
+          mseWaitUpdate(mseVideoSb).then(function() {
+            mseVideoSb.appendBuffer(videoInit.buf);
+            return mseWaitUpdate(mseVideoSb);
+          }).then(function() {
+            mseAudioSb.appendBuffer(audioInit.buf);
+            return mseWaitUpdate(mseAudioSb);
+          }).then(function() {
+            mseWorker.postMessage({type: 'start', sessionId: dvrObj.id, videoGen: videoInit.gen, audioGen: audioInit.gen});
+          }).catch(function(e) {
+            console.error('MSE init error:', e);
+          });
+        }, {once: true});
+      }).catch(function(e) {
+        console.error('MSE startup error:', e);
+        statusEl.style.color = '#ff6b6b';
+        statusEl.textContent = 'MSE Error';
+        statusEl.title = e.message || String(e);
+      });
+    }
 
     function fmtTime(secs) {
       var h = Math.floor(secs / 3600);
@@ -4129,6 +4288,20 @@
       seekPlayed.style.width = (pct * 100) + '%';
       seekThumb.style.left = (pct * 100) + '%';
       seekThumb.style.opacity = '1';
+      if (dvr && dvr.delivery === 'mse') {
+        var targetPos = Math.floor(pct * (mseDuration || dvr.duration || 0));
+        statusEl.style.color = '#ffa726';
+        statusEl.textContent = 'Seeking...';
+        if (mseWorker) mseWorker.postMessage({type: 'stop'});
+        api.post('/vod/' + dvr.id + '/mse/seek?position=' + targetPos).then(function(info) {
+          startMSEPlayback(videoEl, dvr, info.pos);
+        }).catch(function(err) {
+          console.error('MSE seek error:', err);
+          statusEl.style.color = '#ff6b6b';
+          statusEl.textContent = 'Seek failed';
+        });
+        return;
+      }
       var dur = videoEl.duration;
       if (dur && isFinite(dur) && dur > 0) {
         videoEl.currentTime = pct * dur;
@@ -4194,7 +4367,7 @@
       if (playerCtx.signal.aborted) { clearInterval(ctrlUpdateTimer); return; }
       var cur = videoEl.currentTime || 0;
       var dur = videoEl.duration;
-      var knownDur = dvr.duration || epgDuration || (isFinite(dur) ? dur : 0);
+      var knownDur = mseDuration || dvr.duration || epgDuration || (isFinite(dur) ? dur : 0);
 
       var effectiveDur = knownDur > 0 ? knownDur : (isFinite(dur) ? dur : 0);
       if (effectiveDur > 0) {
@@ -4202,7 +4375,8 @@
         seekThumb.style.left = ((cur / effectiveDur) * 100) + '%';
         seekTranscoded.style.width = '100%';
         var bufEnd = 0;
-        if (videoEl.buffered.length > 0) bufEnd = videoEl.buffered.end(videoEl.buffered.length - 1);
+        var mseBufSource = mseVideoSb || videoEl;
+        if (mseBufSource.buffered && mseBufSource.buffered.length > 0) bufEnd = mseBufSource.buffered.end(mseBufSource.buffered.length - 1);
         seekBuffered.style.width = ((bufEnd / effectiveDur) * 100) + '%';
         timeDisplay.textContent = fmtCtrlTime(cur) + ' / ' + fmtCtrlTime(effectiveDur);
       } else {
@@ -4273,14 +4447,17 @@
       }
     }).catch(function() {}) : Promise.resolve();
 
-    var isHLS = streamSrc.indexOf('.m3u8') >= 0;
-    var streamReady = isHLS ? Promise.resolve() : waitForStream();
+    var isMSE = dvr && dvr.delivery === 'mse';
+    var isHLS = !isMSE && streamSrc.indexOf('.m3u8') >= 0;
+    var streamReady = (isHLS || isMSE) ? Promise.resolve() : waitForStream();
 
     Promise.all([streamReady, epgReady]).then(function() {
       statusEl.style.color = '#ffa726';
       statusEl.textContent = 'Buffering...';
 
-      if (isHLS && typeof Hls !== 'undefined' && Hls.isSupported()) {
+      if (isMSE) {
+        startMSEPlayback(videoEl, dvr, 0);
+      } else if (isHLS && typeof Hls !== 'undefined' && Hls.isSupported()) {
         var hlsPlayer = new Hls({
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
@@ -4377,6 +4554,12 @@
 
     function restartPlayback() {
       if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
+      if (dvr && dvr.delivery === 'mse') {
+        statusEl.style.color = '#ffa726';
+        statusEl.textContent = 'Reconnecting...';
+        startMSEPlayback(videoEl, dvr, 0);
+        return;
+      }
       if (hlsInstance && dvr) {
         statusEl.style.color = '#ffa726';
         statusEl.textContent = 'Reconnecting...';

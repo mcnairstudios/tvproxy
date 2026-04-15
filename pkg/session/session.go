@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gavinmcnair/tvproxy/pkg/fmp4"
 	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
@@ -34,6 +35,9 @@ type Session struct {
 	SeekOffset      float64
 	Video           *media.VideoInfo
 	AudioTracks     []media.AudioTrack
+	VideoStore   *fmp4.TrackStore
+	AudioStore   *fmp4.TrackStore
+	seekGen      atomic.Int64
 	startOpts    StartOpts
 	consumers    map[string]*Consumer
 	wasRecording bool

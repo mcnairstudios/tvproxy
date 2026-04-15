@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 
+	"github.com/gavinmcnair/tvproxy/pkg/fmp4"
 	"github.com/gavinmcnair/tvproxy/pkg/hls"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
@@ -139,8 +141,12 @@ func (h *VODHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	delivery := "stream"
-	if sess := h.vodService.GetSession(sessionID); sess != nil && sess.HLSOutputDir != "" {
-		delivery = "hls"
+	if sess := h.vodService.GetSession(sessionID); sess != nil {
+		if sess.ProfileName == "Browser" {
+			delivery = "mse"
+		} else if sess.HLSOutputDir != "" {
+			delivery = "hls"
+		}
 	}
 
 	resp := map[string]any{
@@ -175,8 +181,12 @@ func (h *VODHandler) CreateChannelSession(w http.ResponseWriter, r *http.Request
 	}
 
 	delivery := "stream"
-	if sess := h.vodService.GetSession(sessionID); sess != nil && sess.HLSOutputDir != "" {
-		delivery = "hls"
+	if sess := h.vodService.GetSession(sessionID); sess != nil {
+		if sess.ProfileName == "Browser" {
+			delivery = "mse"
+		} else if sess.HLSOutputDir != "" {
+			delivery = "hls"
+		}
 	}
 
 	resp := map[string]any{
@@ -688,3 +698,160 @@ func (h *VODHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
 
 	hls.ServeSegment(w, r, hlsSess.SegmentPath(segmentIndex))
 }
+
+func (h *VODHandler) MSEInit(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "sessionID")
+	track := chi.URLParam(r, "track")
+
+	sess := h.vodService.GetSession(channelID)
+	if sess == nil {
+		respondError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	var store *fmp4.TrackStore
+	if track == "video" {
+		store = sess.VideoStore
+	} else {
+		store = sess.AudioStore
+	}
+	if store == nil {
+		respondError(w, http.StatusNotFound, "no MSE store for track")
+		return
+	}
+
+	data, gen := store.GetInit()
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("X-Gen", strconv.FormatInt(gen, 10))
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Expose-Headers", "X-Gen")
+	w.Write(data)
+}
+
+func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "sessionID")
+	track := chi.URLParam(r, "track")
+
+	sess := h.vodService.GetSession(channelID)
+	if sess == nil {
+		respondError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	var store *fmp4.TrackStore
+	if track == "video" {
+		store = sess.VideoStore
+	} else {
+		store = sess.AudioStore
+	}
+	if store == nil {
+		respondError(w, http.StatusNotFound, "no MSE store")
+		return
+	}
+
+	genStr := r.URL.Query().Get("gen")
+	seqStr := r.URL.Query().Get("seq")
+	gen, _ := strconv.ParseInt(genStr, 10, 64)
+	seq, _ := strconv.Atoi(seqStr)
+
+	data, ok := store.GetSegment(gen, seq)
+	if !ok {
+		w.WriteHeader(http.StatusGone)
+		return
+	}
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Write(data)
+}
+
+func (h *VODHandler) MSESeek(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "sessionID")
+	posStr := r.URL.Query().Get("position")
+	pos, err := strconv.ParseFloat(posStr, 64)
+	if err != nil || pos < 0 {
+		respondError(w, http.StatusBadRequest, "invalid position")
+		return
+	}
+
+	if err := h.vodService.SeekSession(r.Context(), channelID, pos); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	sess := h.vodService.GetSession(channelID)
+	gen := int64(0)
+	if sess != nil && sess.VideoStore != nil {
+		gen = sess.VideoStore.Generation()
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{"gen": gen, "pos": pos})
+}
+
+func (h *VODHandler) MSEDebug(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "sessionID")
+	sess := h.vodService.GetSession(channelID)
+	if sess == nil {
+		respondError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	resp := map[string]any{
+		"duration": sess.Duration,
+	}
+	if sess.VideoStore != nil {
+		resp["video_segments"] = sess.VideoStore.SegmentCount()
+		resp["gen"] = sess.VideoStore.Generation()
+	}
+	respondJSON(w, http.StatusOK, resp)
+}
+
+func (h *VODHandler) MSEWorkerJS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript")
+	w.Header().Set("Cache-Control", "no-cache")
+	fmt.Fprint(w, mseWorkerJS)
+}
+
+const mseWorkerJS = `
+let ac = null;
+
+async function fetchTrack(sessionId, name, gen, signal) {
+  let seq = 0;
+  let backoff = 0;
+  while (!signal.aborted) {
+    try {
+      const resp = await fetch('/vod/' + sessionId + '/mse/' + name + '/segment?gen=' + gen + '&seq=' + seq, {signal});
+      if (resp.status === 410) {
+        self.postMessage({type: 'genChanged', track: name});
+        return;
+      }
+      if (!resp.ok) {
+        throw new Error('HTTP ' + resp.status);
+      }
+      const data = await resp.arrayBuffer();
+      self.postMessage({type: 'segment', track: name, data: data, seq: seq}, [data]);
+      seq++;
+      backoff = 0;
+    } catch(e) {
+      if (e.name === 'AbortError') return;
+      const delay = Math.pow(2, backoff) * 1000;
+      backoff = Math.min(backoff + 1, 5);
+      self.postMessage({type: 'error', track: name, msg: e.toString() + ' (retry in ' + (delay/1000) + 's)'});
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
+self.onmessage = function(e) {
+  const msg = e.data;
+  if (msg.type === 'start' || msg.type === 'seek') {
+    if (ac) ac.abort();
+    ac = new AbortController();
+    const signal = ac.signal;
+    fetchTrack(msg.sessionId, 'video', msg.videoGen, signal);
+    fetchTrack(msg.sessionId, 'audio', msg.audioGen, signal);
+  } else if (msg.type === 'stop') {
+    if (ac) ac.abort();
+    ac = null;
+  }
+};
+`
