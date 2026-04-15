@@ -208,7 +208,7 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 		vSink.SetProperty("sync", false)
 
 		aCaps, _ := gst.NewElement("capsfilter")
-		aCaps.SetProperty("caps", gst.NewCapsFromString("audio/mpeg,mpegversion=4,stream-format=raw"))
+		aCaps.SetProperty("caps", gst.NewCapsFromString("audio/mpeg,mpegversion=4"))
 		aSink, _ := gst.NewElement("appsink")
 		aSink.Set("name", "audiosink")
 		aSink.SetProperty("emit-signals", true)
@@ -420,7 +420,7 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 		vSink.SetProperty("sync", false)
 
 		aCaps, _ := gst.NewElement("capsfilter")
-		aCaps.SetProperty("caps", gst.NewCapsFromString("audio/mpeg,mpegversion=4,stream-format=raw"))
+		aCaps.SetProperty("caps", gst.NewCapsFromString("audio/mpeg,mpegversion=4"))
 		aSink, _ := gst.NewElement("appsink")
 		aSink.Set("name", "audiosink")
 		aSink.SetProperty("emit-signals", true)
