@@ -215,7 +215,7 @@ func (s *SatIPService) scanSource(ctx context.Context, source *models.SatIPSourc
 					})
 				}
 			}
-			s.probeCache.SaveProbeByStreamID(id, probe)
+			s.probeCache.SaveProbe(id, probe)
 		}
 	}
 

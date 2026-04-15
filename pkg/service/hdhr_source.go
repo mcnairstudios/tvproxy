@@ -175,9 +175,7 @@ func (s *HDHRSourceService) ScanSource(ctx context.Context, sourceID string) err
 		})
 
 		if s.probeCache != nil {
-			probe := hdhrProbeFromLineup(entry)
-			s.probeCache.SaveProbe(media.StreamHash(entry.URL), probe)
-			s.probeCache.SaveProbeByStreamID(id, probe)
+			s.probeCache.SaveProbe(id, hdhrProbeFromLineup(entry))
 		}
 
 		if (i+1)%50 == 0 {
@@ -208,7 +206,7 @@ func (s *HDHRSourceService) ScanSource(ctx context.Context, sourceID string) err
 				s.log.Warn().Err(err).Msg("failed to capture TS header")
 			} else {
 				for _, st := range streams {
-					s.probeCache.SaveTSHeader(media.StreamHash(st.URL), header)
+					s.probeCache.SaveTSHeader(st.ID, header)
 				}
 				s.log.Info().Int("size", len(header)).Int("channels", len(streams)).Msg("captured TS header for fast startup")
 			}

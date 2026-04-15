@@ -147,6 +147,15 @@ func (s *VODService) lookupSourceProfile(ctx context.Context, m3uAccountID, sati
 	return s.autoSelectSourceProfile(ctx, streamURL)
 }
 
+func (s *VODService) resolveEncoderElement(ctx context.Context, videoCodec string) string {
+	codec := strings.ToLower(videoCodec)
+	switch codec {
+	case "h264", "h265", "av1":
+		return s.settingsService.ResolveEncoderElement(ctx, codec)
+	}
+	return ""
+}
+
 func (s *VODService) autoSelectSourceProfile(ctx context.Context, streamURL string) *models.SourceProfile {
 	if streamURL == "" {
 		return nil
@@ -194,7 +203,6 @@ func (s *VODService) transcoderPreference(ctx context.Context) string {
 
 type sessionArgs struct {
 	Container        string
-	Delivery         string
 	OutputVideoCodec string
 	OutputAudioCodec string
 	OutputHWAccel    string
@@ -225,7 +233,6 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 
 	return sessionArgs{
 		Container:        sp.Container,
-		Delivery:         sp.Delivery,
 		OutputVideoCodec: videoCodec,
 		OutputAudioCodec: audioCodec,
 		OutputHWAccel:    hwaccel,
@@ -252,7 +259,6 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 			SourceProfile: s.lookupSourceProfile(ctx, streamID, "", streamURL),
 		},
 		StrategyOutput{
-			Delivery:   sa.Delivery,
 			VideoCodec: sa.OutputVideoCodec,
 			AudioCodec: sa.OutputAudioCodec,
 			HWAccel:    sa.OutputHWAccel,
@@ -278,6 +284,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		SkipProbe:         strategy.SkipProbe,
 		MetadataOnly:     strategy.MetadataOnly,
 	}
+	startOpts.VideoEncoderElement = s.resolveEncoderElement(ctx, strategy.VideoCodec)
 	sp := s.lookupSourceProfile(ctx, streamID, "", streamURL)
 	applySourceProfile(&startOpts, sp)
 
@@ -337,7 +344,6 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 			SourceProfile: s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID, streamURL),
 		},
 		StrategyOutput{
-			Delivery:   sa.Delivery,
 			VideoCodec: sa.OutputVideoCodec,
 			AudioCodec: sa.OutputAudioCodec,
 			HWAccel:    sa.OutputHWAccel,
@@ -364,6 +370,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		KnownDuration:    stream.VODDuration,
 		MetadataOnly:     strategy.MetadataOnly,
 	}
+	startOpts2.VideoEncoderElement = s.resolveEncoderElement(ctx, strategy.VideoCodec)
 	applySourceProfile(&startOpts2, s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID, streamURL))
 
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, startOpts2, session.ConsumerViewer)
@@ -395,18 +402,19 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 	sessionKey := "file:" + filepath.Base(filePath)
 
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
-		ChannelID:        sessionKey,
-		StreamID:         sessionKey,
-		StreamURL:        filePath,
-		StreamName:       name,
-		ChannelName:      name,
-		ProfileName:      profileName,
-		OutputVideoCodec: sa.OutputVideoCodec,
-		OutputAudioCodec: sa.OutputAudioCodec,
-		OutputContainer:  sa.Container,
-		OutputHWAccel:    sa.OutputHWAccel,
-		OutputDir:        s.config.VODOutputDir,
-		MetadataOnly:     false,
+		ChannelID:            sessionKey,
+		StreamID:             sessionKey,
+		StreamURL:            filePath,
+		StreamName:           name,
+		ChannelName:          name,
+		ProfileName:          profileName,
+		OutputVideoCodec:     sa.OutputVideoCodec,
+		OutputAudioCodec:     sa.OutputAudioCodec,
+		OutputContainer:      sa.Container,
+		OutputHWAccel:        sa.OutputHWAccel,
+		VideoEncoderElement:  s.resolveEncoderElement(ctx, sa.OutputVideoCodec),
+		OutputDir:            s.config.VODOutputDir,
+		MetadataOnly:         false,
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", 0, false, err

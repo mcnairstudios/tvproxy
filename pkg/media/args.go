@@ -1,16 +1,17 @@
 package media
 
 import (
-	"crypto/sha256"
-	"fmt"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/google/uuid"
 )
 
-func StreamHash(url string) string {
-	sum := sha256.Sum256([]byte(url))
-	return fmt.Sprintf("%x", sum)[:16]
+var streamNamespace = uuid.MustParse("f47ac10b-58cc-4372-a567-0e02b2c3d479")
+
+func StreamID(url string) string {
+	return uuid.NewSHA1(streamNamespace, []byte(url)).String()
 }
 
 func IsHTTPURL(s string) bool {

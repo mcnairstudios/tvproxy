@@ -1,6 +1,7 @@
 package service
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
@@ -43,7 +44,6 @@ type StrategyInput struct {
 }
 
 type StrategyOutput struct {
-	Delivery   string
 	VideoCodec string
 	AudioCodec string
 	HWAccel    string
@@ -66,16 +66,28 @@ func classifyStream(in StrategyInput) StreamCategory {
 func resolveSessionStrategy(in StrategyInput, out StrategyOutput, outputDir string) SessionStrategy {
 	cat := classifyStream(in)
 
+	var s SessionStrategy
 	switch cat {
 	case CategoryLiveIPTV, CategoryLiveSatIP:
-		return liveStrategy(in, out, cat)
+		s = liveStrategy(in, out, cat)
 	case CategoryVODRemote:
-		return vodRemoteStrategy(in, out)
+		s = vodRemoteStrategy(in, out)
 	case CategoryVODLocal:
-		return vodLocalStrategy(in, out)
+		s = vodLocalStrategy(in, out)
 	default:
-		return vodLocalStrategy(in, out)
+		s = vodLocalStrategy(in, out)
 	}
+
+	isLive := cat == CategoryLiveIPTV || cat == CategoryLiveSatIP
+	if isLive {
+		channelID := in.StreamID
+		if channelID == "" {
+			channelID = "unknown"
+		}
+		s.HLSOutputDir = filepath.Join(outputDir, channelID, "hls")
+	}
+
+	return s
 }
 
 func liveStrategy(in StrategyInput, out StrategyOutput, cat StreamCategory) SessionStrategy {

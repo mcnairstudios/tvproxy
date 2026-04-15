@@ -61,7 +61,6 @@ func TestResolveSessionStrategy_LiveIPTV(t *testing.T) {
 		StreamID:  "test-stream-id",
 	}
 	out := StrategyOutput{
-		Delivery:   "hls",
 		VideoCodec: "copy",
 		AudioCodec: "aac",
 		Container:  "mp4",
@@ -84,7 +83,6 @@ func TestResolveSessionStrategy_VODRemote(t *testing.T) {
 		StreamID:  "test-movie-id",
 	}
 	out := StrategyOutput{
-		Delivery:   "hls",
 		VideoCodec: "copy",
 		AudioCodec: "aac",
 		Container:  "mp4",
@@ -98,9 +96,6 @@ func TestResolveSessionStrategy_VODRemote(t *testing.T) {
 	if s.MetadataOnly {
 		t.Error("MetadataOnly should be false for VOD (session manager starts transcoder)")
 	}
-	if s.HLSOutputDir != "" {
-		t.Error("HLSOutputDir should be empty for VOD")
-	}
 }
 
 func TestResolveSessionStrategy_VODLocal(t *testing.T) {
@@ -110,7 +105,6 @@ func TestResolveSessionStrategy_VODLocal(t *testing.T) {
 		StreamID:  "test-local-id",
 	}
 	out := StrategyOutput{
-		Delivery:   "hls",
 		VideoCodec: "copy",
 		AudioCodec: "aac",
 		Container:  "mp4",
@@ -133,7 +127,6 @@ func TestResolveSessionStrategy_LiveWithTranscode(t *testing.T) {
 		StreamID:  "test-transcode-id",
 	}
 	out := StrategyOutput{
-		Delivery:   "hls",
 		VideoCodec: "av1",
 		AudioCodec: "aac",
 		HWAccel:    "qsv",
@@ -203,12 +196,10 @@ func TestResolveSessionStrategy_LiveWithSourceProfile(t *testing.T) {
 		SourceProfile: &models.SourceProfile{
 			Deinterlace:    true,
 			AudioDelayMs:   200,
-			AudioChannels:  2,
 			VideoQueueMs:   15000,
 		},
 	}
 	out := StrategyOutput{
-		Delivery:   "hls",
 		VideoCodec: "default",
 		AudioCodec: "default",
 		Container:  "mp4",
@@ -229,7 +220,7 @@ func TestResolveSessionStrategy_SkipProbe(t *testing.T) {
 		StreamURL: "http://provider.com/live/123.ts",
 		StreamID:  "test-skip",
 	}
-	out := StrategyOutput{Delivery: "hls", Container: "mp4"}
+	out := StrategyOutput{Container: "mp4"}
 	s := resolveSessionStrategy(in, out, "/tmp")
 	if s.SkipProbe {
 		t.Error("SkipProbe should be false for probe_mode=auto")

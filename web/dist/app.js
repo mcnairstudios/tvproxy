@@ -4106,9 +4106,9 @@
     var seekRow = document.createElement('div');
     seekRow.style.cssText = 'position:relative;height:12px;cursor:pointer;margin-bottom:4px;display:flex;align-items:center;';
     var seekTrack = document.createElement('div');
-    seekTrack.style.cssText = 'position:absolute;left:0;right:0;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;transition:height 0.1s;';
+    seekTrack.style.cssText = 'position:absolute;left:0;right:0;height:4px;background:rgba(255,255,255,0.4);border-radius:2px;transition:height 0.1s;';
     var seekTranscoded = document.createElement('div');
-    seekTranscoded.style.cssText = 'position:absolute;left:0;height:100%;background:rgba(255,255,255,0.3);border-radius:2px;width:0%;';
+    seekTranscoded.style.cssText = 'position:absolute;left:0;height:100%;background:rgba(255,255,255,0.3);border-radius:2px;width:100%;';
     var seekBuffered = document.createElement('div');
     seekBuffered.style.cssText = 'position:absolute;left:0;height:100%;background:rgba(255,255,255,0.5);border-radius:2px;width:0%;';
     var seekPlayed = document.createElement('div');
@@ -4123,10 +4123,14 @@
     seekRow.addEventListener('mouseenter', function() { seekTrack.style.height = '6px'; seekThumb.style.opacity = '1'; });
     seekRow.addEventListener('mouseleave', function() { seekTrack.style.height = '4px'; seekThumb.style.opacity = '0'; });
     seekRow.addEventListener('click', function(e) {
+      e.stopPropagation();
       var rect = seekTrack.getBoundingClientRect();
       var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      seekPlayed.style.width = (pct * 100) + '%';
+      seekThumb.style.left = (pct * 100) + '%';
+      seekThumb.style.opacity = '1';
       var dur = videoEl.duration;
-      if (dur && isFinite(dur)) {
+      if (dur && isFinite(dur) && dur > 0) {
         videoEl.currentTime = pct * dur;
       }
     });
@@ -7324,63 +7328,6 @@
           ),
         ));
 
-        const currentHWAccel = ((Array.isArray(settings) ? settings : []).find(s => s.key === 'default_hwaccel') || {}).value || 'none';
-        const hwaccelSelect = h('select', { id: 'setting-default-hwaccel', style: 'padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); font-size: 14px' },
-          h('option', { value: 'none' }, 'Software (none)'),
-          h('option', { value: 'qsv' }, 'Intel QSV'),
-          h('option', { value: 'nvenc' }, 'NVIDIA NVENC'),
-          h('option', { value: 'vaapi' }, 'VA-API'),
-          h('option', { value: 'videotoolbox' }, 'VideoToolbox'),
-        );
-        hwaccelSelect.value = currentHWAccel;
-        hwaccelSelect.onchange = async function() {
-          hwaccelSelect.disabled = true;
-          try {
-            await api.put('/api/settings', { default_hwaccel: hwaccelSelect.value });
-            toast.success('Hardware acceleration updated');
-          } catch (err) {
-            toast.error(err.message);
-            hwaccelSelect.value = currentHWAccel;
-          }
-          hwaccelSelect.disabled = false;
-        };
-
-        const currentVideoCodec = ((Array.isArray(settings) ? settings : []).find(s => s.key === 'default_video_codec') || {}).value || 'copy';
-        const videoCodecSelect = h('select', { id: 'setting-default-video-codec', style: 'padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); font-size: 14px' },
-          h('option', { value: 'copy' }, 'Passthrough (copy)'),
-          h('option', { value: 'h264' }, 'H.264'),
-          h('option', { value: 'h265' }, 'H.265 / HEVC'),
-          h('option', { value: 'av1' }, 'AV1'),
-        );
-        videoCodecSelect.value = currentVideoCodec;
-        videoCodecSelect.onchange = async function() {
-          videoCodecSelect.disabled = true;
-          try {
-            await api.put('/api/settings', { default_video_codec: videoCodecSelect.value });
-            toast.success('Video codec updated');
-          } catch (err) {
-            toast.error(err.message);
-            videoCodecSelect.value = currentVideoCodec;
-          }
-          videoCodecSelect.disabled = false;
-        };
-
-        container.appendChild(h('div', { className: 'table-container', style: 'margin-top: 24px' },
-          h('div', { className: 'table-header' }, h('h3', null, 'Recording Encoding')),
-          h('div', { style: 'padding: 16px; font-size: 15px' },
-            h('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:12px' },
-              h('label', { for: 'setting-default-hwaccel', style: 'margin:0;min-width:160px' }, 'Hardware acceleration:'),
-              hwaccelSelect,
-            ),
-            h('div', { style: 'display:flex;align-items:center;gap:10px' },
-              h('label', { for: 'setting-default-video-codec', style: 'margin:0;min-width:160px' }, 'Video codec:'),
-              videoCodecSelect,
-            ),
-            h('p', { style: 'color: var(--text-muted); margin-top: 8px; font-size: 13px' },
-              'Used for scheduled recordings only. Live playback and VOD negotiate codec settings automatically from Source and Client Stream Profiles. Set hardware acceleration to match your GPU.'),
-          ),
-        ));
-
         const capabilitiesContent = h('div', { style: 'padding: 16px; font-size: 15px' });
         capabilitiesContent.appendChild(h('p', { style: 'color: var(--text-muted); font-size: 13px' }, 'Loading...'));
         const capabilitiesSection = h('div', { className: 'table-container', style: 'margin-top: 24px' },
@@ -7395,43 +7342,135 @@
             if (!caps || !caps.video_encoders) throw new Error('No capability data');
             capabilitiesContent.innerHTML = '';
 
-            if (caps.hwaccel) {
-              const hwRow = h('div', { style: 'margin-bottom: 12px; display: flex; align-items: center; gap: 10px' },
-                h('label', { style: 'margin: 0; min-width: 160px; font-weight: 500' }, 'Detected platform:'),
-                h('span', { style: 'padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 500; background: var(--accent); color: #fff' }, caps.hwaccel.toUpperCase()),
-              );
-              capabilitiesContent.appendChild(hwRow);
+            var platformBadges = h('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap' },
+              h('span', { style: 'font-weight:500;font-size:14px;margin-right:4px' }, 'Detected Platforms'));
+            if (caps.platforms && caps.platforms.length > 0) {
+              caps.platforms.forEach(function(p) {
+                platformBadges.appendChild(h('span', {
+                  style: 'padding:4px 12px;border-radius:12px;font-size:13px;font-weight:600;background:var(--accent);color:#fff;text-transform:uppercase;letter-spacing:0.5px'
+                }, p));
+              });
+            } else {
+              platformBadges.appendChild(h('span', { style: 'color:var(--text-muted);font-size:13px' }, 'No hardware platforms detected'));
+            }
+            capabilitiesContent.appendChild(platformBadges);
+
+            var hwEncoders = caps.video_encoders.filter(function(e) { return e.hw; });
+            var swEncoders = caps.video_encoders.filter(function(e) { return !e.hw; });
+            var columnsWrap = h('div', { style: 'display:flex;gap:24px;margin-bottom:16px' });
+
+            if (hwEncoders.length > 0) {
+              var hwCol = h('div', { style: 'flex:1' });
+              hwCol.appendChild(h('div', { style: 'font-weight:500;font-size:13px;margin-bottom:8px;color:var(--text-muted)' }, 'Hardware Encoders'));
+              var hwBadges = h('div', { style: 'display:flex;flex-wrap:wrap;gap:6px' });
+              hwEncoders.forEach(function(enc) {
+                hwBadges.appendChild(h('span', {
+                  style: 'padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;color:#fff;background:#2ea043',
+                  title: enc.codec.toUpperCase() + ' — ' + enc.platform
+                }, enc.name));
+              });
+              hwCol.appendChild(hwBadges);
+              columnsWrap.appendChild(hwCol);
             }
 
-            if (caps.video_encoders && caps.video_encoders.length > 0) {
-              const label = h('label', { style: 'margin: 0 0 8px 0; display: block; font-weight: 500' }, 'Video encoders:');
-              capabilitiesContent.appendChild(label);
-              const badgeWrap = h('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px' });
-              caps.video_encoders.forEach(function(enc) {
-                const bg = enc.hw ? '#2ea043' : '#6e7681';
-                const badge = h('span', {
-                  style: 'padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; color: #fff; background:' + bg,
-                  title: enc.name + ' (' + enc.codec + ', ' + (enc.hw ? 'hardware' : 'software') + ')',
-                }, enc.name);
-                badgeWrap.appendChild(badge);
+            if (swEncoders.length > 0) {
+              var swCol = h('div', { style: 'flex:1;text-align:right' });
+              swCol.appendChild(h('div', { style: 'font-weight:500;font-size:13px;margin-bottom:8px;color:var(--text-muted)' }, 'Software Encoders'));
+              var swBadges = h('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end' });
+              swEncoders.forEach(function(enc) {
+                swBadges.appendChild(h('span', {
+                  style: 'padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;color:#fff;background:#6e7681',
+                  title: enc.codec.toUpperCase()
+                }, enc.name));
               });
-              capabilitiesContent.appendChild(badgeWrap);
+              swCol.appendChild(swBadges);
+              columnsWrap.appendChild(swCol);
             }
+            capabilitiesContent.appendChild(columnsWrap);
 
             if (caps.audio_encoders && caps.audio_encoders.length > 0) {
-              const audioLabel = h('label', { style: 'margin: 12px 0 8px 0; display: block; font-weight: 500' }, 'Audio encoders:');
-              capabilitiesContent.appendChild(audioLabel);
-              const audioBadgeWrap = h('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px' });
+              var audioRow = h('div', { style: 'margin-top:12px;text-align:right' });
+              audioRow.appendChild(h('div', { style: 'font-weight:500;font-size:13px;margin-bottom:8px;color:var(--text-muted)' }, 'Audio Encoders'));
+              var audioBadges = h('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end' });
               caps.audio_encoders.forEach(function(enc) {
-                const bg = enc.hw ? '#2ea043' : '#6e7681';
-                const badge = h('span', {
-                  style: 'padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; color: #fff; background:' + bg,
-                  title: enc.name + ' (' + enc.codec + ', ' + (enc.hw ? 'hardware' : 'software') + ')',
-                }, enc.name);
-                audioBadgeWrap.appendChild(badge);
+                audioBadges.appendChild(h('span', {
+                  style: 'padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;color:#fff;background:#6e7681',
+                  title: enc.codec.toUpperCase()
+                }, enc.name));
               });
-              capabilitiesContent.appendChild(audioBadgeWrap);
+              audioRow.appendChild(audioBadges);
+              capabilitiesContent.appendChild(audioRow);
             }
+
+            var encoderSection = h('div', { style: 'margin-top:20px;border-top:1px solid var(--border);padding-top:16px' });
+            encoderSection.appendChild(h('div', { style: 'font-weight:500;font-size:14px;margin-bottom:12px' }, 'Encoder Selection'));
+            encoderSection.appendChild(h('p', { style: 'color:var(--text-muted);font-size:13px;margin:0 0 12px 0' },
+              'Choose which encoder to use for each codec. Hardware encoders are faster and use less CPU.'));
+
+            var selectStyle = 'padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);font-size:14px;min-width:200px';
+            var codecNames = { h264: 'H.264', h265: 'H.265 / HEVC', av1: 'AV1' };
+            var allVideoEncoders = caps.video_encoders || [];
+
+            ['h264', 'h265', 'av1'].forEach(function(codec) {
+              var matching = allVideoEncoders.filter(function(e) { return e.codec === codec; });
+              if (matching.length === 0) return;
+              var currentVal = ((Array.isArray(settings) ? settings : []).find(function(s) { return s.key === 'encoder_' + codec; }) || {}).value || '';
+              var sel = h('select', { style: selectStyle });
+              sel.appendChild(h('option', { value: '' }, 'Auto (fallback chain)'));
+              var hwOpts = matching.filter(function(e) { return e.hw; });
+              var swOpts = matching.filter(function(e) { return !e.hw; });
+              if (hwOpts.length > 0) {
+                var hwGroup = h('optgroup', { label: 'Hardware' });
+                hwOpts.forEach(function(e) { hwGroup.appendChild(h('option', { value: e.name }, e.name + ' (' + e.platform + ')')); });
+                sel.appendChild(hwGroup);
+              }
+              if (swOpts.length > 0) {
+                var swGroup = h('optgroup', { label: 'Software' });
+                swOpts.forEach(function(e) { swGroup.appendChild(h('option', { value: e.name }, e.name)); });
+                sel.appendChild(swGroup);
+              }
+              sel.value = currentVal;
+              sel.onchange = async function() {
+                sel.disabled = true;
+                try {
+                  var payload = {};
+                  payload['encoder_' + codec] = sel.value;
+                  await api.put('/api/settings', payload);
+                  toast.success(codecNames[codec] + ' encoder updated');
+                } catch (err) { toast.error(err.message); sel.value = currentVal; }
+                sel.disabled = false;
+              };
+              encoderSection.appendChild(h('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:10px' },
+                h('label', { style: 'margin:0;min-width:140px;font-size:14px' }, codecNames[codec] + ':'),
+                sel));
+            });
+
+            capabilitiesContent.appendChild(encoderSection);
+
+            var recSection = h('div', { style: 'margin-top:16px;border-top:1px solid var(--border);padding-top:16px' });
+            recSection.appendChild(h('div', { style: 'font-weight:500;font-size:14px;margin-bottom:12px' }, 'Recording Codec'));
+            recSection.appendChild(h('p', { style: 'color:var(--text-muted);font-size:13px;margin:0 0 12px 0' },
+              'Default codec for scheduled recordings. Uses the encoder selected above.'));
+            var currentVideoCodec = ((Array.isArray(settings) ? settings : []).find(function(s) { return s.key === 'default_video_codec'; }) || {}).value || 'copy';
+            var recSelect = h('select', { style: selectStyle },
+              h('option', { value: 'copy' }, 'Passthrough (copy)'),
+              h('option', { value: 'h264' }, 'H.264'),
+              h('option', { value: 'h265' }, 'H.265 / HEVC'),
+              h('option', { value: 'av1' }, 'AV1'));
+            recSelect.value = currentVideoCodec;
+            recSelect.onchange = async function() {
+              recSelect.disabled = true;
+              try {
+                await api.put('/api/settings', { default_video_codec: recSelect.value });
+                toast.success('Recording codec updated');
+              } catch (err) { toast.error(err.message); recSelect.value = currentVideoCodec; }
+              recSelect.disabled = false;
+            };
+            recSection.appendChild(h('div', { style: 'display:flex;align-items:center;gap:10px' },
+              h('label', { style: 'margin:0;min-width:140px;font-size:14px' }, 'Codec:'),
+              recSelect));
+            capabilitiesContent.appendChild(recSection);
+
           } catch (e) {
             capabilitiesContent.innerHTML = '';
             capabilitiesContent.appendChild(h('p', { style: 'color: var(--text-muted); font-size: 13px' }, 'Could not load platform capabilities. The GStreamer capability endpoint may not be available.'));

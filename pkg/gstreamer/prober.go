@@ -48,7 +48,7 @@ func (s *ProbeScheduler) QueueStreams(jobs []ProbeJob) {
 		if existing[j.StreamID] {
 			continue
 		}
-		cached, _ := s.probeCache.GetProbe(media.StreamHash(j.StreamURL))
+		cached, _ := s.probeCache.GetProbe(j.StreamID)
 		if cached != nil {
 			continue
 		}
@@ -134,31 +134,16 @@ func (s *ProbeScheduler) probeOne(ctx context.Context, job ProbeJob) {
 		return
 	}
 
-	hash := media.StreamHash(job.StreamURL)
-	s.probeCache.SaveProbe(hash, result)
-	s.probeCache.SaveProbeByStreamID(job.StreamID, result)
+	s.probeCache.SaveProbe(job.StreamID, result)
 
-	var headerSize int
 	if media.IsHTTPURL(job.StreamURL) {
 		header, err := media.CaptureTPSHeader(probeCtx, job.StreamURL, 5*time.Second)
 		if err == nil && len(header) > 0 {
-			s.probeCache.SaveTSHeader(hash, header)
-			headerSize = len(header)
+			s.probeCache.SaveTSHeader(job.StreamID, header)
 		}
 	}
 
-	vcodec := ""
-	if result.Video != nil {
-		vcodec = result.Video.Codec
-	}
-	acodec := ""
-	if len(result.AudioTracks) > 0 {
-		acodec = result.AudioTracks[0].Codec
-	}
 	s.log.Info().
-		Str("stream", job.StreamID).
-		Str("video", vcodec).
-		Str("audio", acodec).
-		Int("header_bytes", headerSize).
+		Str("url", job.StreamURL).
 		Msg("probed stream")
 }

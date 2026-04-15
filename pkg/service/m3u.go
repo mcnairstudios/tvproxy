@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
@@ -436,7 +434,7 @@ func (s *M3UService) refreshM3UAccount(ctx context.Context, account *models.M3UA
 					Codec: strings.ToLower(entry.TVPACodec),
 				})
 			}
-			m3uSvc.probeCache.SaveProbe(media.StreamHash(entry.URL), probe)
+			m3uSvc.probeCache.SaveProbe(deterministicStreamID(entry.URL), probe)
 		}
 	}
 
@@ -490,18 +488,11 @@ func (s *M3UService) ensureProbeEntries(streams []models.Stream) {
 		if st.URL == "" {
 			continue
 		}
-		existing, _ := s.probeCache.GetProbeByStreamID(st.ID)
+		existing, _ := s.probeCache.GetProbe(st.ID)
 		if existing != nil {
 			continue
 		}
-		hash := media.StreamHash(st.URL)
-		existingByHash, _ := s.probeCache.GetProbe(hash)
-		if existingByHash != nil {
-			s.probeCache.SaveProbeByStreamID(st.ID, existingByHash)
-			continue
-		}
-		skeleton := &media.ProbeResult{}
-		s.probeCache.SaveProbeByStreamID(st.ID, skeleton)
+		s.probeCache.SaveProbe(st.ID, &media.ProbeResult{})
 		created++
 	}
 	if created > 0 {
@@ -561,7 +552,6 @@ func (s *M3UService) RefreshAllAccounts(ctx context.Context) error {
 	return nil
 }
 
-var streamNamespace = uuid.MustParse("f47ac10b-58cc-4372-a567-0e02b2c3d479")
 
 func extractLanguage(name string) (cleanName, lang string) {
 	idx := strings.Index(name, ":")
@@ -590,8 +580,8 @@ func extractLangFromCategory(cat string) string {
 	return ""
 }
 
-func deterministicStreamID(contentHash string) string {
-	return uuid.NewSHA1(streamNamespace, []byte(contentHash)).String()
+func deterministicStreamID(url string) string {
+	return media.StreamID(url)
 }
 
 func (s *M3UService) cacheTypeForAccount(account *models.M3UAccount) string {
@@ -609,11 +599,7 @@ func (s *M3UService) cacheTypeForAccount(account *models.M3UAccount) string {
 }
 
 func computeContentHash(streamURL string) string {
-	u, err := url.Parse(streamURL)
-	if err != nil {
-		return streamURL
-	}
-	return u.Path
+	return streamURL
 }
 
 func extractYearFromName(name string) int {

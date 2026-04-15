@@ -218,6 +218,7 @@ func (s *BoltStreamStore) bulkUpsertBatch(streams []models.Stream, now time.Time
 		nameIdx := tx.Bucket(bktIdxName)
 		tree := tx.Bucket(bktTree)
 
+		added := 0
 		for i := range streams {
 			st := &streams[i]
 			id := []byte(st.ID)
@@ -243,6 +244,7 @@ func (s *BoltStreamStore) bulkUpsertBatch(streams []models.Stream, now time.Time
 				}
 			} else {
 				st.CreatedAt = now
+				added++
 			}
 			st.UpdatedAt = now
 
@@ -252,6 +254,9 @@ func (s *BoltStreamStore) bulkUpsertBatch(streams []models.Stream, now time.Time
 			}
 			main.Put(id, data)
 			s.addIndexEntries(tx, st, acctIdx, satipIdx, hdhrIdx, vodIdx, groupIdx, nameIdx, tree)
+		}
+		if added > 0 {
+			s.updateStreamCount(tx, added)
 		}
 		s.bumpRevision(tx)
 		return nil
@@ -384,6 +389,7 @@ func (s *BoltStreamStore) deleteStaleByIndex(bucket []byte, prefix string, keepI
 			}
 		}
 		if len(deleted) > 0 {
+			s.updateStreamCount(tx, -len(deleted))
 			s.bumpRevision(tx)
 		}
 		return nil
@@ -432,6 +438,7 @@ func (s *BoltStreamStore) deleteOrphanedByIndex(bucket []byte, knownIDs []string
 			}
 		}
 		if len(deleted) > 0 {
+			s.updateStreamCount(tx, -len(deleted))
 			s.bumpRevision(tx)
 		}
 		return nil
@@ -463,6 +470,7 @@ func (s *BoltStreamStore) Delete(_ context.Context, id string) error {
 			s.removeIndexEntries(tx, &st)
 		}
 		main.Delete([]byte(id))
+		s.updateStreamCount(tx, -1)
 		s.bumpRevision(tx)
 		return nil
 	})
@@ -554,22 +562,49 @@ func (s *BoltStreamStore) Save() error {
 func (s *BoltStreamStore) Load() error {
 	s.loadRevision()
 
-	var streamCount, treeCount int
+	var count uint64
+	var hasTree bool
 	s.db.View(func(tx *bolt.Tx) error {
-		streamCount = tx.Bucket(bktStream).Stats().KeyN
-		treeCount = tx.Bucket(bktTree).Stats().KeyN
+		if v := tx.Bucket(bktMeta).Get([]byte("stream_count")); v != nil && len(v) == 8 {
+			count = binary.BigEndian.Uint64(v)
+		}
+		c := tx.Bucket(bktTree).Cursor()
+		k, _ := c.First()
+		hasTree = k != nil
 		return nil
 	})
 
-	if streamCount > 0 && treeCount == 0 {
-		s.log.Info().Int("streams", streamCount).Msg("rebuilding stream indexes")
+	if count > 0 && !hasTree {
+		s.log.Info().Uint64("streams", count).Msg("rebuilding stream indexes")
 		s.rebuildIndexes()
 	}
 
-	if streamCount > 0 {
-		s.log.Info().Int("count", streamCount).Msg("loaded stream bolt store")
+	if count > 0 {
+		s.log.Info().Uint64("count", count).Msg("loaded stream bolt store")
 	}
 	return nil
+}
+
+func (s *BoltStreamStore) updateStreamCount(tx *bolt.Tx, delta int) {
+	meta := tx.Bucket(bktMeta)
+	var count uint64
+	if v := meta.Get([]byte("stream_count")); v != nil && len(v) == 8 {
+		count = binary.BigEndian.Uint64(v)
+	}
+	if delta < 0 && uint64(-delta) > count {
+		count = 0
+	} else {
+		count = uint64(int64(count) + int64(delta))
+	}
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], count)
+	meta.Put([]byte("stream_count"), buf[:])
+}
+
+func (s *BoltStreamStore) setStreamCount(tx *bolt.Tx, count uint64) {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], count)
+	tx.Bucket(bktMeta).Put([]byte("stream_count"), buf[:])
 }
 
 func (s *BoltStreamStore) rebuildIndexes() {
@@ -614,6 +649,10 @@ func (s *BoltStreamStore) rebuildIndexes() {
 			return nil
 		})
 	}
+	s.db.Update(func(tx *bolt.Tx) error {
+		s.setStreamCount(tx, uint64(len(streams)))
+		return nil
+	})
 	s.log.Info().Int("indexed", len(streams)).Msg("index rebuild complete")
 }
 

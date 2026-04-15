@@ -112,9 +112,13 @@ func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, output
 		videoElements = parser
 	} else {
 		vDec := createHWDecoder(srcCodec, hw)
+		videoElements = append(videoElements, vDec...)
+		vconv, _ := gst.NewElement("videoconvert")
+		if vconv != nil {
+			videoElements = append(videoElements, vconv)
+		}
 		vEnc := createHWEncoder(outVideo, hw, 6000)
 		vOutParse := createOutputParser(outVideo)
-		videoElements = append(videoElements, vDec...)
 		videoElements = append(videoElements, vEnc...)
 		videoElements = append(videoElements, vOutParse...)
 	}
@@ -183,18 +187,36 @@ func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, output
 		isVideo := strings.HasPrefix(capsName, "video") || strings.HasPrefix(padName, "video")
 		isAudio := strings.Contains(capsName, "audio") || strings.HasPrefix(padName, "audio")
 
+		linked := false
 		if isVideo {
 			videoOnce.Do(func() {
 				pad.Link(vQueue.GetStaticPad("sink"))
+				linked = true
 			})
 		} else if isAudio {
 			audioOnce.Do(func() {
 				pad.Link(aQueue.GetStaticPad("sink"))
+				linked = true
 			})
+		}
+		if !linked {
+			drainUnlinkedPadNative(pipeline, pad)
 		}
 	})
 
 	return pipeline, nil
+}
+
+func drainUnlinkedPadNative(pipeline *gst.Pipeline, pad *gst.Pad) {
+	fake, _ := gst.NewElement("fakesink")
+	if fake == nil {
+		return
+	}
+	fake.SetProperty("sync", false)
+	fake.SetProperty("async", false)
+	pipeline.Add(fake)
+	fake.SetState(gst.StatePlaying)
+	pad.Link(fake.GetStaticPad("sink"))
 }
 
 func aacEncoder() *gst.Element {
@@ -242,20 +264,16 @@ func buildAudioChain(srcAudio string) []*gst.Element {
 	case "dts":
 		aDec, _ := gst.NewElement("avdec_dca")
 		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+	case "truehd":
+		aDec, _ := gst.NewElement("avdec_truehd")
+		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
 	case "opus":
-		aPass, _ := gst.NewElement("opusparse")
-		if aPass != nil {
-			return []*gst.Element{aPass}
-		}
 		aDec, _ := gst.NewElement("opusdec")
 		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
 	case "flac":
-		aPass, _ := gst.NewElement("flacparse")
-		if aPass == nil {
-			aDec, _ := gst.NewElement("flacdec")
-			return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
-		}
-		return []*gst.Element{aPass}
+		aParse, _ := gst.NewElement("flacparse")
+		aDec, _ := gst.NewElement("flacdec")
+		return []*gst.Element{aParse, aDec, aConv, aResample, aCaps, aEnc, aOutParse}
 	case "vorbis":
 		aDec, _ := gst.NewElement("vorbisdec")
 		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
@@ -367,6 +385,63 @@ func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
 }
 
 func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
+	return createEncoderByName("", codec, hw, bitrate)
+}
+
+func createExplicitEncoder(elementName, codec string, bitrate int) []*gst.Element {
+	return createEncoderByName(elementName, codec, HWNone, bitrate)
+}
+
+func createEncoderByName(elementName, codec string, hw HWAccel, bitrate int) []*gst.Element {
+	if elementName != "" {
+		encoder, _ := gst.NewElement(elementName)
+		if encoder != nil {
+			switch {
+			case strings.HasPrefix(elementName, "va") || strings.HasPrefix(elementName, "vaapi"):
+				encoder.SetProperty("bitrate", uint(bitrate))
+				conv, _ := gst.NewElement("videoconvert")
+				caps, _ := gst.NewElement("capsfilter")
+				caps.SetProperty("caps", gst.NewCapsFromString("video/x-raw,format=NV12"))
+				return []*gst.Element{conv, caps, encoder}
+			case strings.HasPrefix(elementName, "vtenc_"):
+				encoder.SetProperty("bitrate", uint(bitrate))
+				encoder.SetProperty("realtime", true)
+				encoder.SetProperty("allow-frame-reordering", false)
+			case strings.HasPrefix(elementName, "nv"):
+				encoder.SetProperty("bitrate", uint(bitrate))
+			case strings.HasPrefix(elementName, "qsv"):
+				encoder.SetProperty("bitrate", uint(bitrate))
+			case elementName == "svtav1enc":
+				encoder.SetProperty("preset", uint(12))
+				encoder.SetProperty("target-bitrate", uint(bitrate))
+				conv, _ := gst.NewElement("videoconvert")
+				caps, _ := gst.NewElement("capsfilter")
+				caps.SetProperty("caps", gst.NewCapsFromString("video/x-raw,format=I420"))
+				return []*gst.Element{conv, caps, encoder}
+			case elementName == "rav1enc":
+				encoder.SetProperty("speed-preset", uint(10))
+				encoder.SetProperty("low-latency", true)
+				encoder.SetProperty("bitrate", bitrate*1000)
+				conv, _ := gst.NewElement("videoconvert")
+				caps, _ := gst.NewElement("capsfilter")
+				caps.SetProperty("caps", gst.NewCapsFromString("video/x-raw,format=I420"))
+				return []*gst.Element{conv, caps, encoder}
+			case elementName == "x264enc":
+				encoder.SetProperty("speed-preset", 1)
+				encoder.SetProperty("tune", uint(4))
+				encoder.SetProperty("bitrate", uint(bitrate))
+				conv, _ := gst.NewElement("videoconvert")
+				return []*gst.Element{conv, encoder}
+			case elementName == "x265enc":
+				encoder.SetProperty("speed-preset", 1)
+				encoder.SetProperty("bitrate", uint(bitrate))
+				conv, _ := gst.NewElement("videoconvert")
+				return []*gst.Element{conv, encoder}
+			}
+			return []*gst.Element{encoder}
+		}
+	}
+
 	var encoder *gst.Element
 
 	switch hw {
@@ -432,6 +507,10 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 		}
 		if encoder != nil {
 			encoder.SetProperty("bitrate", uint(bitrate))
+			conv, _ := gst.NewElement("videoconvert")
+			caps, _ := gst.NewElement("capsfilter")
+			caps.SetProperty("caps", gst.NewCapsFromString("video/x-raw,format=NV12"))
+			return []*gst.Element{conv, caps, encoder}
 		}
 	case HWNVENC:
 		switch codec {
@@ -498,15 +577,21 @@ func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {
 		switch codec {
 		case "h265":
 			encoder, _ = gst.NewElement("x265enc")
-			encoder.SetProperty("speed-preset", 1)
+			if encoder != nil {
+				encoder.SetProperty("speed-preset", 1)
+			}
 		case "av1":
 			return createSoftwareAV1Encoder(bitrate)
 		default:
 			encoder, _ = gst.NewElement("x264enc")
-			encoder.SetProperty("speed-preset", 1)
-			encoder.SetProperty("tune", uint(4))
+			if encoder != nil {
+				encoder.SetProperty("speed-preset", 1)
+				encoder.SetProperty("tune", uint(4))
+			}
 		}
-		encoder.SetProperty("bitrate", uint(bitrate))
+		if encoder != nil {
+			encoder.SetProperty("bitrate", uint(bitrate))
+		}
 		return []*gst.Element{conv, encoder}
 	}
 
@@ -549,7 +634,6 @@ func createOutputParser(codec string) []*gst.Element {
 	switch codec {
 	case "h265":
 		parser, _ = gst.NewElement("h265parse")
-		parser.SetProperty("config-interval", -1)
 	case "av1":
 		parser, _ = gst.NewElement("av1parse")
 	case "mpeg2video":
@@ -558,6 +642,12 @@ func createOutputParser(codec string) []*gst.Element {
 		parser, _ = gst.NewElement("mpeg4videoparse")
 	default:
 		parser, _ = gst.NewElement("h264parse")
+	}
+	if parser == nil {
+		return []*gst.Element{}
+	}
+	switch codec {
+	case "h265", "h264", "":
 		parser.SetProperty("config-interval", -1)
 	}
 	return []*gst.Element{parser}

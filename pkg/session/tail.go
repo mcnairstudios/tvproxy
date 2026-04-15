@@ -8,17 +8,27 @@ import (
 )
 
 type TailReader struct {
-	file    *os.File
-	ctx     context.Context
-	session *Session
+	file        *os.File
+	ctx         context.Context
+	session     *Session
+	seekVersion uint64
 }
 
 func newTailReader(ctx context.Context, f *os.File, s *Session) *TailReader {
-	return &TailReader{file: f, ctx: ctx, session: s}
+	v := s.SeekVersion()
+	if v > 0 {
+		f.Seek(0, io.SeekEnd)
+	}
+	return &TailReader{file: f, ctx: ctx, session: s, seekVersion: v}
 }
 
 func (r *TailReader) Read(p []byte) (int, error) {
 	for {
+		if v := r.session.SeekVersion(); v != r.seekVersion {
+			r.seekVersion = v
+			r.file.Seek(0, io.SeekEnd)
+		}
+
 		n, err := r.file.Read(p)
 		if n > 0 {
 			return n, nil

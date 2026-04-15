@@ -74,11 +74,22 @@ func (s *SettingsService) ResolveGlobalDefaults(ctx context.Context) (hwaccel, v
 	return hwaccel, videoCodec
 }
 
+func (s *SettingsService) ResolveEncoderElement(ctx context.Context, codec string) string {
+	key := "encoder_" + codec
+	if val, _ := s.Get(ctx, key); val != "" {
+		return val
+	}
+	return ""
+}
+
 
 var apiVisibleKeys = map[string]bool{
 	"vod_profile_selector":       true,
 	"default_hwaccel":            true,
 	"default_video_codec":        true,
+	"encoder_h264":               true,
+	"encoder_h265":               true,
+	"encoder_av1":                true,
 	"transcoder":                 true,
 	"dlna_enabled":               true,
 	"debug_enabled":              true,

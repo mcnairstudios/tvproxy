@@ -16,7 +16,7 @@ COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=1 go build -ldflags="-s -w -X main.buildVersion=$VERSION" -o /tvproxy ./cmd/tvproxy/
 
-FROM gavinmcnair/gstreamer:1.1
+FROM gavinmcnair/gstreamer:1.2
 
 COPY --from=builder /tvproxy /usr/local/bin/tvproxy
 COPY pkg/defaults/clients.json /defaults/clients.json

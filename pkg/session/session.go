@@ -2,6 +2,7 @@ package session
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gavinmcnair/tvproxy/pkg/media"
@@ -38,6 +39,8 @@ type Session struct {
 	wasRecording bool
 	cancel       func()
 	stopPipeline func()
+	seekFunc     func(float64)
+	seekVersion  atomic.Uint64
 	done         chan struct{}
 	doneOnce     sync.Once
 	err          error
@@ -133,6 +136,29 @@ func (s *Session) StopPipeline() {
 	if fn != nil {
 		fn()
 	}
+}
+
+func (s *Session) SetSeekFunc(fn func(float64)) {
+	s.mu.Lock()
+	s.seekFunc = fn
+	s.mu.Unlock()
+}
+
+func (s *Session) Seek(position float64) bool {
+	s.mu.RLock()
+	fn := s.seekFunc
+	s.mu.RUnlock()
+	if fn != nil {
+		s.SeekOffset = position
+		s.seekVersion.Add(1)
+		fn(position)
+		return true
+	}
+	return false
+}
+
+func (s *Session) SeekVersion() uint64 {
+	return s.seekVersion.Load()
 }
 
 func (s *Session) SetProbeInfo(video *media.VideoInfo, audio []media.AudioTrack, duration float64) {

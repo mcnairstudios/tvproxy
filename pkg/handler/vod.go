@@ -152,12 +152,12 @@ func (h *VODHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		"request_headers": clientHeaders(r),
 	}
 	_, _, duration := h.vodService.GetProbeInfo(sessionID)
-	if duration < 30 {
-		if sess := h.vodService.GetSession(sessionID); sess != nil && sess.Duration >= 30 {
+	if duration < 1 {
+		if sess := h.vodService.GetSession(sessionID); sess != nil && sess.Duration > 0 {
 			duration = sess.Duration
 		}
 	}
-	if duration >= 30 {
+	if duration > 0 {
 		resp["duration"] = duration
 	}
 	respondJSON(w, http.StatusOK, resp)
@@ -282,16 +282,18 @@ func (h *VODHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reader, err := h.vodService.TailSession(r.Context(), channelID)
-	if err != nil {
-		h.log.Error().Err(err).Str("channel_id", channelID).Msg("stream failed")
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
+	filePath := sess.FilePath
+	for i := 0; i < 50; i++ {
+		info, err := os.Stat(filePath)
+		if err == nil && info.Size() > 0 {
+			break
+		}
+		if h.vodService.IsDone(channelID) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
-	defer reader.Close()
-
-	setStreamHeaders(w, sess.OutputVideoCodec)
-	streamResponse(w, reader)
+	http.ServeFile(w, r, filePath)
 }
 
 func (h *VODHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {

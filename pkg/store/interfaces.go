@@ -92,13 +92,10 @@ type EPGStore interface {
 }
 
 type ProbeCache interface {
-	GetProbe(streamHash string) (*media.ProbeResult, error)
-	SaveProbe(streamHash string, result *media.ProbeResult) error
-	InvalidateProbe(streamHash string) error
-	GetProbeByStreamID(streamID string) (*media.ProbeResult, error)
-	SaveProbeByStreamID(streamID string, result *media.ProbeResult) error
-	SaveTSHeader(streamHash string, header []byte) error
-	GetTSHeader(streamHash string) ([]byte, error)
+	GetProbe(streamID string) (*media.ProbeResult, error)
+	SaveProbe(streamID string, result *media.ProbeResult) error
+	SaveTSHeader(streamID string, header []byte) error
+	GetTSHeader(streamID string) ([]byte, error)
 }
 
 type RecordingReader interface {

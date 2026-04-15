@@ -12,9 +12,8 @@ import (
 )
 
 var (
-	bucketProbeHash = []byte("probe_hash")
-	bucketProbeID   = []byte("probe_id")
-	bucketTSHeader  = []byte("ts_header")
+	bucketProbe    = []byte("probe")
+	bucketTSHeader = []byte("ts_header")
 )
 
 type BoltProbeCache struct {
@@ -29,8 +28,7 @@ func NewBoltProbeCache(dataDir string) (*BoltProbeCache, error) {
 		return nil, fmt.Errorf("opening probe bolt db: %w", err)
 	}
 	db.Update(func(tx *bolt.Tx) error {
-		tx.CreateBucketIfNotExists(bucketProbeHash)
-		tx.CreateBucketIfNotExists(bucketProbeID)
+		tx.CreateBucketIfNotExists(bucketProbe)
 		tx.CreateBucketIfNotExists(bucketTSHeader)
 		return nil
 	})
@@ -44,11 +42,11 @@ func (c *BoltProbeCache) Close() error {
 	return nil
 }
 
-func (c *BoltProbeCache) GetProbe(streamHash string) (*media.ProbeResult, error) {
+func (c *BoltProbeCache) GetProbe(streamID string) (*media.ProbeResult, error) {
 	var result media.ProbeResult
 	var found bool
 	c.db.View(func(tx *bolt.Tx) error {
-		v := tx.Bucket(bucketProbeHash).Get([]byte(streamHash))
+		v := tx.Bucket(bucketProbe).Get([]byte(streamID))
 		if v == nil {
 			return nil
 		}
@@ -63,7 +61,7 @@ func (c *BoltProbeCache) GetProbe(streamHash string) (*media.ProbeResult, error)
 	return &result, nil
 }
 
-func (c *BoltProbeCache) SaveProbe(streamHash string, result *media.ProbeResult) error {
+func (c *BoltProbeCache) SaveProbe(streamID string, result *media.ProbeResult) error {
 	if result == nil {
 		return nil
 	}
@@ -72,61 +70,23 @@ func (c *BoltProbeCache) SaveProbe(streamHash string, result *media.ProbeResult)
 		return err
 	}
 	return c.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketProbeHash).Put([]byte(streamHash), data)
+		return tx.Bucket(bucketProbe).Put([]byte(streamID), data)
 	})
 }
 
-func (c *BoltProbeCache) InvalidateProbe(streamHash string) error {
-	return c.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketProbeHash).Delete([]byte(streamHash))
-	})
-}
-
-func (c *BoltProbeCache) GetProbeByStreamID(streamID string) (*media.ProbeResult, error) {
-	var result media.ProbeResult
-	var found bool
-	c.db.View(func(tx *bolt.Tx) error {
-		v := tx.Bucket(bucketProbeID).Get([]byte(streamID))
-		if v == nil {
-			return nil
-		}
-		if json.Unmarshal(v, &result) == nil {
-			found = true
-		}
-		return nil
-	})
-	if !found {
-		return nil, nil
-	}
-	return &result, nil
-}
-
-func (c *BoltProbeCache) SaveProbeByStreamID(streamID string, result *media.ProbeResult) error {
-	if result == nil {
-		return nil
-	}
-	data, err := json.Marshal(result)
-	if err != nil {
-		return err
-	}
-	return c.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketProbeID).Put([]byte(streamID), data)
-	})
-}
-
-func (c *BoltProbeCache) SaveTSHeader(streamHash string, header []byte) error {
+func (c *BoltProbeCache) SaveTSHeader(streamID string, header []byte) error {
 	if header == nil {
 		return nil
 	}
 	return c.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketTSHeader).Put([]byte(streamHash), header)
+		return tx.Bucket(bucketTSHeader).Put([]byte(streamID), header)
 	})
 }
 
-func (c *BoltProbeCache) GetTSHeader(streamHash string) ([]byte, error) {
+func (c *BoltProbeCache) GetTSHeader(streamID string) ([]byte, error) {
 	var header []byte
 	c.db.View(func(tx *bolt.Tx) error {
-		v := tx.Bucket(bucketTSHeader).Get([]byte(streamHash))
+		v := tx.Bucket(bucketTSHeader).Get([]byte(streamID))
 		if v != nil {
 			header = make([]byte, len(v))
 			copy(header, v)

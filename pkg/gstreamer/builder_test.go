@@ -68,6 +68,8 @@ func TestNormalizeCodec_AllProbeNames(t *testing.T) {
 		{"vorbis", "vorbis"},
 		{"mpeg4", "mpeg4"},
 		{"MPEG-4 Visual", "mpeg4"},
+		{"truehd", "truehd"},
+		{"mlp", "truehd"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -91,9 +93,10 @@ func TestBuildAudioChain(t *testing.T) {
 		{"AC3", "ac3", 6},
 		{"EAC3", "eac3", 6},
 		{"DTS", "dts", 6},
-		{"Opus", "opus", 1},
+		{"Opus", "opus", 6},
 		{"Vorbis", "vorbis", 6},
-		{"FLAC", "flac", 1},
+		{"FLAC", "flac", 7},
+		{"TrueHD", "truehd", 6},
 		{"Empty (default)", "", 7},
 	}
 	for _, tt := range tests {
@@ -153,7 +156,7 @@ func TestBuild_AudioDelayInsertion(t *testing.T) {
 	if err != nil {
 		t.Skipf("Build error: %v", err)
 	}
-	if path != "mpegts-copy" {
+	if path != "mpegts-transcode" {
 		t.Errorf("path = %q", path)
 	}
 }
@@ -370,15 +373,14 @@ func TestBuild_CopyDetection(t *testing.T) {
 		{"explicit copy", "h264", "copy", true},
 		{"empty output = copy", "h264", "", true},
 		{"default = copy", "h264", "default", true},
-		{"same codec = copy", "h264", "h264", true},
+		{"same codec = transcode", "h264", "h264", false},
 		{"different codec = transcode", "h264", "av1", false},
 		{"h265 to av1 = transcode", "h265", "av1", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			outCodec := NormalizeCodec(tt.outCodec)
-			srcCodec := NormalizeCodec(tt.srcCodec)
-			isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy" || outCodec == srcCodec
+			isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy"
 			if isCopy != tt.wantCopy {
 				t.Errorf("isCopy(src=%q, out=%q) = %v, want %v", tt.srcCodec, tt.outCodec, isCopy, tt.wantCopy)
 			}

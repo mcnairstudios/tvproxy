@@ -195,7 +195,6 @@ type StreamProfile struct {
 	HWAccel       string    `json:"hwaccel"`
 	VideoCodec    string    `json:"video_codec"`
 	Container     string    `json:"container"`
-	Delivery      string    `json:"delivery"`
 	AudioCodec    string    `json:"audio_codec"`
 	Deinterlace   bool      `json:"deinterlace"`
 	FPSMode       string    `json:"fps_mode"`

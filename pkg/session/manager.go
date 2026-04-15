@@ -36,8 +36,9 @@ type StartOpts struct {
 	OutputVideoCodec string
 	OutputAudioCodec string
 	OutputContainer  string
-	OutputHWAccel    string
-	UseWireGuard     bool
+	OutputHWAccel        string
+	VideoEncoderElement  string
+	UseWireGuard         bool
 	KnownDuration    float64
 	SeekOffset       float64
 	OutputDir         string
@@ -229,7 +230,12 @@ func (m *Manager) tailSession(ctx context.Context, s *Session) (io.ReadCloser, e
 		var err error
 		f, err = os.Open(s.FilePath)
 		if err == nil {
-			break
+			info, statErr := f.Stat()
+			if statErr == nil && info.Size() > 0 {
+				break
+			}
+			f.Close()
+			f = nil
 		}
 		if s.isDone() {
 			if procErr := s.getError(); procErr != nil {
@@ -247,7 +253,7 @@ func (m *Manager) tailSession(ctx context.Context, s *Session) (io.ReadCloser, e
 		if procErr := s.getError(); procErr != nil {
 			return nil, fmt.Errorf("transcoder failed: %w", procErr)
 		}
-		return nil, fmt.Errorf("timed out waiting for session file after %d retries", retryCount)
+		return nil, fmt.Errorf("timed out waiting for session data after %d retries", retryCount)
 	}
 
 	return newTailReader(ctx, f, s), nil
@@ -315,13 +321,17 @@ func (m *Manager) IsDone(channelID string) bool {
 }
 
 func (m *Manager) RestartWithSeek(ctx context.Context, channelID string, position float64) {
-	m.mu.Lock()
+	m.mu.RLock()
 	s, ok := m.sessions[channelID]
+	m.mu.RUnlock()
 	if !ok {
-		m.mu.Unlock()
 		return
 	}
+
+	m.log.Info().Str("channel_id", channelID).Float64("position", position).Msg("restarting session with seek")
+	m.mu.Lock()
 	opts := s.startOpts
+	oldFile := s.FilePath
 	s.cancel()
 	delete(m.sessions, channelID)
 	m.mu.Unlock()
@@ -331,11 +341,12 @@ func (m *Manager) RestartWithSeek(ctx context.Context, channelID string, positio
 	case <-time.After(3 * time.Second):
 	}
 
+	if oldFile != "" {
+		os.Remove(oldFile)
+	}
+
 	opts.KnownDuration = s.Duration
 	opts.SeekOffset = position
-
-	m.log.Info().Str("channel_id", channelID).Float64("position", position).Msg("restarting session with seek")
-
 	m.GetOrCreateWithConsumer(ctx, opts, ConsumerViewer)
 }
 
@@ -447,15 +458,8 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 	}
 	s.addConsumer(c)
 
-	if m.probeCache != nil {
-		var cached *media.ProbeResult
-		if opts.StreamID != "" {
-			cached, _ = m.probeCache.GetProbeByStreamID(opts.StreamID)
-		}
-		if cached == nil && opts.StreamURL != "" {
-			cached, _ = m.probeCache.GetProbe(media.StreamHash(opts.StreamURL))
-		}
-		if cached != nil {
+	if m.probeCache != nil && opts.StreamID != "" {
+		if cached, _ := m.probeCache.GetProbe(opts.StreamID); cached != nil {
 			s.SetProbeInfo(cached.Video, cached.AudioTracks, cached.Duration)
 		}
 	}
@@ -540,15 +544,8 @@ func (m *Manager) ProbeURL(ctx context.Context, url string) (*media.ProbeResult,
 }
 
 func (m *Manager) probeAsync(s *Session, streamURL string) {
-	if m.probeCache != nil {
-		var cached *media.ProbeResult
-		if s.StreamID != "" {
-			cached, _ = m.probeCache.GetProbeByStreamID(s.StreamID)
-		}
-		if cached == nil && streamURL != "" {
-			cached, _ = m.probeCache.GetProbe(media.StreamHash(streamURL))
-		}
-		if cached != nil && (cached.Duration > 0 || !media.IsHTTPURL(streamURL)) {
+	if m.probeCache != nil && s.StreamID != "" {
+		if cached, _ := m.probeCache.GetProbe(s.StreamID); cached != nil && (cached.Duration > 0 || !media.IsHTTPURL(streamURL)) {
 			s.SetProbeInfo(cached.Video, cached.AudioTracks, cached.Duration)
 			m.log.Debug().Str("session_id", s.ID).Float64("duration", cached.Duration).Msg("probe cache hit")
 			return
@@ -590,13 +587,8 @@ func (m *Manager) probeAsync(s *Session, streamURL string) {
 
 	s.SetProbeInfo(result.Video, result.AudioTracks, result.Duration)
 
-	if m.probeCache != nil {
-		if s.StreamID != "" {
-			m.probeCache.SaveProbeByStreamID(s.StreamID, result)
-		}
-		if streamURL != "" {
-			m.probeCache.SaveProbe(media.StreamHash(streamURL), result)
-		}
+	if m.probeCache != nil && s.StreamID != "" {
+		m.probeCache.SaveProbe(s.StreamID, result)
 	}
 
 	m.log.Debug().Str("session_id", s.ID).Bool("is_vod", result.IsVOD).Int("audio_tracks", len(result.AudioTracks)).Msg("async probe complete")
@@ -717,6 +709,10 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		userAgent = s.startOpts.HTTPUserAgent
 	}
 
+	if s.startOpts.HLSOutputDir != "" {
+		os.MkdirAll(s.startOpts.HLSOutputDir, 0755)
+	}
+
 	opts := gstreamer.PipelineOpts{
 		InputURL:         s.StreamURL,
 		UserAgent:        userAgent,
@@ -728,8 +724,10 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		OutputAudioCodec: s.startOpts.OutputAudioCodec,
 		OutputBitrate:    0,
 		OutputFormat:     outFormat,
+		VideoEncoderElement: s.startOpts.VideoEncoderElement,
 		HWAccel:          hwAccel,
 		RecordingPath:    s.FilePath,
+		HLSDir:           s.startOpts.HLSOutputDir,
 		IsLive:           probe == nil || probe.Duration == 0,
 
 		Deinterlace:       s.startOpts.Deinterlace,
@@ -747,21 +745,31 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		EncoderBitrateKbps: s.startOpts.EncoderBitrateKbps,
 		SourceWidth:        srcWidth,
 		SourceHeight:       srcHeight,
+		SeekOffset:         s.startOpts.SeekOffset,
 	}
 
 	m.log.Info().
 		Str("session_id", s.ID).
 		Str("channel", s.ChannelName).
+		Str("stream_url", s.StreamURL).
 		Str("src_video", srcVideo).
 		Str("src_audio", srcAudio).
 		Str("container", container).
 		Str("out_video", s.startOpts.OutputVideoCodec).
+		Str("out_audio", s.startOpts.OutputAudioCodec).
 		Str("out_container", s.startOpts.OutputContainer).
 		Str("hw", s.startOpts.OutputHWAccel).
+		Str("encoder", s.startOpts.VideoEncoderElement).
 		Bool("deinterlace", s.startOpts.Deinterlace).
 		Int("audio_delay", s.startOpts.AudioDelayMs).
 		Int("width", srcWidth).
 		Int("height", srcHeight).
+		Float64("seek_offset", s.startOpts.SeekOffset).
+		Float64("known_duration", s.startOpts.KnownDuration).
+		Str("hls_dir", s.startOpts.HLSOutputDir).
+		Str("profile", s.startOpts.ProfileName).
+		Bool("is_live", probe == nil || probe.Duration == 0).
+		Str("output_file", s.FilePath).
 		Msg("building pipeline")
 
 	pipeline, path, err := gstreamer.Build(opts)
@@ -771,20 +779,45 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		return
 	}
 
-	m.log.Info().Str("session_id", s.ID).Str("path", path).Str("output", s.FilePath).Msg("pipeline built, setting to PLAYING")
+	m.log.Info().Str("session_id", s.ID).Str("path", path).Str("output", s.FilePath).Msg("pipeline built")
 	s.SetStopPipeline(func() { pipeline.SetState(gst.StateNull) })
+
 	stateErr := pipeline.SetState(gst.StatePlaying)
 	if stateErr != nil {
 		m.log.Error().Err(stateErr).Str("session_id", s.ID).Msg("pipeline SetState PLAYING failed")
 	} else {
 		m.log.Info().Str("session_id", s.ID).Msg("pipeline PLAYING")
 	}
+
+	if s.startOpts.SeekOffset > 0 && !opts.IsLive {
+		go func() {
+			time.Sleep(3 * time.Second)
+			seekNs := int64(s.startOpts.SeekOffset * 1e9)
+			m.log.Info().Str("session_id", s.ID).Float64("seek_to", s.startOpts.SeekOffset).Msg("deferred seek after preroll")
+			seekEvt := gst.NewSeekEvent(1.0, gst.FormatTime, gst.SeekFlagFlush|gst.SeekFlagKeyUnit, gst.SeekTypeSet, seekNs, gst.SeekTypeNone, 0)
+			pipeline.SendEvent(seekEvt)
+		}()
+	}
+
 	isLive := opts.IsLive
 	go m.pollFileProgress(ctx, s)
 
+	if !isLive {
+		<-ctx.Done()
+		m.log.Info().Str("session_id", s.ID).Msg("VOD session ended (no bus loop)")
+		pipeline.SetState(gst.StateNull)
+		return
+	}
+
 	bus := pipeline.GetBus()
+
+	bufferingPaused := false
+
 pipeloop:
 	for {
+		if ctx.Err() != nil {
+			break pipeloop
+		}
 		msg := bus.TimedPop(gst.ClockTime(500000000))
 		if ctx.Err() != nil {
 			break pipeloop
@@ -812,11 +845,47 @@ pipeloop:
 			s.setError(fmt.Errorf("%s", userErr))
 			s.setLastStderr(gstErr.Error())
 			break pipeloop
+		case gst.MessageBuffering:
+			pct := msg.ParseBuffering()
+			m.log.Debug().Str("session_id", s.ID).Int("percent", pct).Msg("buffering")
+			if pct >= 100 && bufferingPaused {
+				pipeline.SetState(gst.StatePlaying)
+				bufferingPaused = false
+				m.log.Info().Str("session_id", s.ID).Msg("buffering complete: resumed pipeline")
+			}
 		}
 	}
 
 	pipeline.SetState(gst.StateNull)
 	m.log.Info().Str("session_id", s.ID).Msg("pipeline stopped")
+}
+
+func (m *Manager) waitForAsyncDone(bus *gst.Bus, ctx context.Context, sessionID string, timeout time.Duration) bool {
+	deadline := time.After(timeout)
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-deadline:
+			return false
+		default:
+		}
+		msg := bus.TimedPop(gst.ClockTime(200000000))
+		if msg == nil {
+			continue
+		}
+		switch msg.Type() {
+		case gst.MessageAsyncDone:
+			return true
+		case gst.MessageError:
+			gstErr := msg.ParseError()
+			m.log.Error().Err(gstErr).Str("session_id", sessionID).Msg("error while waiting for async done")
+			return false
+		case gst.MessageBuffering:
+			pct := msg.ParseBuffering()
+			m.log.Debug().Str("session_id", sessionID).Int("percent", pct).Msg("buffering during preroll")
+		}
+	}
 }
 
 func friendlyGstError(err string) string {
@@ -843,18 +912,10 @@ func isValidProbe(p *media.ProbeResult) bool {
 }
 
 func (m *Manager) ensureProbe(ctx context.Context, opts StartOpts) *media.ProbeResult {
-	if m.probeCache != nil {
-		if opts.StreamID != "" {
-			if cached, _ := m.probeCache.GetProbeByStreamID(opts.StreamID); isValidProbe(cached) {
-				m.log.Debug().Str("stream_id", opts.StreamID).Float64("duration", cached.Duration).Msg("probe cache hit (by ID)")
-				return cached
-			}
-		}
-		if opts.StreamURL != "" {
-			if cached, _ := m.probeCache.GetProbe(media.StreamHash(opts.StreamURL)); isValidProbe(cached) {
-				m.log.Debug().Str("stream_url", opts.StreamURL).Float64("duration", cached.Duration).Msg("probe cache hit (by URL)")
-				return cached
-			}
+	if m.probeCache != nil && opts.StreamID != "" {
+		if cached, _ := m.probeCache.GetProbe(opts.StreamID); isValidProbe(cached) {
+			m.log.Debug().Str("stream_id", opts.StreamID).Float64("duration", cached.Duration).Msg("probe cache hit")
+			return cached
 		}
 	}
 
@@ -868,11 +929,8 @@ func (m *Manager) ensureProbe(ctx context.Context, opts StartOpts) *media.ProbeR
 		return nil
 	}
 
-	if m.probeCache != nil {
-		if opts.StreamID != "" {
-			m.probeCache.SaveProbeByStreamID(opts.StreamID, result)
-		}
-		m.probeCache.SaveProbe(media.StreamHash(opts.StreamURL), result)
+	if m.probeCache != nil && opts.StreamID != "" {
+		m.probeCache.SaveProbe(opts.StreamID, result)
 	}
 
 	videoCodec := ""

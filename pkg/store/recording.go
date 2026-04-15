@@ -99,11 +99,11 @@ func (s *RecordingStoreImpl) rebuildIndex() {
 	}
 }
 
-func (s *RecordingStoreImpl) GetProbe(streamHash string) (*media.ProbeResult, error) {
-	if err := validatePathComponent(streamHash); err != nil {
-		return nil, fmt.Errorf("invalid stream hash: %w", err)
+func (s *RecordingStoreImpl) GetProbe(streamID string) (*media.ProbeResult, error) {
+	if err := validatePathComponent(streamID); err != nil {
+		return nil, fmt.Errorf("invalid stream ID: %w", err)
 	}
-	path := filepath.Join(s.rootDir, streamHash, "probe.json")
+	path := filepath.Join(s.rootDir, streamID, "probe.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -121,9 +121,12 @@ func (s *RecordingStoreImpl) GetProbe(streamHash string) (*media.ProbeResult, er
 	return &result, nil
 }
 
-func (s *RecordingStoreImpl) SaveProbeByStreamID(streamID string, result *media.ProbeResult) error {
+func (s *RecordingStoreImpl) SaveProbe(streamID string, result *media.ProbeResult) error {
 	if err := validatePathComponent(streamID); err != nil {
 		return fmt.Errorf("invalid stream ID: %w", err)
+	}
+	if !isUsefulProbe(result) {
+		return nil
 	}
 	dir := filepath.Join(s.rootDir, streamID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -136,57 +139,8 @@ func (s *RecordingStoreImpl) SaveProbeByStreamID(streamID string, result *media.
 	return os.WriteFile(filepath.Join(dir, "probe.json"), data, 0644)
 }
 
-func (s *RecordingStoreImpl) GetProbeByStreamID(streamID string) (*media.ProbeResult, error) {
-	if err := validatePathComponent(streamID); err != nil {
-		return nil, err
-	}
-	path := filepath.Join(s.rootDir, streamID, "probe.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var result media.ProbeResult
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func (s *RecordingStoreImpl) SaveProbe(streamHash string, result *media.ProbeResult) error {
-	if err := validatePathComponent(streamHash); err != nil {
-		return fmt.Errorf("invalid stream hash: %w", err)
-	}
-	if !isUsefulProbe(result) {
-		return nil
-	}
-
-	dir := filepath.Join(s.rootDir, streamHash)
-	path := filepath.Join(dir, "probe.json")
-
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
-}
-
-func (s *RecordingStoreImpl) InvalidateProbe(streamHash string) error {
-	if err := validatePathComponent(streamHash); err != nil {
-		return fmt.Errorf("invalid stream hash: %w", err)
-	}
-	path := filepath.Join(s.rootDir, streamHash, "probe.json")
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
-}
-
-func (s *RecordingStoreImpl) SaveTSHeader(streamHash string, header []byte) error { return nil }
-func (s *RecordingStoreImpl) GetTSHeader(streamHash string) ([]byte, error)     { return nil, nil }
+func (s *RecordingStoreImpl) SaveTSHeader(streamID string, header []byte) error { return nil }
+func (s *RecordingStoreImpl) GetTSHeader(streamID string) ([]byte, error)     { return nil, nil }
 
 func isUsefulProbe(result *media.ProbeResult) bool {
 	if result == nil {

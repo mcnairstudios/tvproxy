@@ -29,9 +29,91 @@ curl http://localhost:8080/vod/{channelID}/status
 - SAT>IP AV1 transcode: stable 30s+ runs, 4000+ kbps
 - VOD H.265→AV1 transcode: sub-10s first byte, 5000+ kbps
 - HDHR H.264 copy: 3.3s first byte
+
+### Codec Matrix (tested 2026-04-13)
+All combinations tested with real tvproxy-streams content:
+
+| Source Video | Audio | Copy | →H264 VT | →H265 VT | →AV1 SW |
+|-------------|-------|------|----------|----------|---------|
+| H.264 | AAC | ✓ | n/a | ✓ | ✓ |
+| H.264 | AC3 | ✓ | n/a | ✓ | ✓ |
+| H.264 | DTS | ✓ | n/a | ✓ | ✓ |
+| H.264 | EAC3 | ✓ | n/a | ✓ | untested |
+| H.264 | TrueHD | ✓ | n/a | untested | untested |
+| HEVC | AAC | ✓ | ✓ | n/a | untested |
+| HEVC | AC3 | ✓ | ✓ | n/a | untested |
+| HEVC | DTS | ✓ | ✓ | n/a | untested |
+| HEVC | EAC3 | ✓ | ✓ | n/a | ✓ |
+| HEVC | FLAC | ✓ | ✓ | n/a | untested |
+| HEVC | TrueHD | ✓ | mac-fail* | n/a | slow** |
+
+*10-bit HDR HEVC vtdec fails on macOS; VA-API on A380 should work
+**4K AV1 software encoding on ARM too slow for real-time; A380 HW will handle it
+
+### Fixes Applied This Session
+- Fakesink drain for unlinked demux pads (subtitles, extra audio tracks)
+- TrueHD audio decode chain (avdec_truehd)
+- FLAC audio: flacparse + flacdec (was passthrough, broke mp4 mux)
+- Opus audio: always decode (was passthrough, broke mp4 mux)
+- videoconvert between decoder and encoder for 10-bit format conversion
+- Nil dereference guards in createOutputParser and software encoder paths
+- AVI demuxer support in container switch
+- BuildNativeFromOpts: added fakesink drain for unlinked pads
+- MPEG-TS copy mode: AAC passthrough fix (was wrongly using LATM decoder)
+- Unified stream ID: media.StreamID(url) replaces dual StreamHash + ByStreamID
+- Encoder selection: per-codec settings (encoder_h264/h265/av1) instead of hwaccel guess
 - VOD copy: 1.1s first byte
 - All 13 test packages pass, 103 gstreamer-specific test cases
-- Dockerfile uses gavinmcnair/gstreamer:1.1 (GStreamer 1.24.12)
+- Dockerfile uses gavinmcnair/gstreamer:1.2 (GStreamer 1.28.2)
+- hlscmafsink for live TV (fMP4/CMAF HLS segments, hls.js in browser)
+- http.ServeFile for VOD (Range requests, browser-native seeking within transcoded portion)
+- Delivery mode automatic: live=HLS, VOD=stream (removed from profile)
+- Delivery field removed from StreamProfile model
+- VA-API encoders force NV12 (8-bit) via capsfilter (fixes 10-bit HDR on A380 256MB BAR)
+- Bolt stream store: count tracked via metadata key, no Stats() iteration on load
+
+## Next: decodebin3 Integration (VOD Seeking)
+
+**Problem:** `souphttpsrc → matroskademux` can't seek via GStreamer API. `SeekSimple` fails with
+`gst_segment_do_seek: assertion 'segment->format == format' failed`. The demuxer operates in
+BYTE format (push mode from HTTP) but the seek is in TIME format. Confirmed in /tmp prototypes.
+
+**Solution:** Replace manual `souphttpsrc → matroskademux` with `decodebin3` for the VOD path.
+`decodebin3` (and `playbin3`) handle HTTP buffering, byte-to-time seek conversion, and demuxing
+internally. This is how Plex/Jellyfin do it.
+
+**Architecture:**
+```
+VOD path (decodebin3):
+  decodebin3(uri=http://...) → decoded video pad → encode chain → mp4mux/hlscmafsink
+                              → decoded audio pad → AAC encode → mp4mux/hlscmafsink
+
+Live TV path (unchanged):
+  souphttpsrc/rtspsrc → tsdemux → encode chain → hlscmafsink
+```
+
+**Professional seek flow (from Gemini research):**
+1. Set pipeline to PAUSED
+2. Attach blocking pad probe on demuxer output
+3. On first buffer (preroll complete), send `gst_element_seek` with FLUSH+ACCURATE
+4. Wait for `GST_MESSAGE_ASYNC_DONE` on bus
+5. Set pipeline to PLAYING
+
+**Buffering with hysteresis:**
+- Listen for `GST_MESSAGE_BUFFERING` on bus (0-100%)
+- Pause at <5%, resume at 100%
+- Show buffering % in UI
+- Set `buffer-duration` to 20-30s for 4K content
+
+**Audio track selection:**
+- `decodebin3` exposes `GstStreamCollection` with all tracks (language, codec, channels)
+- Switch tracks via `current-audio` property or Stream API
+- No pipeline rebuild needed
+
+**Files to change:**
+- `pkg/gstreamer/builder.go` — new `buildVODDecodebin3` function
+- `pkg/session/manager.go` — bus message handling (ASYNC_DONE, BUFFERING, ERROR)
+- `web/dist/app.js` — buffering % display, audio track selector
 - NVENC, VAAPI LP, QSV, VideoToolbox encoder chains with fallbacks
 - Probe-driven pipeline: ensureProbe() blocks if no cache, source profile as override
 - User-friendly error messages, bitrate/file_size in status endpoint

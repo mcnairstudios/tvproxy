@@ -36,12 +36,13 @@ type PipelineOpts struct {
 	AudioCodec    string // source audio codec from probe
 	Container     string // source container from probe
 
-	OutputVideoCodec string // target: "copy", "h264", "h265", "av1"
-	OutputAudioCodec string // target: "copy", "aac"
-	OutputBitrate    int    // kbps, 0 = auto
-	OutputFormat     OutputFormat
+	OutputVideoCodec    string // target: "copy", "h264", "h265", "av1"
+	OutputAudioCodec    string // target: "copy", "aac"
+	OutputBitrate       int    // kbps, 0 = auto
+	OutputFormat        OutputFormat
 
-	HWAccel HWAccel
+	VideoEncoderElement string // explicit GStreamer encoder element name (e.g. "vaav1lpenc", "x264enc")
+	HWAccel             HWAccel
 
 	HLSDir          string
 	HLSSegmentTime  int
@@ -67,6 +68,7 @@ type PipelineOpts struct {
 	SourceHeight       int
 
 	DualOutput   bool
+	SeekOffset   float64
 }
 
 type Pipeline struct {
@@ -464,6 +466,8 @@ func NormalizeCodec(codec string) string {
 		return "eac3"
 	case c == "dts" || c == "dca" || c == "dts-hd" || strings.Contains(c, "dts"):
 		return "dts"
+	case c == "truehd" || c == "mlp" || strings.Contains(c, "truehd"):
+		return "truehd"
 	case c == "opus" || c == "libopus":
 		return "opus"
 	case c == "flac":
