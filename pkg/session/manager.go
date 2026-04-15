@@ -119,6 +119,12 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 	if s.HLSOutputDir != "" {
 		os.RemoveAll(s.HLSOutputDir)
 	}
+	if s.VideoStore != nil {
+		s.VideoStore.Close()
+	}
+	if s.AudioStore != nil {
+		s.AudioStore.Close()
+	}
 	m.log.Info().Str("channel_id", channelID).Str("session_id", s.ID).Msg("replaced dead session")
 }
 
@@ -199,6 +205,12 @@ func (m *Manager) stopAndCleanup(channelID string, s *Session) {
 	}
 	if s.HLSOutputDir != "" {
 		os.RemoveAll(s.HLSOutputDir)
+	}
+	if s.VideoStore != nil {
+		s.VideoStore.Close()
+	}
+	if s.AudioStore != nil {
+		s.AudioStore.Close()
 	}
 
 	m.log.Info().

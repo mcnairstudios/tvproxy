@@ -721,6 +721,10 @@ func (h *VODHandler) MSEInit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data, gen := store.GetInit()
+	if data == nil {
+		respondError(w, http.StatusGone, "session closed")
+		return
+	}
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("X-Gen", strconv.FormatInt(gen, 10))
 	w.Header().Set("Access-Control-Allow-Origin", "*")

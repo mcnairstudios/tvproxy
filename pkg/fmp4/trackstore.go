@@ -17,9 +17,10 @@ import (
 const SegmentDuration = 2 * time.Second
 
 type TrackStore struct {
-	mu   sync.Mutex
-	cond *sync.Cond
-	gen  int64
+	mu     sync.Mutex
+	cond   *sync.Cond
+	closed bool
+	gen    int64
 
 	initSeg  []byte
 	segments [][]byte
@@ -75,6 +76,9 @@ func (ts *TrackStore) Reset(gen int64, seekPosNs int64) {
 }
 
 func (ts *TrackStore) Close() {
+	ts.mu.Lock()
+	ts.closed = true
+	ts.mu.Unlock()
 	ts.cond.Broadcast()
 }
 
@@ -278,7 +282,7 @@ func (ts *TrackStore) PushAudioFrame(data []byte, duration uint32) {
 func (ts *TrackStore) GetInit() ([]byte, int64) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	for ts.initSeg == nil {
+	for ts.initSeg == nil && !ts.closed {
 		ts.cond.Wait()
 	}
 	return ts.initSeg, ts.gen
@@ -288,7 +292,7 @@ func (ts *TrackStore) GetSegment(gen int64, seq int) ([]byte, bool) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	for {
-		if ts.gen != gen {
+		if ts.closed || ts.gen != gen {
 			return nil, false
 		}
 		if seq < len(ts.segments) {
