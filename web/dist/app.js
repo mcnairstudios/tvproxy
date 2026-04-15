@@ -3933,10 +3933,7 @@
       if (signalInterval) { clearInterval(signalInterval); signalInterval = null; }
       if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
       mseCleanup();
-      if (hlsInstance) {
-        if (hlsInstance && hlsInstance.destroy) hlsInstance.destroy();
-        hlsInstance = null;
-      } else if (videoEl) {
+      if (videoEl) {
         videoEl.pause();
         videoEl.removeAttribute('src');
         videoEl.load();
@@ -4072,7 +4069,9 @@
         vidEl.src = URL.createObjectURL(mseMediaSource);
 
         mseMediaSource.addEventListener('sourceopen', function() {
-          mseMediaSource.duration = mseDuration;
+          if (mseDuration > 0) {
+            mseMediaSource.duration = mseDuration;
+          }
           mseVideoSb = mseMediaSource.addSourceBuffer(videoMime);
           mseAudioSb = mseMediaSource.addSourceBuffer(audioMime);
           mseVideoSb.mode = 'segments';
@@ -4429,8 +4428,6 @@
       buildAudioMenu(probeData.audio_tracks);
     }
 
-    var hlsInstance = null;
-
     function waitForStream() {
       if (!dvr) return Promise.resolve();
       statusEl.style.color = '#ffa726';
@@ -4538,22 +4535,7 @@
         startMSEPlayback(videoEl, dvr, 0);
         return;
       }
-      if (hlsInstance && dvr) {
-        statusEl.style.color = '#ffa726';
-        statusEl.textContent = 'Reconnecting...';
-        waitForStream().then(function() {
-          return fetch(streamSrc).then(function() {}).catch(function() {});
-        }).then(function() {
-          if (hlsInstance && hlsInstance.loadSource) { hlsInstance.loadSource(streamSrc); hlsInstance.attachMedia(videoEl); }
-          videoEl.play().catch(function() {});
-        }).catch(function() {
-          statusEl.style.color = '#ff6b6b';
-          statusEl.textContent = 'Reconnect failed';
-        });
-      } else if (hlsInstance) {
-        if (hlsInstance && hlsInstance.loadSource) { hlsInstance.loadSource(streamSrc); hlsInstance.attachMedia(videoEl); }
-        videoEl.play().catch(function() {});
-      } else if (videoEl) {
+      if (videoEl) {
         videoEl.src = streamSrc;
         videoEl.play().catch(function() {});
       }
