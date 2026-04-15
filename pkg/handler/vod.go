@@ -647,17 +647,22 @@ func (h *VODHandler) MSEInit(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "sessionID")
 	track := chi.URLParam(r, "track")
 
-	sess := h.vodService.GetSession(channelID)
-	if sess == nil {
-		respondError(w, http.StatusNotFound, "session not found")
-		return
-	}
-
 	var store *fmp4.TrackStore
-	if track == "video" {
-		store = sess.VideoStore
-	} else {
-		store = sess.AudioStore
+	for i := 0; i < 50; i++ {
+		sess := h.vodService.GetSession(channelID)
+		if sess == nil {
+			respondError(w, http.StatusNotFound, "session not found")
+			return
+		}
+		if track == "video" {
+			store = sess.VideoStore
+		} else {
+			store = sess.AudioStore
+		}
+		if store != nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 	if store == nil {
 		respondError(w, http.StatusNotFound, "no MSE store for track")
@@ -680,17 +685,22 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "sessionID")
 	track := chi.URLParam(r, "track")
 
-	sess := h.vodService.GetSession(channelID)
-	if sess == nil {
-		respondError(w, http.StatusNotFound, "session not found")
-		return
-	}
-
 	var store *fmp4.TrackStore
-	if track == "video" {
-		store = sess.VideoStore
-	} else {
-		store = sess.AudioStore
+	for i := 0; i < 25; i++ {
+		sess := h.vodService.GetSession(channelID)
+		if sess == nil {
+			respondError(w, http.StatusNotFound, "session not found")
+			return
+		}
+		if track == "video" {
+			store = sess.VideoStore
+		} else {
+			store = sess.AudioStore
+		}
+		if store != nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 	if store == nil {
 		respondError(w, http.StatusNotFound, "no MSE store")

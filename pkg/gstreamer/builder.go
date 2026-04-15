@@ -752,13 +752,13 @@ func drainUnlinkedPad(pipeline *gst.Pipeline, pad *gst.Pad) {
 func scaledBitrate(width int) int {
 	switch {
 	case width >= 3840:
-		return 8000
+		return 10000
 	case width >= 2560:
-		return 6000
+		return 8000
 	case width >= 1920:
-		return 4000
+		return 5000
 	case width >= 1280:
-		return 2500
+		return 3000
 	default:
 		return 1500
 	}

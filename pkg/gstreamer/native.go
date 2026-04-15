@@ -480,6 +480,7 @@ func createEncoderByName(elementName, codec string, hw HWAccel, bitrate int) []*
 			encoder.SetProperty("bitrate", uint(bitrate))
 			encoder.SetProperty("realtime", true)
 			encoder.SetProperty("allow-frame-reordering", false)
+			encoder.SetProperty("max-keyframe-interval", 60)
 		}
 	case HWVAAPI:
 		switch codec {
