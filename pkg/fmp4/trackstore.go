@@ -114,6 +114,9 @@ func (ts *TrackStore) buildInitSegment() {
 					return
 				}
 			}
+		default:
+			log.Printf("[%s] unsupported video codec for fMP4: %s (only h264/h265 supported)", ts.trackName(), ts.videoCodec)
+			return
 		}
 	} else {
 		trak := init.AddEmptyTrack(ts.timescale, "audio", "und")
