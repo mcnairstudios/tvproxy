@@ -43,7 +43,6 @@ type StartOpts struct {
 	KnownDuration    float64
 	SeekOffset       float64
 	OutputDir         string
-	HLSOutputDir      string
 	SkipProbe         bool
 	MetadataOnly      bool
 
@@ -116,9 +115,6 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 	s.cancel()
 	<-s.done
 	os.RemoveAll(s.TempDir)
-	if s.HLSOutputDir != "" {
-		os.RemoveAll(s.HLSOutputDir)
-	}
 	if s.VideoStore != nil {
 		s.VideoStore.Close()
 	}
@@ -202,9 +198,6 @@ func (m *Manager) stopAndCleanup(channelID string, s *Session) {
 
 	if !s.wasRecording {
 		os.RemoveAll(s.TempDir)
-	}
-	if s.HLSOutputDir != "" {
-		os.RemoveAll(s.HLSOutputDir)
 	}
 	if s.VideoStore != nil {
 		s.VideoStore.Close()
@@ -439,7 +432,6 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 		OutputContainer:  opts.OutputContainer,
 		OutputHWAccel:    opts.OutputHWAccel,
 		UseWireGuard:     opts.UseWireGuard,
-		HLSOutputDir:    opts.HLSOutputDir,
 		Duration:         opts.KnownDuration,
 		SeekOffset:       opts.SeekOffset,
 		FilePath:         filePath,
@@ -485,7 +477,7 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 	m.sessions[opts.ChannelID] = s
 	m.mu.Unlock()
 
-	if opts.HLSOutputDir == "" && !opts.SkipProbe {
+	if !opts.SkipProbe {
 		go m.probeAsync(s, opts.StreamURL)
 	}
 
@@ -727,10 +719,6 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		userAgent = s.startOpts.HTTPUserAgent
 	}
 
-	if s.startOpts.HLSOutputDir != "" {
-		os.MkdirAll(s.startOpts.HLSOutputDir, 0755)
-	}
-
 	opts := gstreamer.PipelineOpts{
 		InputURL:         s.StreamURL,
 		UserAgent:        userAgent,
@@ -745,7 +733,6 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		VideoEncoderElement: s.startOpts.VideoEncoderElement,
 		HWAccel:          hwAccel,
 		RecordingPath:    s.FilePath,
-		HLSDir:           s.startOpts.HLSOutputDir,
 		IsLive:           probe == nil || probe.Duration == 0,
 
 		Deinterlace:       s.startOpts.Deinterlace,
@@ -784,7 +771,6 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Int("height", srcHeight).
 		Float64("seek_offset", s.startOpts.SeekOffset).
 		Float64("known_duration", s.startOpts.KnownDuration).
-		Str("hls_dir", s.startOpts.HLSOutputDir).
 		Str("profile", s.startOpts.ProfileName).
 		Bool("is_live", probe == nil || probe.Duration == 0).
 		Str("output_file", s.FilePath).

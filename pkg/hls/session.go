@@ -100,9 +100,8 @@ func (s *Session) StartTranscode(ctx context.Context, startNumber int, startTime
 			AudioCodec:       "aac_latm",
 			OutputVideoCodec: outVideo,
 			OutputAudioCodec: "aac",
-			OutputFormat:     gstreamer.OutputHLS,
-			HLSDir:           s.OutputDir,
-			HLSSegmentTime:   s.SegmentLength,
+			OutputFormat:     gstreamer.OutputMP4,
+			RecordingPath:    filepath.Join(s.OutputDir, "output.mp4"),
 			HWAccel:          gstreamer.HWAccel(s.Profile.HWAccel),
 		})
 		command = pipeline.Cmd

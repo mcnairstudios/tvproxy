@@ -1,7 +1,6 @@
 package service
 
 import (
-	"path/filepath"
 	"strings"
 
 	"github.com/gavinmcnair/tvproxy/pkg/models"
@@ -22,7 +21,6 @@ type SessionStrategy struct {
 
 	MetadataOnly      bool
 	SkipProbe         bool
-	HLSOutputDir      string
 
 	VideoCodec string
 	AudioCodec string
@@ -63,7 +61,7 @@ func classifyStream(in StrategyInput) StreamCategory {
 	return CategoryLiveIPTV
 }
 
-func resolveSessionStrategy(in StrategyInput, out StrategyOutput, outputDir string) SessionStrategy {
+func resolveSessionStrategy(in StrategyInput, out StrategyOutput) SessionStrategy {
 	cat := classifyStream(in)
 
 	var s SessionStrategy
@@ -76,15 +74,6 @@ func resolveSessionStrategy(in StrategyInput, out StrategyOutput, outputDir stri
 		s = vodLocalStrategy(in, out)
 	default:
 		s = vodLocalStrategy(in, out)
-	}
-
-	isLive := cat == CategoryLiveIPTV || cat == CategoryLiveSatIP
-	if isLive {
-		channelID := in.StreamID
-		if channelID == "" {
-			channelID = "unknown"
-		}
-		s.HLSOutputDir = filepath.Join(outputDir, channelID, "hls")
 	}
 
 	return s

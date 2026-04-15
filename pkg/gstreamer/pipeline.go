@@ -12,7 +12,6 @@ import (
 type OutputFormat string
 
 const (
-	OutputHLS    OutputFormat = "hls"
 	OutputMPEGTS OutputFormat = "mpegts"
 	OutputMP4    OutputFormat = "mp4"
 )
@@ -44,8 +43,6 @@ type PipelineOpts struct {
 	VideoEncoderElement string // explicit GStreamer encoder element name (e.g. "vaav1lpenc", "x264enc")
 	HWAccel             HWAccel
 
-	HLSDir          string
-	HLSSegmentTime  int
 	RecordingPath   string
 
 	UserAgent    string

@@ -47,10 +47,9 @@ func TestBuildNativePipeline_Transcode(t *testing.T) {
 		OutputVideoCodec: "h264",
 		OutputAudioCodec: "aac",
 		OutputBitrate:    4000,
-		OutputFormat:     OutputHLS,
+		OutputFormat:     OutputMP4,
 		HWAccel:          HWVideoToolbox,
-		HLSDir:           "/tmp/hls",
-		HLSSegmentTime:   6,
+		RecordingPath:    "/tmp/test_transcode.mp4",
 	})
 	if err != nil {
 		t.Fatalf("failed to build pipeline: %v", err)

@@ -4124,6 +4124,17 @@
     videoEl.style.cssText = 'width:100%;height:100%;display:block;';
     playerWrap.appendChild(videoEl);
 
+    var spinnerEl = document.createElement('div');
+    spinnerEl.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:none;z-index:10;';
+    spinnerEl.innerHTML = '<div style="width:48px;height:48px;border:4px solid rgba(255,255,255,0.3);border-top-color:#4fc3f7;border-radius:50%;animation:tvpspin 0.8s linear infinite"></div>';
+    var spinStyle = document.createElement('style');
+    spinStyle.textContent = '@keyframes tvpspin { to { transform: rotate(360deg); } }';
+    playerWrap.appendChild(spinStyle);
+    playerWrap.appendChild(spinnerEl);
+    videoEl.addEventListener('waiting', function() { spinnerEl.style.display = 'block'; });
+    videoEl.addEventListener('playing', function() { spinnerEl.style.display = 'none'; });
+    videoEl.addEventListener('seeked', function() { spinnerEl.style.display = 'none'; });
+
     var recordBtn = document.createElement('button');
     recordBtn.title = 'Record';
     recordBtn.textContent = '\u23FA';
@@ -4450,8 +4461,7 @@
     }).catch(function() {}) : Promise.resolve();
 
     var isMSE = dvr && dvr.delivery === 'mse';
-    var isHLS = !isMSE && streamSrc.indexOf('.m3u8') >= 0;
-    var streamReady = (isHLS || isMSE) ? Promise.resolve() : waitForStream();
+    var streamReady = isMSE ? Promise.resolve() : waitForStream();
 
     Promise.all([streamReady, epgReady]).then(function() {
       statusEl.style.color = '#ffa726';
@@ -4459,40 +4469,6 @@
 
       if (isMSE) {
         startMSEPlayback(videoEl, dvr, 0);
-      } else if (isHLS && typeof Hls !== 'undefined' && Hls.isSupported()) {
-        var hlsPlayer = new Hls({
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
-          startLevel: -1,
-          debug: false,
-          fragLoadingTimeOut: 30000,
-          manifestLoadingTimeOut: 30000,
-          levelLoadingTimeOut: 30000
-        });
-        hlsInstance = hlsPlayer;
-        hlsPlayer.loadSource(streamSrc);
-        hlsPlayer.attachMedia(videoEl);
-        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, function() {
-          videoEl.play().catch(function() {});
-        });
-        hlsPlayer.on(Hls.Events.ERROR, function(event, data) {
-          console.error('HLS ERROR:', data);
-          if (data.fatal) {
-            statusEl.style.color = '#ff6b6b';
-            statusEl.textContent = 'Errored';
-            statusEl.title = data.details || 'HLS error';
-            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-              hlsPlayer.startLoad();
-            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-              hlsPlayer.recoverMediaError();
-            }
-          }
-        });
-      } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-        videoEl.src = streamSrc;
-        videoEl.addEventListener('loadedmetadata', function() {
-          videoEl.play().catch(function() {});
-        });
       } else {
         videoEl.src = streamSrc;
         videoEl.play().catch(function() {});

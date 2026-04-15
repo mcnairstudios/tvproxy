@@ -264,7 +264,6 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 			HWAccel:    sa.OutputHWAccel,
 			Container:  sa.Container,
 		},
-		s.config.VODOutputDir,
 	)
 
 	startOpts := session.StartOpts{
@@ -280,7 +279,6 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		OutputHWAccel:    strategy.HWAccel,
 		UseWireGuard:     useWG,
 		OutputDir:        s.config.VODOutputDir,
-		HLSOutputDir:     strategy.HLSOutputDir,
 		SkipProbe:         strategy.SkipProbe,
 		MetadataOnly:     strategy.MetadataOnly,
 	}
@@ -349,7 +347,6 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 			HWAccel:    sa.OutputHWAccel,
 			Container:  sa.Container,
 		},
-		s.config.VODOutputDir,
 	)
 
 	startOpts2 := session.StartOpts{
@@ -365,7 +362,6 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		OutputHWAccel:    strategy.HWAccel,
 		UseWireGuard:     stream.UseWireGuard,
 		OutputDir:        s.config.VODOutputDir,
-		HLSOutputDir:     strategy.HLSOutputDir,
 		SkipProbe:         strategy.SkipProbe,
 		KnownDuration:    stream.VODDuration,
 		MetadataOnly:     strategy.MetadataOnly,

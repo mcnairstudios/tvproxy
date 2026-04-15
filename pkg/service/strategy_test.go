@@ -66,7 +66,7 @@ func TestResolveSessionStrategy_LiveIPTV(t *testing.T) {
 		Container:  "mp4",
 	}
 
-	s := resolveSessionStrategy(in, out, "/tmp/recordings")
+	s := resolveSessionStrategy(in, out)
 
 	if s.Category != CategoryLiveIPTV {
 		t.Errorf("category = %d, want CategoryLiveIPTV", s.Category)
@@ -88,7 +88,7 @@ func TestResolveSessionStrategy_VODRemote(t *testing.T) {
 		Container:  "mp4",
 	}
 
-	s := resolveSessionStrategy(in, out, "/tmp/recordings")
+	s := resolveSessionStrategy(in, out)
 
 	if s.Category != CategoryVODRemote {
 		t.Errorf("category = %d, want CategoryVODRemote", s.Category)
@@ -110,7 +110,7 @@ func TestResolveSessionStrategy_VODLocal(t *testing.T) {
 		Container:  "mp4",
 	}
 
-	s := resolveSessionStrategy(in, out, "/tmp/recordings")
+	s := resolveSessionStrategy(in, out)
 
 	if s.Category != CategoryVODLocal {
 		t.Errorf("category = %d, want CategoryVODLocal", s.Category)
@@ -133,7 +133,7 @@ func TestResolveSessionStrategy_LiveWithTranscode(t *testing.T) {
 		Container:  "mp4",
 	}
 
-	s := resolveSessionStrategy(in, out, "/tmp/recordings")
+	s := resolveSessionStrategy(in, out)
 
 	if s.VideoCodec != "av1" {
 		t.Errorf("VideoCodec = %q, want av1", s.VideoCodec)
@@ -205,7 +205,7 @@ func TestResolveSessionStrategy_LiveWithSourceProfile(t *testing.T) {
 		Container:  "mp4",
 	}
 
-	s := resolveSessionStrategy(in, out, "/tmp/recordings")
+	s := resolveSessionStrategy(in, out)
 
 	if s.VideoCodec != "copy" {
 		t.Errorf("VideoCodec = %q, want copy (mpeg2 source, default client = copy)", s.VideoCodec)
@@ -221,7 +221,7 @@ func TestResolveSessionStrategy_SkipProbe(t *testing.T) {
 		StreamID:  "test-skip",
 	}
 	out := StrategyOutput{Container: "mp4"}
-	s := resolveSessionStrategy(in, out, "/tmp")
+	s := resolveSessionStrategy(in, out)
 	if s.SkipProbe {
 		t.Error("SkipProbe should be false for probe_mode=auto")
 	}
