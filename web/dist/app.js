@@ -503,7 +503,7 @@
 
 
   const channelsCache = new DataCache({
-    label: 'Audio Ch',
+    label: 'Channels',
     loader: async () => {
       const [channels, nowMap] = await Promise.all([
         api.get('/api/channels', { cache: 'no-store' }),
@@ -786,7 +786,7 @@
     { id: 'dashboard', label: 'Dashboard', icon: '\u2302', tip: 'Overview of your TVProxy system status', adminOnly: true },
     { id: 'now-playing', label: 'Activity', icon: '\u25B6', tip: 'Active users and streams', adminOnly: true },
     { section: 'Content' },
-    { id: 'channels', label: 'Audio Ch', icon: '\ud83d\udcfa', tip: 'Define your custom channels and assign streams and EPG data' },
+    { id: 'channels', label: 'Channels', icon: '\ud83d\udcfa', tip: 'Define your custom channels and assign streams and EPG data' },
     { id: 'movies', label: 'Movies', icon: '\uD83C\uDFAC', tip: 'Browse movie library' },
     { id: 'tv-series', label: 'TV Series', icon: '\uD83D\uDCFA', tip: 'Browse TV series library' },
     { id: 'iptv-movies', label: 'IPTV Movies', icon: '\uD83C\uDF1F', tip: 'Browse IPTV movie library', xtreamOnly: true },
@@ -2554,7 +2554,7 @@
         { label: 'HDHR Streams', value: hdhrSources.reduce(function(s, h) { return s + (h.stream_count || 0); }, 0), icon: '\ud83d\udcf6', page: 'hdhr-sources' },
         { label: 'Movies', value: movieCount.toLocaleString(), icon: '\uD83C\uDFAC', page: 'movies' },
         { label: 'TV Series', value: seriesCount.toLocaleString(), icon: '\uD83D\uDCFA', page: 'tv-series' },
-        { label: 'Audio Ch', value: channels.length, icon: '\ud83d\udcfa', page: 'channels' },
+        { label: 'Channels', value: channels.length, icon: '\ud83d\udcfa', page: 'channels' },
         { label: 'Channel Groups', value: groups.length, icon: '\ud83d\udcc2', page: 'channels' },
         { label: 'EPG Sources', value: epgSources.length, icon: '\ud83d\udcc5', page: 'epg-sources' },
         { label: 'HDHomeRun Emu', value: devices.length, icon: '\ud83d\udce1', page: 'hdhr-devices' },
@@ -3014,81 +3014,11 @@
         }
       }
 
-      function manageGroupsModal() {
-        const gb = config.groupBy;
-        const bodyEl = h('div');
-
-        function renderGroupList() {
-          bodyEl.innerHTML = '';
-          const sorted = (groupsData || []).slice().sort((a, b) => (a[gb.sortKey] || 0) - (b[gb.sortKey] || 0));
-
-          const addBtn = h('button', { className: 'btn btn-primary btn-sm', onClick: () => {
-            const formContent = h('div');
-            const cnInputs = {};
-            (gb.fields || []).forEach(f => {
-              const inp = h('input', { type: f.type || 'text', placeholder: f.placeholder || '' });
-              inp.value = f.default != null ? String(f.default) : '';
-              cnInputs[f.key] = inp;
-              formContent.appendChild(h('div', { className: 'form-group' }, h('label', null, f.label), inp));
-            });
-            showModal('Add ' + (gb.singular || 'Group'), formContent, async () => {
-              const body = {};
-              (gb.fields || []).forEach(f => {
-                body[f.key] = f.type === 'number' ? Number(cnInputs[f.key].value) : cnInputs[f.key].value;
-              });
-              await api.post(gb.apiPath, body);
-              toast.success((gb.singular || 'Group') + ' created');
-              if (gb.onChanged) gb.onChanged();
-              groupsData = await gb.loadGroups();
-              renderGroupList();
-              filteredCache = null;
-              updateTable();
-            }, 'Create');
-          }}, '+ Add ' + (gb.singular || 'Group'));
-          bodyEl.appendChild(h('div', { style: 'margin-bottom:12px' }, addBtn));
-
-          if (sorted.length === 0) {
-            bodyEl.appendChild(h('p', { style: 'color:var(--text-muted)' }, 'No groups defined yet.'));
-            return;
-          }
-
-          sorted.forEach(group => {
-            bodyEl.appendChild(h('div', { style: 'display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)' },
-              h('span', { style: 'flex:1;font-weight:500' }, group[gb.nameKey] || 'Unknown'),
-              h('span', { style: 'color:var(--text-secondary);font-size:13px;min-width:60px' }, 'Order: ' + (group[gb.sortKey] || 0)),
-              h('button', { className: 'btn btn-secondary btn-sm btn-icon', title: 'Edit', onClick: () => editGroupInline(group) }, '\u270E'),
-              h('button', { className: 'btn btn-danger btn-sm btn-icon btn-icon-circle', title: 'Delete', onClick: async () => {
-                const ok = await confirmDialog('Delete group "' + (group[gb.nameKey] || '') + '"?');
-                if (!ok) return;
-                try {
-                  await api.del(gb.apiPath + '/' + group.id);
-                  toast.success((gb.singular || 'Group') + ' deleted');
-                  if (gb.onChanged) gb.onChanged();
-                  groupsData = await gb.loadGroups();
-                  renderGroupList();
-                  filteredCache = null;
-                  updateTable();
-                } catch (err) {
-                  toast.error(err.message);
-                }
-              }}, '\u2715'),
-            ));
-          });
-        }
-
-        renderGroupList();
-        showModal('Manage ' + (gb.plural || 'Groups'), bodyEl);
-      }
 
       function buildShell() {
         container.innerHTML = '';
 
         const headerActions = [];
-        if (config.groupBy) {
-          headerActions.push(
-            h('button', { className: 'btn btn-secondary btn-sm', onClick: () => manageGroupsModal() }, 'Manage Groups')
-          );
-        }
         if (config.create) {
           headerActions.push(
             h('button', { className: 'btn btn-primary btn-sm btn-icon', title: 'Add New', style: 'font-size:18px', onClick: () => openForm(null) }, '+')
@@ -5406,7 +5336,7 @@
     }),
 
     channels: buildCrudPage({
-      title: 'Audio Ch',
+      title: 'Channels',
       singular: 'Channel',
       apiPath: '/api/channels',
       cache: channelsCache,
@@ -5854,7 +5784,7 @@
           if (group.jellyfin_enabled) {
             var jfBadge = h('div', { style: 'display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:8px;' });
             jfBadge.appendChild(h('span', { style: 'font-size:12px;font-weight:600;color:#3b82f6' }, 'Jellyfin'));
-            jfBadge.appendChild(h('span', { style: 'font-size:12px;color:var(--text-muted)' }, jellyfinStyles[group.jellyfin_type] || 'Audio Ch'));
+            jfBadge.appendChild(h('span', { style: 'font-size:12px;color:var(--text-muted)' }, jellyfinStyles[group.jellyfin_type] || 'Channels'));
             card.appendChild(jfBadge);
           }
 
