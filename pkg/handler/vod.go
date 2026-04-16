@@ -1,21 +1,18 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/fmp4"
-	"github.com/gavinmcnair/tvproxy/pkg/hls"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
@@ -23,15 +20,13 @@ import (
 type VODHandler struct {
 	vodService    *service.VODService
 	clientService *service.ClientService
-	hlsManager    *hls.Manager
 	log           zerolog.Logger
 }
 
-func NewVODHandler(vodService *service.VODService, clientService *service.ClientService, hlsManager *hls.Manager, log zerolog.Logger) *VODHandler {
+func NewVODHandler(vodService *service.VODService, clientService *service.ClientService, log zerolog.Logger) *VODHandler {
 	return &VODHandler{
 		vodService:    vodService,
 		clientService: clientService,
-		hlsManager:    hlsManager,
 		log:           log.With().Str("handler", "vod").Logger(),
 	}
 }
@@ -141,7 +136,7 @@ func (h *VODHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 
 	delivery := "stream"
 	if sess := h.vodService.GetSession(sessionID); sess != nil {
-		if sess.ProfileName == "Browser" {
+		if sess.Delivery == "mse" {
 			delivery = "mse"
 		}
 	}
@@ -179,7 +174,7 @@ func (h *VODHandler) CreateChannelSession(w http.ResponseWriter, r *http.Request
 
 	delivery := "stream"
 	if sess := h.vodService.GetSession(sessionID); sess != nil {
-		if sess.ProfileName == "Browser" {
+		if sess.Delivery == "mse" {
 			delivery = "mse"
 		}
 	}
@@ -534,147 +529,58 @@ func (h *VODHandler) PlayCompletedRecording(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-func (h *VODHandler) HLSMaster(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "sessionID")
-	sess := h.vodService.GetSession(channelID)
-	if sess == nil {
-		respondError(w, http.StatusNotFound, "session not found")
-		return
-	}
-
-	var duration float64
-	for i := 0; i < 20; i++ {
-		_, _, d := h.vodService.GetProbeInfo(channelID)
-		if d > 0 {
-			duration = d
-			break
+func (h *VODHandler) acquireStore(channelID, track string, timeout time.Duration) (*fmp4.TrackStore, string) {
+	deadline := time.Now().Add(timeout)
+	sessionSeen := false
+	for time.Now().Before(deadline) {
+		sess := h.vodService.GetSession(channelID)
+		if sess == nil {
+			if sessionSeen {
+				return nil, "session ended"
+			}
+			return nil, "session not found"
 		}
-		if sess.Duration > 0 {
-			duration = sess.Duration
-			break
+		sessionSeen = true
+		if sess.Delivery != "mse" {
+			return nil, "session delivery is not MSE"
 		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	var durationTicks int64
-	if duration > 0 {
-		durationTicks = int64(duration * 10000000)
-	}
-
-	streamURL := sess.StreamURL
-	if streamURL == "" {
-		respondError(w, http.StatusInternalServerError, "no stream URL")
-		return
-	}
-
-	profile := hls.ProfileSettings{
-		VideoCodec:   sess.OutputVideoCodec,
-		AudioCodec:   sess.OutputAudioCodec,
-		HWAccel:      sess.OutputHWAccel,
-		Container:    sess.OutputContainer,
-		UseWireGuard: sess.UseWireGuard,
-	}
-	if profile.VideoCodec == "" {
-		profile.VideoCodec = "copy"
-	}
-	if profile.AudioCodec == "" {
-		profile.AudioCodec = "aac"
-	}
-
-	hlsSess := h.hlsManager.GetOrCreateSession(channelID, streamURL, 6, durationTicks, duration == 0, profile)
-	playlistURL := fmt.Sprintf("/vod/%s/hls/playlist.m3u8", channelID)
-	hls.ServeMasterPlaylist(w, hlsSess, playlistURL)
-}
-
-func (h *VODHandler) HLSPlaylist(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "sessionID")
-
-	hlsSess := h.hlsManager.GetSession(channelID)
-	if hlsSess == nil {
-		respondError(w, http.StatusNotFound, "hls session not found")
-		return
-	}
-
-	if hlsSess.IsDone() && hlsSess.CurrentTranscodeIndex() == -1 {
-		if err := hlsSess.StartTranscode(context.Background(), 0, 0); err != nil {
-			h.log.Error().Err(err).Str("session", channelID).Msg("failed to start hls transcode")
+		var store *fmp4.TrackStore
+		if track == "video" {
+			store = sess.VideoStore
+		} else {
+			store = sess.AudioStore
 		}
-	}
-
-	hls.ServeMediaPlaylist(w, hlsSess, "")
-}
-
-func (h *VODHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
-	channelID := chi.URLParam(r, "sessionID")
-	segmentFile := chi.URLParam(r, "segment")
-
-	hlsSess := h.hlsManager.GetSession(channelID)
-	if hlsSess == nil {
-		respondError(w, http.StatusNotFound, "hls session not found")
-		return
-	}
-
-	if segmentFile == "init.mp4" {
-		if err := h.hlsManager.RequestSegment(context.Background(), hlsSess, 0, 0); err != nil {
-			respondError(w, http.StatusNotFound, "init segment not available")
-			return
+		if store != nil && !store.IsClosed() {
+			return store, ""
 		}
-		hls.ServeSegment(w, r, hlsSess.InitSegmentPath())
-		return
+		time.Sleep(200 * time.Millisecond)
 	}
-
-	var segmentIndex int
-	name := segmentFile
-	name = strings.TrimSuffix(name, ".mp4")
-	name = strings.TrimSuffix(name, ".ts")
-	fmt.Sscanf(name, "seg%d", &segmentIndex)
-
-	var runtimeTicks int64
-	if rt := r.URL.Query().Get("runtimeTicks"); rt != "" {
-		fmt.Sscanf(rt, "%d", &runtimeTicks)
-	}
-
-	if err := h.hlsManager.RequestSegment(context.Background(), hlsSess, segmentIndex, runtimeTicks); err != nil {
-		h.log.Error().Err(err).Int("segment", segmentIndex).Msg("hls segment not available")
-		respondError(w, http.StatusNotFound, "segment not available")
-		return
-	}
-
-	hls.ServeSegment(w, r, hlsSess.SegmentPath(segmentIndex))
+	return nil, "pipeline not ready (timeout)"
 }
 
 func (h *VODHandler) MSEInit(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "sessionID")
 	track := chi.URLParam(r, "track")
 
-	var store *fmp4.TrackStore
-	for i := 0; i < 50; i++ {
-		sess := h.vodService.GetSession(channelID)
-		if sess == nil {
-			respondError(w, http.StatusNotFound, "session not found")
-			return
-		}
-		if track == "video" {
-			store = sess.VideoStore
-		} else {
-			store = sess.AudioStore
-		}
-		if store != nil {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
+	store, reason := h.acquireStore(channelID, track, 30*time.Second)
 	if store == nil {
-		respondError(w, http.StatusNotFound, "no MSE store for track")
+		code := http.StatusServiceUnavailable
+		if reason == "session not found" {
+			code = http.StatusNotFound
+		}
+		respondError(w, code, reason)
 		return
 	}
 
 	data, gen := store.GetInit()
 	if data == nil {
-		respondError(w, http.StatusGone, "session closed")
+		w.Header().Set("Cache-Control", "no-store")
+		respondError(w, http.StatusGone, "init segment not available — pipeline may have failed")
 		return
 	}
 	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Gen", strconv.FormatInt(gen, 10))
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Expose-Headers", "X-Gen")
@@ -685,25 +591,13 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "sessionID")
 	track := chi.URLParam(r, "track")
 
-	var store *fmp4.TrackStore
-	for i := 0; i < 25; i++ {
-		sess := h.vodService.GetSession(channelID)
-		if sess == nil {
-			respondError(w, http.StatusNotFound, "session not found")
-			return
-		}
-		if track == "video" {
-			store = sess.VideoStore
-		} else {
-			store = sess.AudioStore
-		}
-		if store != nil {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
+	store, reason := h.acquireStore(channelID, track, 10*time.Second)
 	if store == nil {
-		respondError(w, http.StatusNotFound, "no MSE store")
+		code := http.StatusServiceUnavailable
+		if reason == "session not found" {
+			code = http.StatusNotFound
+		}
+		respondError(w, code, reason)
 		return
 	}
 
@@ -714,10 +608,13 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 
 	data, ok := store.GetSegment(gen, seq)
 	if !ok {
+		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusGone)
 		return
 	}
 	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Write(data)
 }
@@ -759,6 +656,9 @@ func (h *VODHandler) MSEDebug(w http.ResponseWriter, r *http.Request) {
 	if sess.VideoStore != nil {
 		resp["video_segments"] = sess.VideoStore.SegmentCount()
 		resp["gen"] = sess.VideoStore.Generation()
+	}
+	if errMsg := sess.GetError(); errMsg != "" {
+		resp["error"] = errMsg
 	}
 	respondJSON(w, http.StatusOK, resp)
 }

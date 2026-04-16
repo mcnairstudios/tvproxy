@@ -106,6 +106,11 @@ func (s *SourceProfileStoreImpl) migrateDefaults() {
 		VideoQueueMs: 10000, AudioQueueMs: 10000,
 		HTTPTimeoutSec: 30, HTTPRetries: 3,
 	})
+	s.ensureProfile("TVProxy-streams", models.SourceProfile{
+		Deinterlace: false,
+		VideoQueueMs: 10000, AudioQueueMs: 10000,
+		HTTPTimeoutSec: 10, HTTPRetries: 2,
+	})
 }
 
 func (s *SourceProfileStoreImpl) ensureProfile(name string, defaults models.SourceProfile) {
@@ -238,6 +243,12 @@ func (s *SourceProfileStoreImpl) SeedDefaults() {
 			Deinterlace: false,
 			VideoQueueMs: 10000, AudioQueueMs: 10000,
 			HTTPTimeoutSec: 30, HTTPRetries: 3,
+		},
+		{
+			ID: uuid.New().String(), Name: "TVProxy-streams",
+			Deinterlace: false,
+			VideoQueueMs: 10000, AudioQueueMs: 10000,
+			HTTPTimeoutSec: 10, HTTPRetries: 2,
 		},
 	}
 	s.saveUnlocked()

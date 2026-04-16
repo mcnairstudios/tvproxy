@@ -36,14 +36,22 @@ type TrackStore struct {
 	sps [][]byte
 	pps [][]byte
 
+	av1SeqHdr []byte
+
 	audioObjType byte
 	audioFreq    int
 
-	isVideo    bool
-	videoCodec string // "h264", "h265", "av1"
+	isVideo      bool
+	videoCodec   string // "h264", "h265", "av1"
+	targetHeight int
 
-	LastPTS    int64
-	maxSegments int
+	lastPTSNs    int64
+	sharedBaseNs *int64
+	maxSegments  int
+
+	durHistory  [10]uint32
+	durIdx      int
+	durCount    int
 }
 
 func NewTrackStore(isVideo bool, videoCodec string) *TrackStore {
@@ -52,7 +60,7 @@ func NewTrackStore(isVideo bool, videoCodec string) *TrackStore {
 		videoCodec:  videoCodec,
 		trackID:     1,
 		timescale:   90000,
-		LastPTS:     -1,
+		lastPTSNs:   -1,
 		maxSegments: 60,
 	}
 	if !isVideo {
@@ -69,8 +77,11 @@ func (ts *TrackStore) Reset(gen int64, seekPosNs int64) {
 	ts.pendingSamples = nil
 	ts.pendingStart = time.Time{}
 	ts.seqNum = 0
-	ts.decodeTime = uint64(seekPosNs) * uint64(ts.timescale) / 1e9
-	ts.LastPTS = -1
+	ts.decodeTime = 0
+	ts.lastPTSNs = -1
+	if ts.sharedBaseNs != nil {
+		atomic.StoreInt64(ts.sharedBaseNs, -1)
+	}
 	ts.mu.Unlock()
 	ts.cond.Broadcast()
 }
@@ -80,6 +91,12 @@ func (ts *TrackStore) Close() {
 	ts.closed = true
 	ts.mu.Unlock()
 	ts.cond.Broadcast()
+}
+
+func (ts *TrackStore) IsClosed() bool {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return ts.closed
 }
 
 func (ts *TrackStore) Generation() int64 {
@@ -92,6 +109,25 @@ func (ts *TrackStore) SegmentCount() int {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	return len(ts.segments)
+}
+
+func (ts *TrackStore) recordDuration(d uint32) {
+	ts.durHistory[ts.durIdx] = d
+	ts.durIdx = (ts.durIdx + 1) % len(ts.durHistory)
+	if ts.durCount < len(ts.durHistory) {
+		ts.durCount++
+	}
+}
+
+func (ts *TrackStore) avgDuration() uint32 {
+	if ts.durCount == 0 {
+		return 0
+	}
+	var sum uint64
+	for i := 0; i < ts.durCount; i++ {
+		sum += uint64(ts.durHistory[i])
+	}
+	return uint32(sum / uint64(ts.durCount))
 }
 
 func (ts *TrackStore) trackName() string {
@@ -118,8 +154,14 @@ func (ts *TrackStore) buildInitSegment() {
 					return
 				}
 			}
+		case "av1":
+			ts.initSeg = buildAV1Init(ts.trackID, ts.timescale, ts.av1SeqHdr)
+			if ts.initSeg == nil {
+				log.Printf("[%s] failed to build AV1 init segment", ts.trackName())
+			}
+			return
 		default:
-			log.Printf("[%s] unsupported video codec for fMP4: %s (only h264/h265 supported)", ts.trackName(), ts.videoCodec)
+			log.Printf("[%s] unsupported video codec for fMP4: %s", ts.trackName(), ts.videoCodec)
 			return
 		}
 	} else {
@@ -186,7 +228,61 @@ func (ts *TrackStore) flushSegment() {
 	ts.cond.Broadcast()
 }
 
-func (ts *TrackStore) PushVideoFrame(data []byte, duration uint32, isKeyframe bool) {
+func NewSharedBasePTS() *int64 {
+	v := int64(-1)
+	return &v
+}
+
+func (ts *TrackStore) SetSharedBase(base *int64) {
+	ts.sharedBaseNs = base
+}
+
+func (ts *TrackStore) SetTargetHeight(h int) {
+	ts.targetHeight = h
+}
+
+func (ts *TrackStore) ptsToTicks(ptsNs int64) uint64 {
+	if ts.sharedBaseNs != nil {
+		base := atomic.LoadInt64(ts.sharedBaseNs)
+		if base < 0 {
+			atomic.CompareAndSwapInt64(ts.sharedBaseNs, -1, ptsNs)
+			base = atomic.LoadInt64(ts.sharedBaseNs)
+		}
+		rel := ptsNs - base
+		if rel < 0 {
+			rel = 0
+		}
+		return uint64(rel) * uint64(ts.timescale) / 1e9
+	}
+	return uint64(ptsNs) * uint64(ts.timescale) / 1e9
+}
+
+func (ts *TrackStore) resolveDuration(ptsNs, bufDurNs int64) uint32 {
+	if ptsNs >= 0 && ts.lastPTSNs >= 0 {
+		diffNs := ptsNs - ts.lastPTSNs
+		if diffNs > 0 && diffNs < 1e9 {
+			dur := uint32(diffNs * int64(ts.timescale) / 1e9)
+			ts.recordDuration(dur)
+			return dur
+		}
+	}
+	if bufDurNs > 0 && bufDurNs < 1e9 {
+		dur := uint32(bufDurNs * int64(ts.timescale) / 1e9)
+		if dur > 0 {
+			ts.recordDuration(dur)
+			return dur
+		}
+	}
+	if avg := ts.avgDuration(); avg > 0 {
+		return avg
+	}
+	if ts.isVideo {
+		return 3600
+	}
+	return 1024
+}
+
+func (ts *TrackStore) PushVideoFrame(data []byte, ptsNs, bufDurNs int64, isKeyframe bool) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
@@ -209,13 +305,30 @@ func (ts *TrackStore) PushVideoFrame(data []byte, duration uint32, isKeyframe bo
 				ts.buildInitSegment()
 				ts.cond.Broadcast()
 			}
+		case "av1":
+			seqHdr := extractAV1SequenceHeader(data)
+			if seqHdr != nil {
+				ts.av1SeqHdr = seqHdr
+				ts.buildInitSegment()
+				ts.cond.Broadcast()
+			}
 		}
 	}
 	if ts.initSeg == nil {
 		return
 	}
 
-	sampleData := avc.ConvertByteStreamToNaluSample(data)
+	var sampleData []byte
+	if ts.videoCodec == "av1" {
+		sampleData = stripAV1TemporalDelimiter(data)
+	} else {
+		sampleData = avc.ConvertByteStreamToNaluSample(data)
+	}
+
+	duration := ts.resolveDuration(ptsNs, bufDurNs)
+	if ptsNs >= 0 {
+		ts.lastPTSNs = ptsNs
+	}
 
 	flags := mp4.NonSyncSampleFlags
 	if isKeyframe {
@@ -245,7 +358,7 @@ func (ts *TrackStore) PushVideoFrame(data []byte, duration uint32, isKeyframe bo
 	}
 }
 
-func (ts *TrackStore) PushAudioFrame(data []byte, duration uint32) {
+func (ts *TrackStore) PushAudioFrame(data []byte, ptsNs, bufDurNs int64) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
@@ -254,6 +367,11 @@ func (ts *TrackStore) PushAudioFrame(data []byte, duration uint32) {
 		ts.audioFreq = int(ts.timescale)
 		ts.buildInitSegment()
 		ts.cond.Broadcast()
+	}
+
+	duration := ts.resolveDuration(ptsNs, bufDurNs)
+	if ptsNs >= 0 {
+		ts.lastPTSNs = ptsNs
 	}
 
 	sample := mp4.FullSample{
@@ -282,7 +400,15 @@ func (ts *TrackStore) PushAudioFrame(data []byte, duration uint32) {
 func (ts *TrackStore) GetInit() ([]byte, int64) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
+	deadline := time.Now().Add(30 * time.Second)
 	for ts.initSeg == nil && !ts.closed {
+		if time.Now().After(deadline) {
+			return nil, ts.gen
+		}
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			ts.cond.Broadcast()
+		}()
 		ts.cond.Wait()
 	}
 	return ts.initSeg, ts.gen
@@ -291,6 +417,7 @@ func (ts *TrackStore) GetInit() ([]byte, int64) {
 func (ts *TrackStore) GetSegment(gen int64, seq int) ([]byte, bool) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if ts.closed || ts.gen != gen {
 			return nil, false
@@ -298,6 +425,13 @@ func (ts *TrackStore) GetSegment(gen int64, seq int) ([]byte, bool) {
 		if seq < len(ts.segments) {
 			return ts.segments[seq], true
 		}
+		if time.Now().After(deadline) {
+			return nil, false
+		}
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			ts.cond.Broadcast()
+		}()
 		ts.cond.Wait()
 	}
 }

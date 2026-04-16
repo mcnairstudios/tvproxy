@@ -15,9 +15,14 @@ func SetupVideoSink(pipeline *gst.Pipeline, store *TrackStore) error {
 		return err
 	}
 
-	isKeyframe := IsH264Keyframe
-	if store.videoCodec == "h265" {
+	var isKeyframe func([]byte) bool
+	switch store.videoCodec {
+	case "h265":
 		isKeyframe = IsHEVCKeyframe
+	case "av1":
+		isKeyframe = IsAV1Keyframe
+	default:
+		isKeyframe = IsH264Keyframe
 	}
 
 	sink.SetCallbacks(&app.SinkCallbacks{
@@ -29,27 +34,26 @@ func SetupVideoSink(pipeline *gst.Pipeline, store *TrackStore) error {
 			buf := sample.GetBuffer()
 			data := buf.Bytes()
 
-			rawPTS := buf.PresentationTimestamp()
-			pts := int64(rawPTS)
-			var duration uint32
-			if rawPTS != gst.ClockTimeNone && store.LastPTS >= 0 {
-				diffNs := pts - store.LastPTS
-				if diffNs > 0 && diffNs < 1e9 {
-					duration = uint32(diffNs * int64(store.timescale) / 1e9)
-				}
-			}
-			if rawPTS != gst.ClockTimeNone {
-				store.LastPTS = pts
-			}
-			if duration == 0 {
-				durNs := buf.Duration()
-				duration = uint32(durNs * gst.ClockTime(store.timescale) / 1e9)
-				if duration == 0 {
-					duration = 3750 // ~24fps fallback
-				}
+			if store.videoCodec == "av1" && len(data) <= 10 {
+				return gst.FlowOK
 			}
 
-			store.PushVideoFrame(data, duration, isKeyframe(data))
+			isDelta := buf.HasFlags(gst.BufferFlagDeltaUnit)
+			bufKeyframe := !isDelta
+			if !bufKeyframe {
+				bufKeyframe = isKeyframe(data)
+			}
+
+			ptsNs := int64(-1)
+			if rawPTS := buf.PresentationTimestamp(); rawPTS != gst.ClockTimeNone {
+				ptsNs = int64(rawPTS)
+			}
+			bufDurNs := int64(-1)
+			if d := buf.Duration(); d != gst.ClockTimeNone {
+				bufDurNs = int64(d)
+			}
+
+			store.PushVideoFrame(data, ptsNs, bufDurNs, bufKeyframe)
 			return gst.FlowOK
 		},
 	})
@@ -75,23 +79,16 @@ func SetupAudioSink(pipeline *gst.Pipeline, store *TrackStore) error {
 			buf := sample.GetBuffer()
 			data := buf.Bytes()
 
-			rawPTS := buf.PresentationTimestamp()
-			pts := int64(rawPTS)
-			var duration uint32
-			if rawPTS != gst.ClockTimeNone && store.LastPTS >= 0 {
-				diffNs := pts - store.LastPTS
-				if diffNs > 0 && diffNs < 1e9 {
-					duration = uint32(diffNs * 48000 / 1e9)
-				}
+			ptsNs := int64(-1)
+			if rawPTS := buf.PresentationTimestamp(); rawPTS != gst.ClockTimeNone {
+				ptsNs = int64(rawPTS)
 			}
-			if rawPTS != gst.ClockTimeNone {
-				store.LastPTS = pts
-			}
-			if duration == 0 {
-				duration = 1024 // standard AAC frame size
+			bufDurNs := int64(-1)
+			if d := buf.Duration(); d != gst.ClockTimeNone {
+				bufDurNs = int64(d)
 			}
 
-			store.PushAudioFrame(data, duration)
+			store.PushAudioFrame(data, ptsNs, bufDurNs)
 			return gst.FlowOK
 		},
 	})

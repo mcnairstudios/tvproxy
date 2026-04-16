@@ -3962,6 +3962,17 @@
           var hex = function(n) { return n.toString(16).padStart(2, '0'); };
           return 'avc1.' + hex(d[i+5]) + hex(d[i+6]) + hex(d[i+7]);
         }
+        if (d[i] === 0x61 && d[i+1] === 0x76 && d[i+2] === 0x31 && d[i+3] === 0x43) {
+          var av1cOff = i + 4;
+          var profile = (d[av1cOff + 1] >> 5) & 0x07;
+          var level = d[av1cOff + 1] & 0x1F;
+          var tierBit = (d[av1cOff + 2] >> 7) & 1;
+          var highBd = (d[av1cOff + 2] >> 6) & 1;
+          var twelveBit = (d[av1cOff + 2] >> 5) & 1;
+          var bd = highBd ? (twelveBit ? 12 : 10) : 8;
+          var tierStr = tierBit ? 'H' : 'M';
+          return 'av01.' + profile + '.' + String(level).padStart(2, '0') + tierStr + '.' + (bd <= 8 ? '08' : String(bd));
+        }
       }
       return 'hvc1.1.4.L153';
     }
@@ -4035,7 +4046,7 @@
           if (msg.track === 'audio') mseAudioSeq = msg.seq + 1;
           mseAppendQueues[msg.track].push(msg.data);
           mseProcessQueue(msg.track);
-          if (msg.track === 'video' && mseVideoSeq === 4) {
+          if (msg.track === 'video' && mseVideoSeq === 2) {
             if (mseVideoSb && mseVideoSb.buffered.length > 0) {
               vidEl.currentTime = mseVideoSb.buffered.start(0);
             } else {
@@ -4050,11 +4061,19 @@
 
       var basePath = '/vod/' + dvrObj.id + '/mse/';
       var initAc = new AbortController();
-      setTimeout(function() { initAc.abort(); }, 15000);
+      setTimeout(function() { initAc.abort(); }, 35000);
+      statusEl.textContent = 'Initializing...';
+      statusEl.style.color = '#ffaa00';
       Promise.all([
-        fetch(basePath + 'video/init', {signal: initAc.signal}).then(function(r) { return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; }); }),
-        fetch(basePath + 'audio/init', {signal: initAc.signal}).then(function(r) { return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; }); }),
-        fetch(basePath + 'debug', {signal: initAc.signal}).then(function(r) { return r.json(); })
+        fetch(basePath + 'video/init', {signal: initAc.signal, cache: 'no-store'}).then(function(r) {
+          if (!r.ok) throw new Error('video init: HTTP ' + r.status + ' ' + r.statusText);
+          return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; });
+        }),
+        fetch(basePath + 'audio/init', {signal: initAc.signal, cache: 'no-store'}).then(function(r) {
+          if (!r.ok) throw new Error('audio init: HTTP ' + r.status + ' ' + r.statusText);
+          return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; });
+        }),
+        fetch(basePath + 'debug', {signal: initAc.signal, cache: 'no-store'}).then(function(r) { return r.json(); })
       ]).then(function(results) {
         var videoInit = results[0];
         var audioInit = results[1];
@@ -4077,9 +4096,12 @@
           mseVideoSb.mode = 'segments';
           mseAudioSb.mode = 'segments';
 
-          mseVideoSb.addEventListener('error', function() { console.error('mseVideoSb ERROR'); });
-          mseAudioSb.addEventListener('error', function() { console.error('mseAudioSb ERROR'); });
+          mseVideoSb.addEventListener('error', function() { console.error('mseVideoSb ERROR', vidEl.error); });
+          mseAudioSb.addEventListener('error', function() { console.error('mseAudioSb ERROR', vidEl.error); });
+          vidEl.addEventListener('error', function() { console.error('VIDEO ELEMENT ERROR', vidEl.error && vidEl.error.code, vidEl.error && vidEl.error.message); });
 
+          statusEl.textContent = 'Buffering...';
+          statusEl.style.color = '#ffaa00';
           mseWaitUpdate(mseVideoSb).then(function() {
             mseVideoSb.appendBuffer(videoInit.buf);
             return mseWaitUpdate(mseVideoSb);
@@ -4093,10 +4115,21 @@
           });
         }, {once: true});
       }).catch(function(e) {
-        console.error('MSE startup error:', e);
+        var msg = e.message || String(e);
+        console.error('MSE startup error:', msg);
         statusEl.style.color = '#ff6b6b';
-        statusEl.textContent = 'MSE Error';
-        statusEl.title = e.message || String(e);
+        if (e.name === 'AbortError') {
+          statusEl.textContent = 'Timeout — pipeline slow to start';
+        } else if (msg.indexOf('HTTP 503') >= 0) {
+          statusEl.textContent = 'Pipeline not ready';
+        } else if (msg.indexOf('HTTP 404') >= 0) {
+          statusEl.textContent = 'Session not found';
+        } else if (msg.indexOf('HTTP 410') >= 0) {
+          statusEl.textContent = 'Pipeline failed';
+        } else {
+          statusEl.textContent = 'MSE Error: ' + msg;
+        }
+        statusEl.title = msg;
       });
     }
 
@@ -4224,7 +4257,7 @@
           if (resp.session_id) {
             dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, delivery: resp.delivery };
             if (dvrTracker) dvrTracker.reset();
-            streamSrc = dvr.delivery === 'hls' ? '/vod/' + dvr.id + '/hls/master.m3u8' : '/vod/' + dvr.id + '/stream';
+            streamSrc = '/vod/' + dvr.id + '/stream';
           }
         } catch(e) {
           toast.error('Audio switch failed');
@@ -4409,7 +4442,7 @@
     };
     document.body.appendChild(overlay);
 
-    var streamSrc = dvr ? (dvr.delivery === 'hls' ? '/vod/' + dvr.id + '/hls/master.m3u8' : '/vod/' + dvr.id + '/stream') : url;
+    var streamSrc = dvr ? ('/vod/' + dvr.id + '/stream') : url;
     var epgDuration = 0;
 
     var savedVol = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
@@ -4517,7 +4550,7 @@
             if (resp.session_id) {
               dvr = { id: resp.session_id, consumer_id: resp.consumer_id, duration: resp.duration, container: resp.container, delivery: resp.delivery };
               if (dvrTracker) dvrTracker.reset();
-              streamSrc = dvr.delivery === 'hls' ? '/vod/' + dvr.id + '/hls/master.m3u8' : '/vod/' + dvr.id + '/stream';
+              streamSrc = '/vod/' + dvr.id + '/stream';
             }
           } catch(e) {}
           restartPlayback();
@@ -5950,7 +5983,7 @@
         { key: 'video_codec', label: 'Video', render: item => ({'default':'Match Source',h264:'H.264',h265:'H.265',av1:'AV1'})[item.video_codec] || item.video_codec || 'Match Source' },
         { key: 'audio_codec', label: 'Audio', render: item => ({'default':'Match Source',aac:'AAC',opus:'Opus'})[item.audio_codec] || item.audio_codec || 'Match Source' },
         { key: 'container', label: 'Container', render: item => ({mpegts:'MPEG-TS',matroska:'Matroska',mp4:'MP4',webm:'WebM'})[item.container] || item.container },
-        { key: 'delivery', label: 'Delivery', render: item => ({stream:'Stream',hls:'HLS'})[item.delivery] || item.delivery || 'Stream' },
+        { key: 'delivery', label: 'Delivery', render: item => ({stream:'Stream',mse:'MSE'})[item.delivery] || item.delivery || 'Stream' },
         { key: 'is_default', label: 'Type', render: item => {
           const badges = [];
           if (item.is_system) badges.push(h('span', { className: 'badge badge-info', style: 'margin-right:4px' }, 'System'));
@@ -5978,8 +6011,15 @@
         ] },
         { key: 'delivery', label: 'Delivery', type: 'select', options: [
           { value: 'stream', label: 'Stream (direct)' },
-          { value: 'hls', label: 'HLS (browser/web)' },
-        ], default: 'stream', help: 'HLS for browser playback. Stream for native clients (Plex, VLC, HDHR).' },
+          { value: 'mse', label: 'MSE (browser/web)' },
+        ], default: 'stream', help: 'MSE for browser playback. Stream for native clients (Plex, VLC, HDHR).' },
+        { key: 'output_height', label: 'Output Height', type: 'select', options: [
+          { value: '0', label: 'Original' },
+          { value: '1080', label: '1080p' },
+          { value: '720', label: '720p' },
+          { value: '480', label: '480p' },
+          { value: '360', label: '360p' },
+        ], default: '0', numeric: true, help: 'Downscale video before encoding. Reduces CPU/GPU load.' },
         { key: 'audio_codec', label: 'Audio Codec', type: 'select', options: [
           { value: 'default', label: 'Match Source (auto copy/transcode)' },
           { value: 'aac', label: 'AAC' },

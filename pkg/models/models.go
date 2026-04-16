@@ -196,6 +196,8 @@ type StreamProfile struct {
 	VideoCodec    string    `json:"video_codec"`
 	Container     string    `json:"container"`
 	AudioCodec    string    `json:"audio_codec"`
+	Delivery      string    `json:"delivery,omitempty"`
+	OutputHeight  int       `json:"output_height,omitempty"`
 	Deinterlace   bool      `json:"deinterlace"`
 	FPSMode       string    `json:"fps_mode"`
 	UseCustomArgs bool      `json:"use_custom_args"`

@@ -294,7 +294,7 @@ func main() {
 		profileStore, settingsStore, clientStore, logoStore, m3uAccountStore,
 		epgSourceStore, hdhrStore, userStore, channelStore, channelGroupStore,
 		scheduledRecStore, clientDefs, func() {
-			service.SeedClientDefaults(ctx, clientDefs, profileStore, clientStore, settingsStore)
+			service.ForceSeedClientDefaults(ctx, clientDefs, profileStore, clientStore, settingsStore)
 		},
 	)
 
@@ -325,7 +325,7 @@ func main() {
 		hdhr:           handler.NewHDHRHandler(hdhrService, proxyService, cfg),
 		output:         handler.NewOutputHandler(outputService),
 		proxy:          handler.NewProxyHandler(proxyService, settingsService, log),
-		vod:            handler.NewVODHandler(vodService, clientService, hlsManager, log),
+		vod:            handler.NewVODHandler(vodService, clientService, log),
 		activity:       handler.NewActivityHandler(activityService),
 		favorite:       handler.NewFavoriteHandler(favoriteStore),
 		settings:       handler.NewSettingsHandler(settingsService, exportService, dataResetter, authService, streamStore, epgStore),

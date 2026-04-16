@@ -134,7 +134,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	epgDataHandler := NewEPGDataHandler(epgStore, epgStore)
 	hdhrHandler := NewHDHRHandler(hdhrService, proxyService, cfg)
 	outputHandler := NewOutputHandler(outputService)
-	vodHandler := NewVODHandler(vodService, clientService, nil, log)
+	vodHandler := NewVODHandler(vodService, clientService, log)
 	activityHandler := NewActivityHandler(activityService)
 	exportService := service.NewExportService(channelStore, channelGroupStore, profileStore, nil, clientStore, m3uAccountStore, epgSourceStore, settingsService, authService)
 	dataResetter := service.NewDataResetter(

@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -9,6 +11,21 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 )
+
+func toInt(v any) int {
+	switch val := v.(type) {
+	case float64:
+		return int(val)
+	case string:
+		n, _ := strconv.Atoi(val)
+		return n
+	case nil:
+		return 0
+	default:
+		n, _ := strconv.Atoi(fmt.Sprint(val))
+		return n
+	}
+}
 
 type StreamProfileHandler struct {
 	repo store.ProfileStore
@@ -94,6 +111,8 @@ func (h *StreamProfileHandler) Create(w http.ResponseWriter, r *http.Request) {
 		VideoCodec    string `json:"video_codec"`
 		Container     string `json:"container"`
 		AudioCodec    string `json:"audio_codec"`
+		Delivery      string `json:"delivery"`
+		OutputHeight  any    `json:"output_height"`
 		Deinterlace   bool   `json:"deinterlace"`
 		FPSMode       string `json:"fps_mode"`
 		UseCustomArgs bool   `json:"use_custom_args"`
@@ -151,6 +170,8 @@ func (h *StreamProfileHandler) Create(w http.ResponseWriter, r *http.Request) {
 		VideoCodec:    req.VideoCodec,
 		Container:     req.Container,
 		AudioCodec:    req.AudioCodec,
+		Delivery:      req.Delivery,
+		OutputHeight:  toInt(req.OutputHeight),
 		Deinterlace:   req.Deinterlace,
 		FPSMode:       req.FPSMode,
 		UseCustomArgs: req.UseCustomArgs,
@@ -202,6 +223,8 @@ func (h *StreamProfileHandler) Update(w http.ResponseWriter, r *http.Request) {
 		VideoCodec    string `json:"video_codec"`
 		Container     string `json:"container"`
 		AudioCodec    string `json:"audio_codec"`
+		Delivery      string `json:"delivery"`
+		OutputHeight  any    `json:"output_height"`
 		Deinterlace   bool   `json:"deinterlace"`
 		FPSMode       string `json:"fps_mode"`
 		UseCustomArgs bool   `json:"use_custom_args"`
@@ -277,6 +300,8 @@ func (h *StreamProfileHandler) Update(w http.ResponseWriter, r *http.Request) {
 	profile.VideoCodec = req.VideoCodec
 	profile.Container = req.Container
 	profile.AudioCodec = req.AudioCodec
+	profile.Delivery = req.Delivery
+	profile.OutputHeight = toInt(req.OutputHeight)
 	profile.Deinterlace = req.Deinterlace
 	profile.FPSMode = req.FPSMode
 	profile.IsDefault = req.IsDefault

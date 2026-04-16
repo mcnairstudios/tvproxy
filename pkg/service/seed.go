@@ -27,9 +27,28 @@ func resolveGlobalDefaults(settingsStore store.SettingsStore) (hwaccel, videoCod
 	return
 }
 
-func SeedClientDefaults(_ context.Context, defs *defaults.ClientDefaults, profileStore store.ProfileStore, clientStore store.ClientStore, settingsStore store.SettingsStore) error {
+func SeedClientDefaults(ctx context.Context, defs *defaults.ClientDefaults, profileStore store.ProfileStore, clientStore store.ClientStore, settingsStore store.SettingsStore) error {
 	if defs == nil {
 		return nil
+	}
+
+	return seedClientDefaultsForce(ctx, defs, profileStore, clientStore, settingsStore, false)
+}
+
+func ForceSeedClientDefaults(ctx context.Context, defs *defaults.ClientDefaults, profileStore store.ProfileStore, clientStore store.ClientStore, settingsStore store.SettingsStore) error {
+	return seedClientDefaultsForce(ctx, defs, profileStore, clientStore, settingsStore, true)
+}
+
+func seedClientDefaultsForce(_ context.Context, defs *defaults.ClientDefaults, profileStore store.ProfileStore, clientStore store.ClientStore, settingsStore store.SettingsStore, force bool) error {
+	if defs == nil {
+		return nil
+	}
+
+	if !force {
+		existing, _ := clientStore.List(context.Background())
+		if len(existing) > 0 {
+			return nil
+		}
 	}
 
 	clientStore.Clear()
@@ -46,6 +65,7 @@ func SeedClientDefaults(_ context.Context, defs *defaults.ClientDefaults, profil
 			StreamMode: "ffmpeg",
 			HWAccel:    hwaccel,
 			Container:  c.Container,
+			Delivery:   c.Delivery,
 			AutoDetect: c.AutoDetect,
 			Command:    "ffmpeg",
 			IsClient:   true,

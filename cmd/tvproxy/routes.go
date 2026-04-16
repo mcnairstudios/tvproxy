@@ -79,9 +79,6 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 
 	r.Get("/vod/{sessionID}/status", h.vod.Status)
 	r.Get("/vod/{sessionID}/stream", h.vod.Stream)
-	r.Get("/vod/{sessionID}/hls/master.m3u8", h.vod.HLSMaster)
-	r.Get("/vod/{sessionID}/hls/playlist.m3u8", h.vod.HLSPlaylist)
-	r.Get("/vod/{sessionID}/hls/{segment}", h.vod.HLSSegment)
 	r.Get("/vod/{sessionID}/mse/{track}/init", h.vod.MSEInit)
 	r.Get("/vod/{sessionID}/mse/{track}/segment", h.vod.MSESegment)
 	r.Post("/vod/{sessionID}/mse/seek", h.vod.MSESeek)

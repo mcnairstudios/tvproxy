@@ -410,14 +410,14 @@ func TestBitrate(t *testing.T) {
 	if got := bitrate(PipelineOpts{OutputBitrate: 0}); got != 6000 {
 		t.Errorf("bitrate default = %d, want 6000", got)
 	}
-	if got := bitrate(PipelineOpts{SourceWidth: 3840}); got != 8000 {
-		t.Errorf("bitrate 4K = %d, want 8000", got)
+	if got := bitrate(PipelineOpts{SourceWidth: 3840}); got != 10000 {
+		t.Errorf("bitrate 4K = %d, want 10000", got)
 	}
-	if got := bitrate(PipelineOpts{SourceWidth: 1920}); got != 4000 {
-		t.Errorf("bitrate 1080p = %d, want 4000", got)
+	if got := bitrate(PipelineOpts{SourceWidth: 1920}); got != 5000 {
+		t.Errorf("bitrate 1080p = %d, want 5000", got)
 	}
-	if got := bitrate(PipelineOpts{SourceWidth: 1280}); got != 2500 {
-		t.Errorf("bitrate 720p = %d, want 2500", got)
+	if got := bitrate(PipelineOpts{SourceWidth: 1280}); got != 3000 {
+		t.Errorf("bitrate 720p = %d, want 3000", got)
 	}
 	if got := bitrate(PipelineOpts{SourceWidth: 720}); got != 1500 {
 		t.Errorf("bitrate SD = %d, want 1500", got)
@@ -426,7 +426,7 @@ func TestBitrate(t *testing.T) {
 
 func TestScaledBitrate(t *testing.T) {
 	tests := []struct{ width, want int }{
-		{3840, 8000}, {2560, 6000}, {1920, 4000}, {1280, 2500}, {720, 1500}, {0, 1500},
+		{3840, 10000}, {2560, 8000}, {1920, 5000}, {1280, 3000}, {720, 1500}, {0, 1500},
 	}
 	for _, tt := range tests {
 		if got := scaledBitrate(tt.width); got != tt.want {
@@ -481,5 +481,51 @@ func TestBuild_MPEGTSDetection(t *testing.T) {
 				t.Errorf("isMPEGTS for %q (container=%q) = %v, want %v", tt.url, container, isMPEGTS, tt.wantMPEG)
 			}
 		})
+	}
+}
+
+func TestPipelineOpts_SourceProfileMapping(t *testing.T) {
+	opts := PipelineOpts{
+		InputURL:         "rtsp://192.168.1.149/?freq=545",
+		VideoCodec:       "h264",
+		AudioCodec:       "aac_latm",
+		OutputVideoCodec: "h265",
+		OutputAudioCodec: "aac",
+		OutputFormat:     OutputMP4,
+		HWAccel:          HWVAAPI,
+		RecordingPath:    "/tmp/test.mp4",
+		IsLive:           true,
+		Deinterlace:      true,
+		RTSPLatency:      0,
+		RTSPProtocols:    "tcp",
+		UseAppSink:       true,
+	}
+
+	if opts.HWAccel != HWVAAPI {
+		t.Errorf("HWAccel = %v, want HWVAAPI", opts.HWAccel)
+	}
+	if !opts.Deinterlace {
+		t.Error("Deinterlace should be true for SAT>IP")
+	}
+	if !opts.IsLive {
+		t.Error("IsLive should be true for SAT>IP")
+	}
+	if !opts.UseAppSink {
+		t.Error("UseAppSink should be true for MSE delivery")
+	}
+}
+
+func TestNormalizeCodec_AV1Variants(t *testing.T) {
+	tests := []struct{ input, want string }{
+		{"av1", "av1"},
+		{"AV1", "av1"},
+		{"av1 video", "av1"},
+		{"AV1 Video", "av1"},
+	}
+	for _, tt := range tests {
+		got := NormalizeCodec(tt.input)
+		if got != tt.want {
+			t.Errorf("NormalizeCodec(%q) = %q, want %q", tt.input, got, tt.want)
+		}
 	}
 }

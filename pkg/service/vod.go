@@ -81,18 +81,29 @@ func NewVODService(
 	}
 }
 
-func (s *VODService) resolveStreamForChannel(ctx context.Context, channelID string) (streamURL, streamName, channelName, streamID, streamGroup string, useWireGuard bool, err error) {
+type resolvedStream struct {
+	URL            string
+	StreamName     string
+	ChannelName    string
+	StreamID       string
+	StreamGroup    string
+	UseWireGuard   bool
+	M3UAccountID   string
+	SatIPSourceID  string
+}
+
+func (s *VODService) resolveStreamForChannel(ctx context.Context, channelID string) (*resolvedStream, error) {
 	channel, err := s.channelStore.GetByID(ctx, channelID)
 	if err != nil {
-		return "", "", "", "", "", false, fmt.Errorf("channel not found: %w", err)
+		return nil, fmt.Errorf("channel not found: %w", err)
 	}
 	if !channel.IsEnabled {
-		return "", "", "", "", "", false, fmt.Errorf("channel %s is disabled", channelID)
+		return nil, fmt.Errorf("channel %s is disabled", channelID)
 	}
 
 	channelStreams, err := s.channelStore.GetStreams(ctx, channelID)
 	if err != nil {
-		return "", "", "", "", "", false, fmt.Errorf("getting channel streams: %w", err)
+		return nil, fmt.Errorf("getting channel streams: %w", err)
 	}
 
 	for _, cs := range channelStreams {
@@ -100,10 +111,19 @@ func (s *VODService) resolveStreamForChannel(ctx context.Context, channelID stri
 		if err != nil || !stream.IsActive {
 			continue
 		}
-		return stream.URL, stream.Name, channel.Name, cs.StreamID, stream.Group, stream.UseWireGuard, nil
+		return &resolvedStream{
+			URL:           stream.URL,
+			StreamName:    stream.Name,
+			ChannelName:   channel.Name,
+			StreamID:      cs.StreamID,
+			StreamGroup:   stream.Group,
+			UseWireGuard:  stream.UseWireGuard,
+			M3UAccountID:  stream.M3UAccountID,
+			SatIPSourceID: stream.SatIPSourceID,
+		}, nil
 	}
 
-	return "", "", "", "", "", false, fmt.Errorf("no active streams for channel %s", channelID)
+	return nil, fmt.Errorf("no active streams for channel %s", channelID)
 }
 
 func applySourceProfile(opts *session.StartOpts, sp *models.SourceProfile) {
@@ -206,6 +226,8 @@ type sessionArgs struct {
 	OutputVideoCodec string
 	OutputAudioCodec string
 	OutputHWAccel    string
+	Delivery         string
+	OutputHeight     int
 }
 
 func (s *VODService) composeSessionArgs(ctx context.Context, profileName, streamURL, streamGroup string) sessionArgs {
@@ -231,22 +253,53 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 		audioCodec = "aac"
 	}
 
+	delivery := sp.Delivery
+	if delivery == "" {
+		delivery = "stream"
+	}
+
+	container := sp.Container
+	if (videoCodec == "av1" || videoCodec == "AV1") && (container == "mpegts" || container == "ts") {
+		container = "mp4"
+	}
+
 	return sessionArgs{
-		Container:        sp.Container,
+		Container:        container,
 		OutputVideoCodec: videoCodec,
 		OutputAudioCodec: audioCodec,
 		OutputHWAccel:    hwaccel,
+		Delivery:         delivery,
+		OutputHeight:     sp.OutputHeight,
 	}
 }
 
 func (s *VODService) StartWatching(ctx context.Context, channelID string, profileName string, userAgent string, remoteAddr string) (string, string, string, bool, error) {
-	streamURL, streamName, channelName, streamID, streamGroup, useWG, err := s.resolveStreamForChannel(ctx, channelID)
+	rs, err := s.resolveStreamForChannel(ctx, channelID)
 	if err != nil {
 		return "", "", "", false, err
 	}
 
+	streamURL := rs.URL
+	streamName := rs.StreamName
+	channelName := rs.ChannelName
+	streamID := rs.StreamID
+	streamGroup := rs.StreamGroup
+	useWG := rs.UseWireGuard
+
 	audioOnly := strings.EqualFold(streamGroup, "radio")
 	sa := s.composeSessionArgs(ctx, profileName, streamURL, streamGroup)
+
+	var probeVCodec, probeACodec string
+	if s.probeCache != nil {
+		if pr, err := s.probeCache.GetProbe(streamID); err == nil && pr != nil {
+			if pr.Video != nil {
+				probeVCodec = pr.Video.Codec
+			}
+			if len(pr.AudioTracks) > 0 {
+				probeACodec = pr.AudioTracks[0].Codec
+			}
+		}
+	}
 
 	strategy := resolveSessionStrategy(
 		StrategyInput{
@@ -256,13 +309,16 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 			SatIPSource:   strings.HasPrefix(streamURL, "rtsp://"),
 			StreamGroup:   streamGroup,
 			StreamID:      streamID,
-			SourceProfile: s.lookupSourceProfile(ctx, streamID, "", streamURL),
+			StreamVCodec:  probeVCodec,
+			StreamACodec:  probeACodec,
+			SourceProfile: s.lookupSourceProfile(ctx, rs.M3UAccountID, rs.SatIPSourceID, streamURL),
 		},
 		StrategyOutput{
-			VideoCodec: sa.OutputVideoCodec,
-			AudioCodec: sa.OutputAudioCodec,
-			HWAccel:    sa.OutputHWAccel,
-			Container:  sa.Container,
+			VideoCodec:   sa.OutputVideoCodec,
+			AudioCodec:   sa.OutputAudioCodec,
+			HWAccel:      sa.OutputHWAccel,
+			Container:    sa.Container,
+			OutputHeight: sa.OutputHeight,
 		},
 	)
 
@@ -281,9 +337,11 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		OutputDir:        s.config.VODOutputDir,
 		SkipProbe:         strategy.SkipProbe,
 		MetadataOnly:     strategy.MetadataOnly,
+		Delivery:         sa.Delivery,
+		OutputHeight:     sa.OutputHeight,
 	}
 	startOpts.VideoEncoderElement = s.resolveEncoderElement(ctx, strategy.VideoCodec)
-	sp := s.lookupSourceProfile(ctx, streamID, "", streamURL)
+	sp := s.lookupSourceProfile(ctx, rs.M3UAccountID, rs.SatIPSourceID, streamURL)
 	applySourceProfile(&startOpts, sp)
 
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, startOpts, session.ConsumerViewer)
@@ -342,10 +400,11 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 			SourceProfile: s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID, streamURL),
 		},
 		StrategyOutput{
-			VideoCodec: sa.OutputVideoCodec,
-			AudioCodec: sa.OutputAudioCodec,
-			HWAccel:    sa.OutputHWAccel,
-			Container:  sa.Container,
+			VideoCodec:   sa.OutputVideoCodec,
+			AudioCodec:   sa.OutputAudioCodec,
+			HWAccel:      sa.OutputHWAccel,
+			Container:    sa.Container,
+			OutputHeight: sa.OutputHeight,
 		},
 	)
 
@@ -365,6 +424,8 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		SkipProbe:         strategy.SkipProbe,
 		KnownDuration:    stream.VODDuration,
 		MetadataOnly:     strategy.MetadataOnly,
+		Delivery:         sa.Delivery,
+		OutputHeight:     sa.OutputHeight,
 	}
 	startOpts2.VideoEncoderElement = s.resolveEncoderElement(ctx, strategy.VideoCodec)
 	applySourceProfile(&startOpts2, s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID, streamURL))
@@ -411,6 +472,8 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 		VideoEncoderElement:  s.resolveEncoderElement(ctx, sa.OutputVideoCodec),
 		OutputDir:            s.config.VODOutputDir,
 		MetadataOnly:         false,
+		Delivery:             sa.Delivery,
+		OutputHeight:         sa.OutputHeight,
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", 0, false, err

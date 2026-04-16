@@ -1,10 +1,10 @@
 # Fixes & Ideas (Not on Critical Path)
 
-## How to Test This Branch
+## How to Test
 
 ```bash
 # Build
-CGO_ENABLED=1 go build -o ./tvproxy ./cmd/tvproxy/
+CGO_ENABLED=1 go build -tags enable_gstreamer -o ./tvproxy ./cmd/tvproxy/
 
 # Run (with plugins)
 GST_PLUGIN_PATH=/Users/gavinmcnair/claude/gstreamer-plugin/builddir:/Users/gavinmcnair/claude/tvproxymux/build:/Users/gavinmcnair/claude/tvproxysrc/build \
@@ -13,417 +13,142 @@ TVPROXY_RECORD_DIR=/tmp/recordings \
 TVPROXY_VOD_OUTPUT_DIR=/tmp/recordings \
 TVPROXY_BASE_URL=http://192.168.0.111 \
 ./tvproxy
-
-# Test VOD (Browser profile = AV1 transcode)
-curl -X POST http://localhost:8080/stream/{streamID}/vod?profile=Browser
-
-# Test SAT>IP (Browser profile = AV1 transcode)
-curl -X POST http://localhost:8080/channel/{channelID}/vod?profile=Browser
-
-# Check status
-curl http://localhost:8080/vod/{channelID}/status
 ```
 
-## What's Working (feature/gstreamer-simplify)
-- Unified pipeline builder: `gstreamer.Build()` with 2 paths (MPEG-TS native, VOD qtdemux)
-- SAT>IP AV1 transcode: stable 30s+ runs, 4000+ kbps
-- VOD H.265→AV1 transcode: sub-10s first byte, 5000+ kbps
-- HDHR H.264 copy: 3.3s first byte
+## High Priority
 
-### Codec Matrix (tested 2026-04-13)
-All combinations tested with real tvproxy-streams content:
+### 1. Audio-Master Segment Cutting (A/V Sync Drift)
+**PARTIALLY RESOLVED:** PTS-driven timeline with shared base PTS eliminates drift from accumulated durations. Both tracks derive decodeTime directly from GStreamer PTS via shared atomic base. Rolling average handles erratic durations.
 
-| Source Video | Audio | Copy | →H264 VT | →H265 VT | →AV1 SW |
-|-------------|-------|------|----------|----------|---------|
-| H.264 | AAC | ✓ | n/a | ✓ | ✓ |
-| H.264 | AC3 | ✓ | n/a | ✓ | ✓ |
-| H.264 | DTS | ✓ | n/a | ✓ | ✓ |
-| H.264 | EAC3 | ✓ | n/a | ✓ | untested |
-| H.264 | TrueHD | ✓ | n/a | untested | untested |
-| HEVC | AAC | ✓ | ✓ | n/a | untested |
-| HEVC | AC3 | ✓ | ✓ | n/a | untested |
-| HEVC | DTS | ✓ | ✓ | n/a | untested |
-| HEVC | EAC3 | ✓ | ✓ | n/a | ✓ |
-| HEVC | FLAC | ✓ | ✓ | n/a | untested |
-| HEVC | TrueHD | ✓ | mac-fail* | n/a | slow** |
+**Remaining risk:** If audio PTS and video PTS diverge significantly (>100ms), segments may have A/V offset. Monitor in long (1hr+) sessions on A380.
 
-*10-bit HDR HEVC vtdec fails on macOS; VA-API on A380 should work
-**4K AV1 software encoding on ARM too slow for real-time; A380 HW will handle it
+**Full fix (if needed):** Audio PTS becomes master clock for segment boundaries — video cuts aligned to audio boundaries.
 
-### Fixes Applied This Session
-- Fakesink drain for unlinked demux pads (subtitles, extra audio tracks)
-- TrueHD audio decode chain (avdec_truehd)
-- FLAC audio: flacparse + flacdec (was passthrough, broke mp4 mux)
-- Opus audio: always decode (was passthrough, broke mp4 mux)
-- videoconvert between decoder and encoder for 10-bit format conversion
-- Nil dereference guards in createOutputParser and software encoder paths
-- AVI demuxer support in container switch
-- BuildNativeFromOpts: added fakesink drain for unlinked pads
-- MPEG-TS copy mode: AAC passthrough fix (was wrongly using LATM decoder)
-- Unified stream ID: media.StreamID(url) replaces dual StreamHash + ByStreamID
-- Encoder selection: per-codec settings (encoder_h264/h265/av1) instead of hwaccel guess
-- VOD copy: 1.1s first byte
-- All 13 test packages pass, 103 gstreamer-specific test cases
-- Dockerfile uses gavinmcnair/gstreamer:1.2 (GStreamer 1.28.2)
-- hlscmafsink for live TV (fMP4/CMAF HLS segments, hls.js in browser)
-- http.ServeFile for VOD (Range requests, browser-native seeking within transcoded portion)
-- Delivery mode automatic: live=HLS, VOD=stream (removed from profile)
-- Delivery field removed from StreamProfile model
-- VA-API encoders force NV12 (8-bit) via capsfilter (fixes 10-bit HDR on A380 256MB BAR)
-- Bolt stream store: count tracked via metadata key, no Stats() iteration on load
+### 2. Tuner Contention
+SAT>IP copy test failed with 0 bytes when tuner was locked by prior session. HDHR errored with "Internal data stream error" on tuner conflict.
 
-## Next: decodebin3 Integration (VOD Seeking)
+**Fix:** Session manager checks tuner availability before creating new pipeline.
+- `pipeline.SetState(StateNull)` must complete synchronously before removing session
+- Wait for RTSP TEARDOWN before starting new session on same tuner
+- Per-source connection limits in M3U account settings
 
-**Problem:** `souphttpsrc → matroskademux` can't seek via GStreamer API. `SeekSimple` fails with
-`gst_segment_do_seek: assertion 'segment->format == format' failed`. The demuxer operates in
-BYTE format (push mode from HTTP) but the seek is in TIME format. Confirmed in /tmp prototypes.
+### 3. Auto-Recovery for Live Stream Pipeline Drops
+When live pipeline EOS's (DVB signal drop) or errors, should auto-restart.
 
-**Solution:** Replace manual `souphttpsrc → matroskademux` with `decodebin3` for the VOD path.
-`decodebin3` (and `playbin3`) handle HTTP buffering, byte-to-time seek conversion, and demuxing
-internally. This is how Plex/Jellyfin do it.
+**Fix:**
+- Keep same session/consumers, rebuild GStreamer pipeline
+- Retry count + backoff (max 3 retries, 2s between)
+- Frontend MSE handles reconnect via generation counter (already implemented)
 
-**Architecture:**
-```
-VOD path (decodebin3):
-  decodebin3(uri=http://...) → decoded video pad → encode chain → mp4mux/hlscmafsink
-                              → decoded audio pad → AAC encode → mp4mux/hlscmafsink
+### 4. RTSP Copy Mode Produces 0 Bytes
+RTSP source with h264parse → mp4mux produces 0 bytes. Transcode works (re-timestamps). HTTP source copy works.
 
-Live TV path (unchanged):
-  souphttpsrc/rtspsrc → tsdemux → encode chain → hlscmafsink
-```
+**Root cause:** RTSP RTP timestamps don't align with mp4mux expectations.
 
-**Professional seek flow (from Gemini research):**
-1. Set pipeline to PAUSED
-2. Attach blocking pad probe on demuxer output
-3. On first buffer (preroll complete), send `gst_element_seek` with FLUSH+ACCURATE
-4. Wait for `GST_MESSAGE_ASYNC_DONE` on bus
-5. Set pipeline to PLAYING
+**Options:**
+1. RTSP copy → use mpegtsmux instead of mp4mux
+2. RTSP copy → always transcode (defeats purpose)
+3. RTSP copy → use plugin path via gst-launch subprocess
 
-**Buffering with hysteresis:**
-- Listen for `GST_MESSAGE_BUFFERING` on bus (0-100%)
-- Pause at <5%, resume at 100%
-- Show buffering % in UI
-- Set `buffer-duration` to 20-30s for 4K content
+**Impact:** SAT>IP copy mode only. Browser playback (always transcode) NOT affected.
 
-**Audio track selection:**
-- `decodebin3` exposes `GstStreamCollection` with all tracks (language, codec, channels)
-- Switch tracks via `current-audio` property or Stream API
-- No pipeline rebuild needed
+### 5. ensureProbe Doesn't Use WireGuard
+`ensureProbe()` uses libavformat directly (no custom HTTP client). WireGuard-routed sources fail to probe.
 
-**Files to change:**
-- `pkg/gstreamer/builder.go` — new `buildVODDecodebin3` function
-- `pkg/session/manager.go` — bus message handling (ASYNC_DONE, BUFFERING, ERROR)
-- `web/dist/app.js` — buffering % display, audio track selector
-- NVENC, VAAPI LP, QSV, VideoToolbox encoder chains with fallbacks
-- Probe-driven pipeline: ensureProbe() blocks if no cache, source profile as override
-- User-friendly error messages, bitrate/file_size in status endpoint
-- fragment-duration=2000ms (fixes "Could not multiplex" with svtav1enc)
+**Fix:** Use the probe scheduler's method instead of direct avprobe. The scheduler already handles WG routing.
 
-## Source Profile Redesign: GStreamer Tuning Bible
+### 6. ForceSeedClientDefaults Wipes User Customizations
+`ForceSeedClientDefaults` (called on every startup in main.go) clears all clients and re-seeds. Any user edits to client profiles are lost on restart. `SeedClientDefaults` (skip-if-non-empty) is only used internally now.
 
-The source profile should capture EVERYTHING that differs between source types as GStreamer pipeline properties. Codec/container detection is handled by probe — the profile handles *behavior*.
+**Fix:** main.go should call `SeedClientDefaults` (non-force). Only `HardReset` should call `ForceSeedClientDefaults`.
 
-### DVB/SAT>IP Profile (default for RTSP sources)
-```
-# Source element (rtspsrc)
-rtsp_latency: 0               # rtspsrc latency (ms)
-rtsp_protocols: tcp            # tcp, udp, udp-mcast
-rtsp_buffer_mode: 0            # 0=none, 1=slave, 2=buffer, 3=auto
-rtsp_retry: 5                  # connection retry count
+### 7. Hardcoded 16:9 Aspect Ratio for Output Scaling
+`builder.go` calculates output width as `OutputHeight * 16 / 9`. Non-16:9 content (4:3 SD, 21:9 movies) will be stretched/squashed.
 
-# Demux/Parse
-ts_set_timestamps: true        # tsparse set-timestamps
-deinterlace: false             # insert vadeinterlace/deinterlace element
-deinterlace_method: auto       # auto, bob, weave, adaptive
+**Fix:** Use source aspect ratio from probe data (`SourceWidth / SourceHeight`) when available. Fall back to 16:9 only when probe is missing.
 
-# Audio
-audio_delay_ms: 0              # ms offset to sync audio with video (positive = delay audio)
-audio_channels: 2              # target channel count (stereo downmix)
-audio_language: ""             # preferred ISO 639 language code
+## Medium Priority
 
-# Queues/Buffering  
-video_queue_time_ms: 10000     # max-size-time on video queue
-audio_queue_time_ms: 10000     # max-size-time on audio queue
+### 8. Migrate proxy.go to Native Build()
+`service/proxy.go` still uses `gst-launch-1.0` subprocess via `BuildPipeline()`. Need `Build()` variant that outputs to `fdsink`/`appsink` instead of `filesink`.
 
-# Encoder tuning
-encoder_bitrate_kbps: 0        # 0 = auto (scale by resolution)
-encoder_preset: 12             # svtav1enc preset / vtenc speed
-```
+### 9. Migrate Jellyfin HLS to Native Build()
+`hls/session.go` and `jellyfin/playback.go` use old `BuildPipeline()` for string pipelines. HLS output needs `hlssink2`/`hlscmafsink` elements. Works today via gst-launch subprocess.
 
-### IPTV/HTTP Profile (default for HTTP sources)
-```
-# Source element (souphttpsrc)
-http_timeout_sec: 30           # connection timeout
-http_retries: 3                # retry count
-http_user_agent: ""            # override (empty = global default)
-http_extra_headers: {}         # bypass headers, auth tokens
+### 10. Stream Source Failover
+When primary source fails, try secondary source. Channel→stream mapping already supports multiple streams. Need retry logic in `service/vod.go` and `service/proxy.go`.
 
-# Demux/Parse
-ts_set_timestamps: true        # tsparse set-timestamps
-deinterlace: false             # most IPTV is progressive
+### 11. Active Stream Tracking / Connection Limits
+Limited tuners per HDHR, limited connections per IPTV provider. Need tuner/connection count check BEFORE starting new pipeline. Per-source connection limits in M3U account settings.
 
-# Audio
-audio_delay_ms: 0              # usually 0 for IPTV
-audio_channels: 2              # stereo downmix
-audio_language: ""             # preferred language
+### 12. Probe Cache Pre-Population
+Without cached probe, channel switching requires live probe (2-5s delay). Probe scheduler runs on startup but must cover all channels. Consider priority probe queue for uncached channels.
 
-# Queues/Buffering
-video_queue_time_ms: 10000     # max-size-time
-audio_queue_time_ms: 10000     # max-size-time
-```
+### 13. Duplicated Builder Logic
+`buildMPEGTSNative` and `buildNonMPEGTSNative` share identical code for:
+- 10-bit/VT HEVC decode fallback (`decHW` logic)
+- Output scaling (`videoscale + videoconvert + capsfilter`)
 
-### HDHR Profile (default for port 5004 sources)
-```
-# Same as IPTV/HTTP but with HDHR-specific defaults
-http_timeout_sec: 10           # HDHR is local network, faster timeout
-ts_set_timestamps: true
-```
+Extract to shared helpers to reduce copy-paste drift risk.
 
-### VOD Profile (default for .mp4/.mkv URLs)
-```
-# No is-live, no timestamps
-# qtdemux handles everything
-audio_channels: 0              # 0 = preserve original
-```
+### 14. GetInit/GetSegment Goroutine Churn
+`TrackStore.GetInit()` and `GetSegment()` spawn a goroutine every 500ms to broadcast on the cond var (workaround for missed signals). Over a 30s timeout that's ~60 short-lived goroutines. Replace with `time.AfterFunc` + cancel on return.
 
-### Implementation
-- Each source type has a built-in default profile (not stored in DB)
-- Users can create custom profiles that override specific fields
-- The builder reads profile fields and applies them to element properties
-- Profile is selected by: (1) channel override, (2) M3U account default, (3) auto-detect from URL
+## Low Priority / Future
 
-## Output Codec Settings: Platform-Filtered Available Codecs
+### 15. WebRTC Sink for Sub-Second Latency
+`webrtcsink` available in gstreamer:1.2. Requires signalling server (WebSocket), ICE/STUN/TURN. Transformative for live TV channel surfing.
 
-The Settings → Encoding Defaults codec dropdown should show only codecs available on the current platform:
+### 16. WebM Output Needs Opus Audio
+WebM container requires Opus, not AAC. `buildAudioChain` always outputs AAC. Low priority — WebM uncommon for IPTV/VOD.
 
-### API endpoint: GET /api/gstreamer/capabilities
-Returns available encoders/decoders detected at runtime via `gst.Find()`:
-```json
-{
-  "video_encoders": [
-    {"id": "vaav1lpenc", "name": "AV1 (Intel VA-API LP)", "codec": "av1", "hw": true},
-    {"id": "vah265lpenc", "name": "H.265 (Intel VA-API LP)", "codec": "h265", "hw": true},
-    {"id": "vah264lpenc", "name": "H.264 (Intel VA-API LP)", "codec": "h264", "hw": true},
-    {"id": "svtav1enc", "name": "AV1 (SVT-AV1 Software)", "codec": "av1", "hw": false},
-    {"id": "x265enc", "name": "H.265 (x265 Software)", "codec": "h265", "hw": false},
-    {"id": "x264enc", "name": "H.264 (x264 Software)", "codec": "h264", "hw": false}
-  ],
-  "video_decoders": [...],
-  "audio_encoders": [...],
-  "hwaccel": "vaapi"  // detected platform
-}
-```
+### 17. Plugin Static Pad Transcode
+tvproxydemux static `video` pad works for copy but not external encode chains. Caps negotiation issue. Native tsdemux path used instead (proven working).
 
-Frontend: Settings page queries this on load, populates dropdowns with only available options.
-Priority: after source profile redesign.
+### 18. Audio Channels on Client Stream Profile
+Add `audio_channels` field (0=passthrough, 2=stereo, 6=5.1). Defaults: Browser=2, Phone=2, Plex=0, DLNA=2. Wire into buildAudioChain capsfilter.
 
-## Audio Transcode Channels on Client Stream Profile
-- Add `audio_channels` field to StreamProfile model (0=passthrough, 2=stereo, 6=5.1)
-- Defaults: Browser=2, Phone=2, Plex=0, Jellyfin=0, VLC=0, DLNA=2
-- User can override per-client (DLNA with AVR → set to 0)
-- Wire into buildAudioChain capsfilter instead of hardcoded channels=2
-- The source profile does NOT control this — it's a consumer decision
+### 19. Audio Language Selection in Native MPEG-TS Path
+Native tsdemux takes first audio pad. Need to collect all audio pads, check language tags, select preferred. tvproxydemux does this internally — replicate in native path.
 
-## Audio Language Selection in Native MPEG-TS Path
-- Source profile AudioLanguage flows to PipelineOpts but is only used by plugin path (tvproxydemux audio-language property)
-- Native tsdemux path takes first audio pad via pad-added — no language selection
-- Fix: in pad-added handler, collect all audio pads, check language tags, select preferred
-- This is what tvproxydemux does internally — replicate in native path
+## Reference
 
-## Import Saga (Implemented)
-- On M3U refresh, skeleton probe entries created for all new streams
-- `isValidProbe()` check ensures skeletons trigger live probe on first play
-- Background probe scheduler processes all unprobed streams
-- TMDB saga: deferred — inject TMDB client into M3UService, call Sync() after import
-  - On M3U refresh, collect VOD items (movies/series) and queue for TMDB lookup
-  - This would populate posters/metadata immediately instead of waiting for library browse
-
-## Remaining Issues (Priority Order)
-
-## Tuner Contention
-- SAT>IP copy test failed with 0 bytes when tuner was already locked by prior transcode test
-- HDHR copy errored at 5.7s with "Internal data stream error" — likely tuner conflict
-- Need proper tuner release between sequential tests (pipeline.SetState(StateNull) + sleep)
-- In production: session manager should wait for tuner release before creating new session on same tuner
-
-## Plugin Static Pad Transcode
-- Attempted linking encode chain to tvproxydemux's static `video` pad — produced 0 bytes
-- The static pad works for copy (plugin→plugin) but not for external encode chains
-- Root cause: likely caps negotiation issue between plugin's internal parser and external decoder
-- For now: transcode uses native tsdemux path (proven working)
-- Future: tvproxydemux could expose a raw/decoded video pad option
-
-## Codec → GStreamer Element Reference
-
-### Video (parser → decoder → encoder → output parser)
+### Codec → GStreamer Elements
 | Codec | Parser | Decoder (VT/VA/NV/SW) | Encoder (VT/VA/NV/SW) |
 |-------|--------|----------------------|----------------------|
 | h264 | h264parse | vtdec / vah264dec / nvh264dec / avdec_h264 | vtenc_h264 / vah264lpenc / nvh264enc / x264enc |
 | h265 | h265parse | vtdec / vah265dec / nvh265dec / avdec_h265 | vtenc_h265 / vah265lpenc / nvh265enc / x265enc |
-| av1 | av1parse | dav1ddec / avdec_av1 | vtenc_av1 / vaav1enc / nvav1enc / svtav1enc |
-| mpeg2 | mpegvideoparse | avdec_mpeg2video | — (always transcode to h264/h265/av1) |
+| av1 | av1parse | dav1ddec / vaav1dec / nvav1dec / avdec_av1 | vtenc_av1 / vaav1lpenc / nvav1enc / svtav1enc |
+| mpeg2 | mpegvideoparse | avdec_mpeg2video / vampeg2dec | — (always transcode) |
 
-### Audio (parser → decoder → encoder → output parser)
+### Audio Chains
 | Codec | Chain |
 |-------|-------|
 | aac_latm | aacparse → avdec_aac_latm → audioconvert → audioresample → faac → aacparse |
-| aac | aacparse (passthrough) |
+| aac | aacparse (passthrough in VOD, transcode in live) |
 | mp2 | mpegaudioparse → mpg123audiodec → audioconvert → audioresample → faac → aacparse |
 | ac3 | avdec_ac3 → audioconvert → audioresample → faac → aacparse |
 | eac3 | avdec_eac3 → audioconvert → audioresample → faac → aacparse |
 | dts | avdec_dca → audioconvert → audioresample → faac → aacparse |
-| opus | opusparse (passthrough) |
-| flac | flacparse (passthrough) or flacdec → transcode |
+| truehd | avdec_truehd → audioconvert → audioresample → faac → aacparse |
+| flac | flacparse → flacdec → audioconvert → audioresample → faac → aacparse |
+| opus | opusdec → audioconvert → audioresample → faac → aacparse |
 
-### Muxer Selection
-| Scenario | Muxer | Properties |
-|----------|-------|-----------|
-| MPEG-TS copy | mpegtsmux | (none) |
-| fMP4 transcode | mp4mux | fragment-duration=2000 streamable=true |
-| fMP4 VOD | mp4mux | fragment-duration=2000 streamable=true |
+### Hardware Acceleration
+| Hardware | Setting | Encoders |
+|----------|---------|----------|
+| Intel Arc (A380) | `vaapi` | vaav1lpenc, vah265lpenc, vah264lpenc |
+| Intel Gen9+ | `vaapi` | vah265lpenc, vah264lpenc |
+| NVIDIA Turing+ | `nvenc` | nvav1enc, nvh265enc, nvh264enc |
+| Apple Silicon | `videotoolbox` | vtenc_h265, vtenc_h264, vtenc_av1 (M4+) |
+| Software | `none` | svtav1enc, x265enc, x264enc |
 
-## Hardware Acceleration Selection Guide
-
-| Hardware | HWAccel Setting | Best For |
-|----------|----------------|----------|
-| Intel Gen9+ (Skylake→) | `vaapi` | LP encoders (vah264lpenc, vah265lpenc) — zero init overhead |
-| Intel Arc (DG2/A380) | `vaapi` | + vaav1enc (hardware AV1!) |
-| Intel (via oneVPL) | `qsv` | QSV encoders — falls back to VAAPI LP if unavailable |
-| NVIDIA Turing+ | `nvenc` | nvh264enc, nvh265enc, nvav1enc |
-| Apple Silicon | `videotoolbox` | vtdec, vtenc_h264, vtenc_h265, vtenc_av1 (M4+) |
-| Software (any) | `none` | x264enc, x265enc, svtav1enc (preset 12) |
-
-Set in Settings → Encoding Defaults → HWAccel. Source profiles can override per-source for testing.
-
-## DONE: Plugin container-hint / audio-codec-hint
-- container-hint, audio-codec-hint, video-codec-hint all implemented in tvproxydemux
-- Built and tested locally — all three properties appear in gst-inspect
-- Need to: rebuild gavinmcnair/gstreamer Docker image with updated plugin
-- Need to: update builder.go to pass hints when using plugin path (currently deferred due to go-gst NewPipelineFromString issue)
-
-## Stream Source Failover
-- When primary source fails (IPTV connection refused, tuner busy), should try secondary source
-- This is in the stream resolution layer (service/vod.go, service/proxy.go), not the pipeline builder
-- Existing channel→stream mapping already supports multiple streams per channel
-- Need: retry logic that picks next stream when first pipeline fails
-
-## Active Stream Tracking
-- Limited tuners per HDHR device, limited connections per IPTV provider
-- Session manager tracks active sessions per channel (existing)
-- Need to ensure tuner/connection count is checked BEFORE starting new pipeline
-- Consider: per-source connection limits in M3U account settings
-
-## Probe Cache Critical for Channel Switching Speed
-- Without cached probe data, channel switching requires a live probe (2-5s delay)
-- The probe cache MUST be pre-populated for all channels via the probe scheduler
-- Channel settings (codec, audio, container) should come from probe cache, not live detection
-- The probe scheduler already runs on startup — ensure it covers all channels with streams
-- Consider: priority probe queue when user navigates to a channel without cached data
-
-## Migrate proxy.go to Build()
-- service/proxy.go still uses gst-launch-1.0 subprocess via BuildPipeline()
-- Need Build() variant that outputs to fdsink/appsink instead of filesink
-- Lower priority — proxy path works, VOD path was the broken one
-
-## Migrate hls/session.go and jellyfin/playback.go to Build()
-- Both still use old BuildPipeline() for string pipelines + gst-launch subprocess
-- HLS output requires hlssink2/hlscmafsink elements — different from filesink
-- Need a Build() variant that outputs to HLS dir instead of file
-- Lower priority — Jellyfin HLS works via existing path, browser uses VOD stream
-
-## avprobe FormatName Not Populated
-- `ProbeResult.FormatName` is never set by avprobe package
-- Causes container detection to fall back to URL extension matching
-- Should extract format_name from ffprobe/libavformat during probe
-- File: pkg/avprobe/avprobe.go — need to read `format_name` from AVFormatContext
-
-## RTSP copy mode produces 0 bytes with mp4mux
-- RTSP source (rtspsrc ! rtpmp2tdepay) with h264parse → mp4mux produces 0 bytes
-- Same pipeline with HTTP source (souphttpsrc ! tsparse ! tsdemux) works fine (5.4MB)
-- Root cause: RTSP RTP timestamps don't align with what mp4mux expects for copy mode
-- Transcode works on RTSP because decode/encode re-timestamps
-- Options:
-  1. For RTSP copy: use mpegtsmux instead of mp4mux (native TS output)
-  2. For RTSP copy: always transcode to at least re-timestamp (defeats purpose)
-  3. For RTSP copy: use plugin path via gst-launch subprocess (plugins work)
-- Affects: SAT>IP copy mode. Browser playback (always transcode) is NOT affected.
-
-## RESOLVED: "Could not multiplex" on SAT>IP AV1 transcode
-- Fixed by increasing mp4mux fragment-duration from 500ms to 2000ms
-- Root cause: svtav1enc buffers 15+ seconds before first output, audio was 15s ahead of video
-- mp4mux with 500ms fragments couldn't handle the timestamp gap
-- 2000ms fragments give enough headroom for the encoder's startup buffering
-
-## Proxy profile session creation returns 500
-- Creating a VOD session with `?profile=Proxy` returns 500 internal server error
-- The Proxy profile is meant for HTTP passthrough (no transcoding)
-- May not be compatible with the VOD session flow (which expects a GStreamer pipeline)
-- Direct/Proxy profiles should probably bypass the session manager entirely
-- The correct path for Proxy: HTTP reverse proxy to the source URL
-
-## Multiple simultaneous AV1 transcodes stall on M1
-- Running 2 svtav1enc instances concurrently causes both to stall
-- svtav1enc preset=12 uses all available CPU cores
-- On the A380 with vaav1enc (hardware), this won't be an issue
-- Consider: limit concurrent AV1 transcodes to 1 (or number of hw encoders)
-- Consider: lower preset (higher number = faster but lower quality) for concurrent sessions
-
-## ensureProbe doesn't use WireGuard for probing
-- `ensureProbe()` calls `avprobe.Probe()` which uses libavformat directly (no custom HTTP client)
-- WireGuard-routed sources would fail to probe (connection blocked without WG tunnel)
-- The probe scheduler worker handles this correctly (uses configured HTTP client)
-- `ensureProbe` is only for edge cases (never-probed channels)
-- Fix: use the scheduler's probe method instead of direct avprobe
-
-## Auto-recovery for live stream pipeline drops
-- When live pipeline EOS's (source drop) or errors, auto-restart the pipeline
-- Keep the same session/consumers, just rebuild the GStreamer pipeline
-- Add retry count and backoff (max 3 retries, 2s between)
-- Output file should be appended or a new file created
-- Frontend tail reader should handle the file change seamlessly
-- This would make live TV viewing resilient to brief source interruptions
-
-## Deinterlace not wired in GStreamer builder
-- Source profile Deinterlace flag exists but not used in builder.go
-- For GStreamer: insert `deinterlace` element after decoder in transcode chain
-- Or: use `vavpp` (VAAPI) / `vtdec deinterlace=true` (VideoToolbox) for hardware deinterlace
-- tvproxydemux detects interlaced content (video-interlaced property) — could auto-insert
-
-## RestartWithSeek is ffmpeg-specific
-- pkg/session/manager.go:485 — manipulates ffmpeg -ss args
-- For GStreamer: either send seek event to pipeline, or create new pipeline with seek offset
-- VOD seeking works differently in GStreamer — use gst_element_seek_simple()
-- Or: for qtdemux, set souphttpsrc Range header for HTTP byte-range seeking
-
-## Future: hlscmafsink for browser playback (CMAF fMP4 HLS)
-- `hlscmafsink` is available in gavinmcnair/gstreamer:1.1 (Rust gst-plugins-rs)
-- Outputs CMAF fMP4 HLS segments instead of single file + tail reader
-- Benefits: lower latency (chunked TE), native Safari HLS, better seeking
-- Requires: new Build() sink type (HLSDir instead of RecordingPath)
-- Frontend: hls.js for Chrome, native HLS for Safari
-- This is the proper long-term solution for browser playback
-
-## Future: webrtcsink for sub-second latency
-- `webrtcsink` is available in gavinmcnair/gstreamer:1.1
-- Sub-second latency WebRTC streaming to browsers
-- Requires: signalling server (WebSocket), ICE/STUN/TURN handling
-- Would be transformative for live TV channel surfing (instant channel switch)
-- Complex to implement but the elements are ready
-
-## WebM output needs Opus audio (not AAC)
-- WebM container requires Opus audio, not AAC
-- If output format is WebM, audio chain should use opusenc instead of faac
-- Currently buildAudioChain always outputs AAC
-- Low priority — WebM not commonly used for IPTV/VOD
-
-## go-gst NewPipelineFromString doesn't work with plugin bins
-- `gst-launch-1.0` with tvproxysrc/tvproxydemux/tvproxymux produces output
-- Same pipeline string via go-gst `NewPipelineFromString` produces 0 bytes
-- Root cause: go-gst handles GstBin elements (our plugins) differently than gst-launch
-- Workaround: always use native programmatic pipeline (buildMPEGTSNative)
-- Future: investigate go-gst bin element handling, or use gst-launch subprocess for plugin path
-
-## GLib-GObject-CRITICAL warnings
-- `g_boxed_type_register_static: assertion 'g_type_from_name (name) == 0' failed`
-- Appears on first plugin use — harmless but noisy
-- Likely a type registration race in go-gst bindings
+### MSE Architecture (Current)
+```
+GStreamer pipeline → appsink → Go TrackStore (fMP4 via mp4ff) → HTTP segments → Browser MSE
+Keyframe detection: BufferFlagDeltaUnit (GStreamer flag, not OBU/NALU parsing)
+Duration: rolling 10-frame average, PTS diff primary, buf.Duration fallback
+AV1: strip TD OBUs, skip ≤10 byte buffers, sequence header in av1C configOBUs
+Audio: always transcode to AAC for live, copy AAC for VOD
+Seeking: CGO gst_element_seek_simple, generation counter invalidates old segments
+```

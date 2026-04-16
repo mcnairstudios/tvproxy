@@ -63,6 +63,8 @@ type PipelineOpts struct {
 	EncoderBitrateKbps int
 	SourceWidth        int
 	SourceHeight       int
+	OutputHeight       int
+	SourcePixFmt       string
 
 	DualOutput   bool
 	SeekOffset   float64

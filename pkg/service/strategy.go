@@ -42,10 +42,11 @@ type StrategyInput struct {
 }
 
 type StrategyOutput struct {
-	VideoCodec string
-	AudioCodec string
-	HWAccel    string
-	Container  string
+	VideoCodec   string
+	AudioCodec   string
+	HWAccel      string
+	Container    string
+	OutputHeight int
 }
 
 func classifyStream(in StrategyInput) StreamCategory {
@@ -89,10 +90,20 @@ func liveStrategy(in StrategyInput, out StrategyOutput, cat StreamCategory) Sess
 		sourceAudio = strings.ToLower(in.StreamACodec)
 	}
 
+	videoCodec := resolveVideoActionWithHeight(sourceVideo, out.VideoCodec, out.OutputHeight)
+
+	audioCodec := resolveAudioAction(sourceAudio, out.AudioCodec, out.Container)
+	if audioCodec == "copy" && sourceAudio != "aac" {
+		audioCodec = "aac"
+	}
+	if audioCodec == "copy" && (cat == CategoryLiveSatIP || cat == CategoryLiveIPTV) {
+		audioCodec = "aac"
+	}
+
 	return SessionStrategy{
 		Category:     cat,
-		VideoCodec:   resolveVideoAction(sourceVideo, out.VideoCodec),
-		AudioCodec:   resolveAudioAction(sourceAudio, out.AudioCodec, out.Container),
+		VideoCodec:   videoCodec,
+		AudioCodec:   audioCodec,
 		HWAccel:      out.HWAccel,
 		Container:    out.Container,
 		MetadataOnly: false,
@@ -100,37 +111,77 @@ func liveStrategy(in StrategyInput, out StrategyOutput, cat StreamCategory) Sess
 }
 
 func vodRemoteStrategy(in StrategyInput, out StrategyOutput) SessionStrategy {
-	s := SessionStrategy{
+	sourceAudio := "aac"
+	if in.StreamACodec != "" {
+		sourceAudio = strings.ToLower(in.StreamACodec)
+	}
+
+	audioCodec := resolveAudioAction(sourceAudio, out.AudioCodec, out.Container)
+	if audioCodec == "copy" && sourceAudio != "aac" {
+		audioCodec = "aac"
+	}
+
+	return SessionStrategy{
 		Category:     CategoryVODRemote,
 		VideoCodec:   out.VideoCodec,
-		AudioCodec:   out.AudioCodec,
+		AudioCodec:   audioCodec,
 		HWAccel:      out.HWAccel,
 		Container:    out.Container,
 		MetadataOnly: false,
 	}
-	return s
 }
 
 func vodLocalStrategy(in StrategyInput, out StrategyOutput) SessionStrategy {
-	s := SessionStrategy{
+	sourceAudio := "aac"
+	if in.StreamACodec != "" {
+		sourceAudio = strings.ToLower(in.StreamACodec)
+	}
+
+	audioCodec := resolveAudioAction(sourceAudio, out.AudioCodec, out.Container)
+	if audioCodec == "copy" && sourceAudio != "aac" {
+		audioCodec = "aac"
+	}
+
+	return SessionStrategy{
 		Category:     CategoryVODLocal,
 		VideoCodec:   out.VideoCodec,
-		AudioCodec:   out.AudioCodec,
+		AudioCodec:   audioCodec,
 		HWAccel:      out.HWAccel,
 		Container:    out.Container,
 		MetadataOnly: false,
 	}
-	return s
 }
 
 func resolveVideoAction(sourceCodec, clientCodec string) string {
+	return resolveVideoActionWithHeight(sourceCodec, clientCodec, 0)
+}
+
+func resolveVideoActionWithHeight(sourceCodec, clientCodec string, outputHeight int) string {
 	if clientCodec == "" || clientCodec == "default" || clientCodec == "copy" {
+		if outputHeight > 0 {
+			if sourceCodec != "" {
+				return normalizeVideoCodecName(sourceCodec)
+			}
+			return "h265"
+		}
 		return "copy"
 	}
-	if sourceCodec == clientCodec {
+	src := normalizeVideoCodecName(sourceCodec)
+	dst := normalizeVideoCodecName(clientCodec)
+	if src == dst && outputHeight == 0 {
 		return "copy"
 	}
 	return clientCodec
+}
+
+func normalizeVideoCodecName(c string) string {
+	switch strings.ToLower(c) {
+	case "hevc", "h265", "h.265":
+		return "h265"
+	case "avc", "h264", "h.264":
+		return "h264"
+	}
+	return strings.ToLower(c)
 }
 
 func resolveAudioAction(sourceCodec, clientCodec, outputContainer string) string {

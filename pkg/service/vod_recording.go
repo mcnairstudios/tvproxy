@@ -48,12 +48,16 @@ func (s *VODService) startRecordingInternal(ctx context.Context, sessionKey, tit
 		return s.finalizeRecordingStart(sess, sessionKey, consumerID, title, channelName, userID, stopAt)
 	}
 
-	streamURL, streamName, resolvedChannelName, streamID, _, useWG, err := s.resolveStreamForChannel(ctx, sessionKey)
+	rs, err := s.resolveStreamForChannel(ctx, sessionKey)
 	if err != nil {
 		return err
 	}
+	streamURL := rs.URL
+	streamName := rs.StreamName
+	streamID := rs.StreamID
+	useWG := rs.UseWireGuard
 	if channelName == "" {
-		channelName = resolvedChannelName
+		channelName = rs.ChannelName
 	}
 
 	defaultHWAccel, defaultCodec := s.settingsService.ResolveGlobalDefaults(ctx)

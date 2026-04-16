@@ -26,6 +26,7 @@ type Session struct {
 	OutputAudioCodec string
 	OutputContainer  string
 	OutputHWAccel    string
+	Delivery         string
 	UseWireGuard     bool
 	FilePath        string
 	TempDir         string
@@ -110,6 +111,13 @@ func (s *Session) getError() error {
 	err := s.err
 	s.mu.RUnlock()
 	return err
+}
+
+func (s *Session) GetError() string {
+	if err := s.getError(); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 func (s *Session) setLastStderr(stderr string) {

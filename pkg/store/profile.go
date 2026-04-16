@@ -54,10 +54,27 @@ func (s *ProfileStoreImpl) Load() error {
 	if err := json.Unmarshal(data, &profiles); err != nil {
 		return fmt.Errorf("parsing profile store: %w", err)
 	}
+	changed := false
+	for i := range profiles {
+		if profiles[i].Delivery == "hls" {
+			profiles[i].Delivery = "mse"
+			changed = true
+		}
+		if profiles[i].Name == "Browser" && profiles[i].IsClient && profiles[i].Delivery == "" {
+			profiles[i].Delivery = "mse"
+			changed = true
+		}
+	}
+
 	s.mu.Lock()
 	s.profiles = profiles
 	s.mu.Unlock()
 	s.log.Info().Int("count", len(profiles)).Msg("loaded profiles from json")
+
+	if changed {
+		s.Save()
+		s.log.Info().Msg("migrated hls delivery to mse")
+	}
 	return nil
 }
 

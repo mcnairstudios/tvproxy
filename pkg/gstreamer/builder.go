@@ -159,7 +159,14 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 	if isCopy {
 		videoElements = createOutputParser(srcCodec)
 	} else {
-		videoElements = append(videoElements, createHWDecoder(srcCodec, hw)...)
+		decHW := hw
+		if strings.Contains(opts.SourcePixFmt, "10") || strings.Contains(opts.SourcePixFmt, "12") {
+			decHW = HWNone
+		}
+		if hw == HWVideoToolbox && (srcCodec == "h265" || srcCodec == "hevc") {
+			decHW = HWNone
+		}
+		videoElements = append(videoElements, createHWDecoder(srcCodec, decHW)...)
 		if opts.Deinterlace {
 			di, _ := gst.NewElement("vadeinterlace")
 			if di == nil {
@@ -167,6 +174,17 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 			}
 			if di != nil {
 				videoElements = append(videoElements, di)
+			}
+		}
+		if opts.OutputHeight > 0 {
+			vscale, _ := gst.NewElement("videoscale")
+			vconv0, _ := gst.NewElement("videoconvert")
+			scaleCaps, _ := gst.NewElement("capsfilter")
+			if vscale != nil && vconv0 != nil && scaleCaps != nil {
+				w := opts.OutputHeight * 16 / 9
+				w = (w + 1) &^ 1
+				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,width=%d,height=%d", w, opts.OutputHeight)))
+				videoElements = append(videoElements, vconv0, vscale, scaleCaps)
 			}
 		}
 		vconv, _ := gst.NewElement("videoconvert")
@@ -205,7 +223,7 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 
 	if opts.UseAppSink {
 		vCaps, _ := gst.NewElement("capsfilter")
-		vCaps.SetProperty("caps", gst.NewCapsFromString("video/x-h265,stream-format=byte-stream,alignment=au;video/x-h264,stream-format=byte-stream,alignment=au"))
+		vCaps.SetProperty("caps", gst.NewCapsFromString("video/x-h265,stream-format=byte-stream,alignment=au;video/x-h264,stream-format=byte-stream,alignment=au;video/x-av1,alignment=frame"))
 		vSink, _ := gst.NewElement("appsink")
 		vSink.Set("name", "videosink")
 		vSink.SetProperty("emit-signals", true)
@@ -355,7 +373,14 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 	if isCopy {
 		videoElements = createOutputParser(srcCodec)
 	} else {
-		videoElements = append(videoElements, createHWDecoder(srcCodec, hw)...)
+		decHW := hw
+		if strings.Contains(opts.SourcePixFmt, "10") || strings.Contains(opts.SourcePixFmt, "12") {
+			decHW = HWNone
+		}
+		if hw == HWVideoToolbox && (srcCodec == "h265" || srcCodec == "hevc") {
+			decHW = HWNone
+		}
+		videoElements = append(videoElements, createHWDecoder(srcCodec, decHW)...)
 		if opts.Deinterlace {
 			di, _ := gst.NewElement("vadeinterlace")
 			if di == nil {
@@ -363,6 +388,17 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 			}
 			if di != nil {
 				videoElements = append(videoElements, di)
+			}
+		}
+		if opts.OutputHeight > 0 {
+			vscale, _ := gst.NewElement("videoscale")
+			vconv0, _ := gst.NewElement("videoconvert")
+			scaleCaps, _ := gst.NewElement("capsfilter")
+			if vscale != nil && vconv0 != nil && scaleCaps != nil {
+				w := opts.OutputHeight * 16 / 9
+				w = (w + 1) &^ 1
+				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,width=%d,height=%d", w, opts.OutputHeight)))
+				videoElements = append(videoElements, vconv0, vscale, scaleCaps)
 			}
 		}
 		vconv, _ := gst.NewElement("videoconvert")
@@ -400,7 +436,7 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 
 	if opts.UseAppSink {
 		vCaps, _ := gst.NewElement("capsfilter")
-		vCaps.SetProperty("caps", gst.NewCapsFromString("video/x-h265,stream-format=byte-stream,alignment=au;video/x-h264,stream-format=byte-stream,alignment=au"))
+		vCaps.SetProperty("caps", gst.NewCapsFromString("video/x-h265,stream-format=byte-stream,alignment=au;video/x-h264,stream-format=byte-stream,alignment=au;video/x-av1,alignment=frame"))
 		vSink, _ := gst.NewElement("appsink")
 		vSink.Set("name", "videosink")
 		vSink.SetProperty("emit-signals", true)
@@ -730,6 +766,9 @@ func bitrate(opts PipelineOpts) int {
 	}
 	if opts.EncoderBitrateKbps > 0 {
 		return opts.EncoderBitrateKbps
+	}
+	if opts.OutputHeight > 0 {
+		return scaledBitrate(opts.OutputHeight * 16 / 9)
 	}
 	if opts.SourceWidth > 0 {
 		return scaledBitrate(opts.SourceWidth)

@@ -60,6 +60,8 @@ type StartOpts struct {
 	HTTPUserAgent     string
 	TSSetTimestamps   bool
 	EncoderBitrateKbps int
+	Delivery           string
+	OutputHeight       int
 }
 
 type Manager struct {
@@ -431,6 +433,7 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 		OutputAudioCodec: opts.OutputAudioCodec,
 		OutputContainer:  opts.OutputContainer,
 		OutputHWAccel:    opts.OutputHWAccel,
+		Delivery:         opts.Delivery,
 		UseWireGuard:     opts.UseWireGuard,
 		Duration:         opts.KnownDuration,
 		SeekOffset:       opts.SeekOffset,
@@ -680,9 +683,11 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	container := ""
 	srcWidth := 0
 	srcHeight := 0
+	srcPixFmt := ""
 	if probe != nil {
 		if probe.Video != nil {
 			srcVideo = probe.Video.Codec
+			srcPixFmt = probe.Video.PixFmt
 		}
 		srcWidth = probe.Width
 		srcHeight = probe.Height
@@ -750,6 +755,8 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		EncoderBitrateKbps: s.startOpts.EncoderBitrateKbps,
 		SourceWidth:        srcWidth,
 		SourceHeight:       srcHeight,
+		OutputHeight:       s.startOpts.OutputHeight,
+		SourcePixFmt:       srcPixFmt,
 		SeekOffset:         s.startOpts.SeekOffset,
 	}
 
@@ -776,7 +783,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Str("output_file", s.FilePath).
 		Msg("building pipeline")
 
-	opts.UseAppSink = s.startOpts.ProfileName == "Browser"
+	opts.UseAppSink = s.startOpts.Delivery == "mse"
 
 	pipeline, path, err := gstreamer.Build(opts)
 	if err != nil {
@@ -795,6 +802,12 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		}
 		s.VideoStore = fmp4.NewTrackStore(true, outCodec)
 		s.AudioStore = fmp4.NewTrackStore(false, "")
+		sharedBase := fmp4.NewSharedBasePTS()
+		s.VideoStore.SetSharedBase(sharedBase)
+		s.AudioStore.SetSharedBase(sharedBase)
+		if s.startOpts.OutputHeight > 0 {
+			s.VideoStore.SetTargetHeight(s.startOpts.OutputHeight)
+		}
 
 		if err := fmp4.SetupVideoSink(pipeline, s.VideoStore); err != nil {
 			m.log.Error().Err(err).Msg("failed to setup video appsink")

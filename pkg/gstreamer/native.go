@@ -318,6 +318,13 @@ func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
 			if decoder == nil {
 				decoder, _ = gst.NewElement("vaapih265dec")
 			}
+		case "av1":
+			decoder, _ = gst.NewElement("vaav1dec")
+		case "mpeg2video":
+			decoder, _ = gst.NewElement("vampeg2dec")
+			if decoder == nil {
+				decoder, _ = gst.NewElement("vaapimpeg2dec")
+			}
 		default:
 			decoder, _ = gst.NewElement("vaapidecode")
 		}
@@ -399,6 +406,7 @@ func createEncoderByName(elementName, codec string, hw HWAccel, bitrate int) []*
 			switch {
 			case strings.HasPrefix(elementName, "va") || strings.HasPrefix(elementName, "vaapi"):
 				encoder.SetProperty("bitrate", uint(bitrate))
+				encoder.SetProperty("key-int-max", uint(60))
 				conv, _ := gst.NewElement("videoconvert")
 				caps, _ := gst.NewElement("capsfilter")
 				caps.SetProperty("caps", gst.NewCapsFromString("video/x-raw,format=NV12"))
@@ -508,6 +516,7 @@ func createEncoderByName(elementName, codec string, hw HWAccel, bitrate int) []*
 		}
 		if encoder != nil {
 			encoder.SetProperty("bitrate", uint(bitrate))
+			encoder.SetProperty("key-int-max", uint(60))
 			conv, _ := gst.NewElement("videoconvert")
 			caps, _ := gst.NewElement("capsfilter")
 			caps.SetProperty("caps", gst.NewCapsFromString("video/x-raw,format=NV12"))

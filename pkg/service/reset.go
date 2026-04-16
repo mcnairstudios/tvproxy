@@ -91,7 +91,7 @@ func (r *DataResetter) HardReset() error {
 		return err
 	}
 	if r.clientDefs != nil {
-		SeedClientDefaults(context.Background(), r.clientDefs, r.profileStore, r.clientStore, r.settingsStore)
+		ForceSeedClientDefaults(context.Background(), r.clientDefs, r.profileStore, r.clientStore, r.settingsStore)
 	}
 	return nil
 }
