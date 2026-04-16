@@ -805,6 +805,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		sharedBase := fmp4.NewSharedBasePTS()
 		s.VideoStore.SetSharedBase(sharedBase)
 		s.AudioStore.SetSharedBase(sharedBase)
+		s.VideoStore.SetPartner(s.AudioStore)
 		if s.startOpts.OutputHeight > 0 {
 			s.VideoStore.SetTargetHeight(s.startOpts.OutputHeight)
 		}

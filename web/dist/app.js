@@ -4072,12 +4072,17 @@
         fetch(basePath + 'audio/init', {signal: initAc.signal, cache: 'no-store'}).then(function(r) {
           if (!r.ok) throw new Error('audio init: HTTP ' + r.status + ' ' + r.statusText);
           return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; });
-        }),
-        fetch(basePath + 'debug', {signal: initAc.signal, cache: 'no-store'}).then(function(r) { return r.json(); })
-      ]).then(function(results) {
-        var videoInit = results[0];
-        var audioInit = results[1];
-        var debugInfo = results[2];
+        })
+      ]).then(function(initResults) {
+        var videoInit = initResults[0];
+        var audioInit = initResults[1];
+        return fetch(basePath + 'debug', {cache: 'no-store'}).then(function(r) { return r.json(); }).then(function(debugInfo) {
+          return { videoInit: videoInit, audioInit: audioInit, debugInfo: debugInfo };
+        });
+      }).then(function(results) {
+        var videoInit = results.videoInit;
+        var audioInit = results.audioInit;
+        var debugInfo = results.debugInfo;
 
         mseDuration = debugInfo.duration || dvrObj.duration || 0;
         var videoCodec = detectVideoCodec(videoInit.buf);
@@ -4102,6 +4107,13 @@
 
           statusEl.textContent = 'Buffering...';
           statusEl.style.color = '#ffaa00';
+          var videoOffset = debugInfo.video_offset || 0;
+          var audioOffset = debugInfo.audio_offset || 0;
+          if (videoOffset > 0 || audioOffset > 0) {
+            console.log('A/V offset: video=' + videoOffset.toFixed(3) + 's audio=' + audioOffset.toFixed(3) + 's');
+          }
+          mseVideoSb.timestampOffset = videoOffset;
+          mseAudioSb.timestampOffset = audioOffset;
           mseWaitUpdate(mseVideoSb).then(function() {
             mseVideoSb.appendBuffer(videoInit.buf);
             return mseWaitUpdate(mseVideoSb);

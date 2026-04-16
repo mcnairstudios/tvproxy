@@ -656,6 +656,10 @@ func (h *VODHandler) MSEDebug(w http.ResponseWriter, r *http.Request) {
 	if sess.VideoStore != nil {
 		resp["video_segments"] = sess.VideoStore.SegmentCount()
 		resp["gen"] = sess.VideoStore.Generation()
+		resp["video_offset"] = sess.VideoStore.TimestampOffset()
+	}
+	if sess.AudioStore != nil {
+		resp["audio_offset"] = sess.AudioStore.TimestampOffset()
 	}
 	if errMsg := sess.GetError(); errMsg != "" {
 		resp["error"] = errMsg
