@@ -16,6 +16,11 @@ import (
 
 const SegmentDuration = 2 * time.Second
 
+type segmentEntry struct {
+	data        []byte
+	startTimeNs int64
+}
+
 type TrackStore struct {
 	mu     sync.Mutex
 	cond   *sync.Cond
@@ -23,7 +28,7 @@ type TrackStore struct {
 	gen    int64
 
 	initSeg  []byte
-	segments [][]byte
+	segments []segmentEntry
 
 	pendingSamples []mp4.FullSample
 	pendingStart   time.Time
@@ -106,7 +111,11 @@ func (ts *TrackStore) TimestampOffset() float64 {
 	if base < 0 {
 		return 0
 	}
-	return float64(ts.firstPTSNs-base) / 1e9
+	off := float64(ts.firstPTSNs-base) / 1e9
+	if off < -10 || off > 30 {
+		return 0
+	}
+	return off
 }
 
 func (ts *TrackStore) IsClosed() bool {
@@ -258,8 +267,17 @@ func (ts *TrackStore) flushSegment() {
 		return
 	}
 
+	startNs := int64(-1)
+	if len(samples) > 0 && ts.sharedBaseNs != nil {
+		base := atomic.LoadInt64(ts.sharedBaseNs)
+		if base >= 0 {
+			sampleTicks := samples[0].DecodeTime
+			startNs = int64(sampleTicks) * 1e9 / int64(ts.timescale)
+		}
+	}
+
 	ts.mu.Lock()
-	ts.segments = append(ts.segments, buf.Bytes())
+	ts.segments = append(ts.segments, segmentEntry{data: buf.Bytes(), startTimeNs: startNs})
 
 	if ts.maxSegments > 0 && len(ts.segments) > ts.maxSegments {
 		ts.segments = ts.segments[len(ts.segments)-ts.maxSegments:]
@@ -310,6 +328,19 @@ func (ts *TrackStore) ptsToTicks(ptsNs int64) uint64 {
 }
 
 func (ts *TrackStore) resolveDuration(ptsNs, bufDurNs int64) uint32 {
+	if !ts.isVideo {
+		if bufDurNs > 0 && bufDurNs < 1e9 {
+			dur := uint32(bufDurNs * int64(ts.timescale) / 1e9)
+			if dur > 0 {
+				ts.recordDuration(dur)
+				return dur
+			}
+		}
+		if avg := ts.avgDuration(); avg > 0 {
+			return avg
+		}
+		return 1024
+	}
 	if ptsNs >= 0 && ts.lastPTSNs >= 0 {
 		diffNs := ptsNs - ts.lastPTSNs
 		if diffNs > 0 && diffNs < 1e9 {
@@ -328,10 +359,7 @@ func (ts *TrackStore) resolveDuration(ptsNs, bufDurNs int64) uint32 {
 	if avg := ts.avgDuration(); avg > 0 {
 		return avg
 	}
-	if ts.isVideo {
-		return 3600
-	}
-	return 1024
+	return 3600
 }
 
 func (ts *TrackStore) PushVideoFrame(data []byte, ptsNs, bufDurNs int64, isKeyframe bool) {
@@ -447,6 +475,16 @@ func (ts *TrackStore) PushAudioFrame(data []byte, ptsNs, bufDurNs int64) {
 	}
 	ts.decodeTime += uint64(duration)
 	ts.pendingSamples = append(ts.pendingSamples, sample)
+
+	if !ts.isVideo {
+		now := time.Now()
+		if ts.pendingStart.IsZero() {
+			ts.pendingStart = now
+		}
+		if now.Sub(ts.pendingStart) >= SegmentDuration {
+			ts.flushSegment()
+		}
+	}
 }
 
 func (ts *TrackStore) GetInit() ([]byte, int64) {
@@ -466,19 +504,20 @@ func (ts *TrackStore) GetInit() ([]byte, int64) {
 	return ts.initSeg, ts.gen
 }
 
-func (ts *TrackStore) GetSegment(gen int64, seq int) ([]byte, bool) {
+func (ts *TrackStore) GetSegment(gen int64, seq int) ([]byte, int64, bool) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if ts.closed || ts.gen != gen {
-			return nil, false
+			return nil, 0, false
 		}
 		if seq < len(ts.segments) {
-			return ts.segments[seq], true
+			e := ts.segments[seq]
+			return e.data, e.startTimeNs, true
 		}
 		if time.Now().After(deadline) {
-			return nil, false
+			return nil, 0, false
 		}
 		go func() {
 			time.Sleep(500 * time.Millisecond)
@@ -528,6 +567,12 @@ func RunSegmentFlusher(ctx context.Context, video, audio *TrackStore) {
 				}
 			}
 			video.mu.Unlock()
+
+			audio.mu.Lock()
+			if len(audio.pendingSamples) > 0 && !audio.pendingStart.IsZero() && time.Since(audio.pendingStart) >= SegmentDuration {
+				audio.flushSegment()
+			}
+			audio.mu.Unlock()
 		}
 	}
 }

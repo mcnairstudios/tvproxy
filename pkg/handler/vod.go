@@ -585,34 +585,10 @@ func (h *VODHandler) MSEInit(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "sessionID")
 	track := chi.URLParam(r, "track")
 
-	sc, scReason := h.acquireController(channelID, 30*time.Second)
-	if sc != nil {
-		var data []byte
-		var gen int64
-		if track == "video" {
-			data, gen = sc.GetVideoInit()
-		} else {
-			data, gen = sc.GetAudioInit()
-		}
-		if data == nil {
-			w.Header().Set("Cache-Control", "no-store")
-			respondError(w, http.StatusGone, "init segment not available — pipeline may have failed")
-			return
-		}
-		w.Header().Set("Content-Type", "video/mp4")
-		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Gen", strconv.FormatInt(gen, 10))
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Expose-Headers", "X-Gen")
-		w.Write(data)
-		return
-	}
-
 	store, reason := h.acquireStore(channelID, track, 30*time.Second)
 	if store == nil {
 		code := http.StatusServiceUnavailable
-		if reason == "session not found" && scReason == "session not found" {
+		if reason == "session not found" {
 			code = http.StatusNotFound
 		}
 		respondError(w, code, reason)
@@ -643,28 +619,6 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 	gen, _ := strconv.ParseInt(genStr, 10, 64)
 	seq, _ := strconv.Atoi(seqStr)
 
-	sc, _ := h.acquireController(channelID, 10*time.Second)
-	if sc != nil {
-		seg, ok := sc.GetSegment(gen, seq)
-		if !ok {
-			w.Header().Set("Cache-Control", "no-store")
-			w.WriteHeader(http.StatusGone)
-			return
-		}
-		var data []byte
-		if track == "video" {
-			data = seg.Video
-		} else {
-			data = seg.Audio
-		}
-		w.Header().Set("Content-Type", "video/mp4")
-		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Write(data)
-		return
-	}
-
 	store, reason := h.acquireStore(channelID, track, 10*time.Second)
 	if store == nil {
 		code := http.StatusServiceUnavailable
@@ -674,7 +628,7 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 		respondError(w, code, reason)
 		return
 	}
-	data, ok := store.GetSegment(gen, seq)
+	data, startTimeNs, ok := store.GetSegment(gen, seq)
 	if !ok {
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusGone)
@@ -684,6 +638,9 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if startTimeNs >= 0 {
+		w.Header().Set("X-Start-Time", fmt.Sprintf("%.6f", float64(startTimeNs)/1e9))
+	}
 	w.Write(data)
 }
 
@@ -703,12 +660,8 @@ func (h *VODHandler) MSESeek(w http.ResponseWriter, r *http.Request) {
 
 	sess := h.vodService.GetSession(channelID)
 	gen := int64(0)
-	if sess != nil {
-		if sess.SegCtrl != nil {
-			gen = sess.SegCtrl.Generation()
-		} else if sess.VideoStore != nil {
-			gen = sess.VideoStore.Generation()
-		}
+	if sess != nil && sess.VideoStore != nil {
+		gen = sess.VideoStore.Generation()
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"gen": gen, "pos": pos})
@@ -725,18 +678,13 @@ func (h *VODHandler) MSEDebug(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		"duration": sess.Duration,
 	}
-	if sess.SegCtrl != nil {
-		resp["segment_count"] = sess.SegCtrl.SegmentCount()
-		resp["gen"] = sess.SegCtrl.Generation()
-		resp["video_offset"] = sess.SegCtrl.VideoTimestampOffset()
-		resp["audio_offset"] = sess.SegCtrl.AudioTimestampOffset()
-	} else if sess.VideoStore != nil {
+	if sess.VideoStore != nil {
 		resp["video_segments"] = sess.VideoStore.SegmentCount()
 		resp["gen"] = sess.VideoStore.Generation()
 		resp["video_offset"] = sess.VideoStore.TimestampOffset()
-		if sess.AudioStore != nil {
-			resp["audio_offset"] = sess.AudioStore.TimestampOffset()
-		}
+	}
+	if sess.AudioStore != nil {
+		resp["audio_offset"] = sess.AudioStore.TimestampOffset()
 	}
 	if errMsg := sess.GetError(); errMsg != "" {
 		resp["error"] = errMsg

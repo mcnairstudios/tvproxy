@@ -23,7 +23,7 @@ func TestTrackStore_GetSegment_Timeout(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		ts.Close()
 	}()
-	data, ok := ts.GetSegment(0, 0)
+	data, _, ok := ts.GetSegment(0, 0)
 	if ok || data != nil {
 		t.Error("expected nil/false from closed store")
 	}
