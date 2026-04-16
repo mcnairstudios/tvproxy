@@ -366,7 +366,25 @@ func (ts *TrackStore) PushVideoFrame(data []byte, ptsNs, bufDurNs int64, isKeyfr
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 
-	if ts.initSeg == nil {
+	if ts.videoCodec == "av1" {
+		seqHdr := extractAV1SequenceHeader(data)
+		if seqHdr != nil && isKeyframe {
+			if ts.initSeg == nil {
+				if ts.av1SeqHdr == nil {
+					ts.av1SeqHdr = seqHdr
+				} else {
+					ts.av1SeqHdr = seqHdr
+					ts.buildInitSegment()
+					ts.cond.Broadcast()
+				}
+			} else if !bytes.Equal(seqHdr, ts.av1SeqHdr) {
+				ts.av1SeqHdr = seqHdr
+				ts.initSeg = nil
+				ts.buildInitSegment()
+				ts.cond.Broadcast()
+			}
+		}
+	} else if ts.initSeg == nil {
 		switch ts.videoCodec {
 		case "h265":
 			vpsNALUs, spsNALUs, ppsNALUs := hevc.GetParameterSetsFromByteStream(data)
@@ -382,13 +400,6 @@ func (ts *TrackStore) PushVideoFrame(data []byte, ptsNs, bufDurNs int64, isKeyfr
 			if len(spsNALUs) > 0 && len(ppsNALUs) > 0 {
 				ts.sps = spsNALUs
 				ts.pps = ppsNALUs
-				ts.buildInitSegment()
-				ts.cond.Broadcast()
-			}
-		case "av1":
-			seqHdr := extractAV1SequenceHeader(data)
-			if seqHdr != nil {
-				ts.av1SeqHdr = seqHdr
 				ts.buildInitSegment()
 				ts.cond.Broadcast()
 			}
