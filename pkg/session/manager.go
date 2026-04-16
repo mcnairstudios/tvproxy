@@ -117,6 +117,9 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 	s.cancel()
 	<-s.done
 	os.RemoveAll(s.TempDir)
+	if s.SegCtrl != nil {
+		s.SegCtrl.Close()
+	}
 	if s.VideoStore != nil {
 		s.VideoStore.Close()
 	}
@@ -200,6 +203,9 @@ func (m *Manager) stopAndCleanup(channelID string, s *Session) {
 
 	if !s.wasRecording {
 		os.RemoveAll(s.TempDir)
+	}
+	if s.SegCtrl != nil {
+		s.SegCtrl.Close()
 	}
 	if s.VideoStore != nil {
 		s.VideoStore.Close()
@@ -800,30 +806,21 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		if outCodec == "" || outCodec == "copy" || outCodec == "default" {
 			outCodec = gstreamer.NormalizeCodec(opts.VideoCodec)
 		}
-		s.VideoStore = fmp4.NewTrackStore(true, outCodec)
-		s.AudioStore = fmp4.NewTrackStore(false, "")
-		sharedBase := fmp4.NewSharedBasePTS()
-		s.VideoStore.SetSharedBase(sharedBase)
-		s.AudioStore.SetSharedBase(sharedBase)
-		s.VideoStore.SetPartner(s.AudioStore)
-		if s.startOpts.OutputHeight > 0 {
-			s.VideoStore.SetTargetHeight(s.startOpts.OutputHeight)
-		}
+		s.SegCtrl = fmp4.NewSegmentController(outCodec)
 
-		if err := fmp4.SetupVideoSink(pipeline, s.VideoStore); err != nil {
+		if err := fmp4.SetupVideoSinkSC(pipeline, s.SegCtrl); err != nil {
 			m.log.Error().Err(err).Msg("failed to setup video appsink")
 		}
-		if err := fmp4.SetupAudioSink(pipeline, s.AudioStore); err != nil {
+		if err := fmp4.SetupAudioSinkSC(pipeline, s.SegCtrl); err != nil {
 			m.log.Error().Err(err).Msg("failed to setup audio appsink")
 		}
 
-		go fmp4.RunSegmentFlusher(ctx, s.VideoStore, s.AudioStore)
+		go s.SegCtrl.RunFlusher(ctx)
 
 		s.SetSeekFunc(func(position float64) {
 			posNs := int64(position * 1e9)
 			newGen := s.seekGen.Add(1)
-			s.VideoStore.Reset(newGen, posNs)
-			s.AudioStore.Reset(newGen, posNs)
+			s.SegCtrl.Reset(newGen)
 			ok := fmp4.SeekPipeline(pipeline, posNs)
 			m.log.Info().Bool("ok", ok).Float64("position", position).Int64("gen", newGen).Msg("CGO seek")
 		})
@@ -849,9 +846,16 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	isLive := opts.IsLive
 	go m.pollFileProgress(ctx, s)
 
-	if s.VideoStore != nil {
+	if s.SegCtrl != nil {
 		<-ctx.Done()
 		m.log.Info().Str("session_id", s.ID).Msg("appsink session ended")
+		pipeline.SetState(gst.StateNull)
+		return
+	}
+
+	if s.VideoStore != nil {
+		<-ctx.Done()
+		m.log.Info().Str("session_id", s.ID).Msg("legacy appsink session ended")
 		pipeline.SetState(gst.StateNull)
 		return
 	}

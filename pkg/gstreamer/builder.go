@@ -167,7 +167,7 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 			decHW = HWNone
 		}
 		videoElements = append(videoElements, createHWDecoder(srcCodec, decHW)...)
-		if opts.Deinterlace {
+		if opts.Deinterlace && hw != HWVideoToolbox {
 			di, _ := gst.NewElement("vadeinterlace")
 			if di == nil {
 				di, _ = gst.NewElement("deinterlace")
@@ -381,7 +381,7 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 			decHW = HWNone
 		}
 		videoElements = append(videoElements, createHWDecoder(srcCodec, decHW)...)
-		if opts.Deinterlace {
+		if opts.Deinterlace && hw != HWVideoToolbox {
 			di, _ := gst.NewElement("vadeinterlace")
 			if di == nil {
 				di, _ = gst.NewElement("deinterlace")
