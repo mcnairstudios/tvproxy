@@ -329,14 +329,14 @@ func (ts *TrackStore) ptsToTicks(ptsNs int64) uint64 {
 
 func (ts *TrackStore) resolveDuration(ptsNs, bufDurNs int64) uint32 {
 	if !ts.isVideo {
-		if bufDurNs > 0 && bufDurNs < 1e9 {
+		if bufDurNs > 0 && bufDurNs < 50000000 {
 			dur := uint32(bufDurNs * int64(ts.timescale) / 1e9)
-			if dur > 0 {
+			if dur > 0 && dur <= 2048 {
 				ts.recordDuration(dur)
 				return dur
 			}
 		}
-		if avg := ts.avgDuration(); avg > 0 {
+		if avg := ts.avgDuration(); avg > 0 && avg <= 2048 {
 			return avg
 		}
 		return 1024
