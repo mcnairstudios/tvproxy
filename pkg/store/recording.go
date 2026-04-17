@@ -139,6 +139,7 @@ func (s *RecordingStoreImpl) SaveProbe(streamID string, result *media.ProbeResul
 	return os.WriteFile(filepath.Join(dir, "probe.json"), data, 0644)
 }
 
+func (s *RecordingStoreImpl) DeleteProbe(streamID string) error              { return nil }
 func (s *RecordingStoreImpl) SaveTSHeader(streamID string, header []byte) error { return nil }
 func (s *RecordingStoreImpl) GetTSHeader(streamID string) ([]byte, error)     { return nil, nil }
 

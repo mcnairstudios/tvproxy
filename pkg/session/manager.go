@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -979,11 +980,23 @@ func (m *Manager) ensureProbe(ctx context.Context, opts StartOpts) *media.ProbeR
 		}
 	}
 
-	m.log.Info().Str("stream_url", opts.StreamURL).Msg("no probe cache — probing now (blocking)")
+	probeURL := opts.StreamURL
+	if strings.HasPrefix(probeURL, "rtsp://") {
+		if u, err := url.Parse(probeURL); err == nil {
+			httpPort := "8875"
+			u.Scheme = "http"
+			if u.Port() == "" || u.Port() == "554" {
+				u.Host = u.Hostname() + ":" + httpPort
+			}
+			probeURL = u.String()
+		}
+	}
+
+	m.log.Info().Str("probe_url", probeURL).Msg("no probe cache — probing now (blocking)")
 	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	result, err := avprobe.Probe(probeCtx, opts.StreamURL, m.config.UserAgent)
+	result, err := avprobe.Probe(probeCtx, probeURL, m.config.UserAgent)
 	if err != nil || result == nil {
 		m.log.Warn().Err(err).Str("stream_url", opts.StreamURL).Msg("pre-probe failed")
 		return nil

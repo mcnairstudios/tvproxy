@@ -78,7 +78,10 @@ static CProbeInfo c_probe(const char *url, const char *user_agent) {
 			info.width = par->width;
 			info.height = par->height;
 
-			AVRational fr = fmt_ctx->streams[i]->avg_frame_rate;
+			AVRational fr = fmt_ctx->streams[i]->r_frame_rate;
+			if (fr.num == 0 || fr.den == 0) {
+				fr = fmt_ctx->streams[i]->avg_frame_rate;
+			}
 			info.framerate_num = fr.num;
 			info.framerate_denom = fr.den;
 

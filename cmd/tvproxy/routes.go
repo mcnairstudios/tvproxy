@@ -89,6 +89,7 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 		r.Use(authMW.Authenticate)
 
 		r.Get("/stream/{streamID}/probe", h.vod.ProbeStream)
+		r.Delete("/stream/{streamID}/probe", h.vod.DeleteProbe)
 		r.Post("/stream/{streamID}/vod", h.vod.CreateSession)
 		r.Post("/channel/{channelID}/vod", h.vod.CreateChannelSession)
 		r.Post("/vod/{sessionID}/seek", h.vod.Seek)

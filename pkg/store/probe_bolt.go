@@ -61,6 +61,12 @@ func (c *BoltProbeCache) GetProbe(streamID string) (*media.ProbeResult, error) {
 	return &result, nil
 }
 
+func (c *BoltProbeCache) DeleteProbe(streamID string) error {
+	return c.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketProbe).Delete([]byte(streamID))
+	})
+}
+
 func (c *BoltProbeCache) SaveProbe(streamID string, result *media.ProbeResult) error {
 	if result == nil {
 		return nil

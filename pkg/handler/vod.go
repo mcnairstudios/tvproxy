@@ -119,6 +119,15 @@ func (h *VODHandler) ProbeStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *VODHandler) DeleteProbe(w http.ResponseWriter, r *http.Request) {
+	streamID := chi.URLParam(r, "streamID")
+	if err := h.vodService.DeleteProbe(r.Context(), streamID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *VODHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 	streamID := chi.URLParam(r, "streamID")
 	profileName := r.URL.Query().Get("profile")

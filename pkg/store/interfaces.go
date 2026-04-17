@@ -94,6 +94,7 @@ type EPGStore interface {
 type ProbeCache interface {
 	GetProbe(streamID string) (*media.ProbeResult, error)
 	SaveProbe(streamID string, result *media.ProbeResult) error
+	DeleteProbe(streamID string) error
 	SaveTSHeader(streamID string, header []byte) error
 	GetTSHeader(streamID string) ([]byte, error)
 }

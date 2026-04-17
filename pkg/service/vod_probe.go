@@ -38,6 +38,13 @@ func (s *VODService) ProbeStream(ctx context.Context, streamID string) (*media.P
 	return avprobe.Probe(ctx, stream.URL, s.config.UserAgent)
 }
 
+func (s *VODService) DeleteProbe(ctx context.Context, streamID string) error {
+	if s.probeCache != nil {
+		return s.probeCache.DeleteProbe(streamID)
+	}
+	return nil
+}
+
 func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName string) (io.ReadCloser, string, error) {
 	sp, err := s.streamProfileRepo.GetByName(ctx, profileName)
 	if err != nil {

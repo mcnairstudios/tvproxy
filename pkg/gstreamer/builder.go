@@ -171,6 +171,12 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 			di, _ := gst.NewElement("deinterlace")
 			if di != nil {
 				videoElements = append(videoElements, di)
+				vrate, _ := gst.NewElement("videorate")
+				fpsCaps, _ := gst.NewElement("capsfilter")
+				if vrate != nil && fpsCaps != nil {
+					fpsCaps.SetProperty("caps", gst.NewCapsFromString("video/x-raw,framerate=25/1"))
+					videoElements = append(videoElements, vrate, fpsCaps)
+				}
 			}
 		}
 		scaleHeight := opts.OutputHeight
@@ -384,6 +390,12 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 			di, _ := gst.NewElement("deinterlace")
 			if di != nil {
 				videoElements = append(videoElements, di)
+				vrate, _ := gst.NewElement("videorate")
+				fpsCaps, _ := gst.NewElement("capsfilter")
+				if vrate != nil && fpsCaps != nil {
+					fpsCaps.SetProperty("caps", gst.NewCapsFromString("video/x-raw,framerate=25/1"))
+					videoElements = append(videoElements, vrate, fpsCaps)
+				}
 			}
 		}
 		scaleHeight := opts.OutputHeight
