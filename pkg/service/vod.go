@@ -322,6 +322,14 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		},
 	)
 
+	if sa.Delivery == "mse" && strategy.VideoCodec == "copy" {
+		codec := probeVCodec
+		if codec == "" {
+			codec = "h265"
+		}
+		strategy.VideoCodec = normalizeVideoCodecName(codec)
+	}
+
 	startOpts := session.StartOpts{
 		ChannelID:        channelID,
 		StreamID:         streamID,
@@ -407,6 +415,14 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 			OutputHeight: sa.OutputHeight,
 		},
 	)
+
+	if sa.Delivery == "mse" && strategy.VideoCodec == "copy" {
+		codec := stream.VODVCodec
+		if codec == "" {
+			codec = "h265"
+		}
+		strategy.VideoCodec = normalizeVideoCodecName(codec)
+	}
 
 	startOpts2 := session.StartOpts{
 		ChannelID:        streamID,

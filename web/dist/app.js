@@ -5955,13 +5955,10 @@
           { value: 'stream', label: 'Stream (direct)' },
           { value: 'mse', label: 'MSE (browser/web)' },
         ], default: 'stream', help: 'MSE for browser playback. Stream for native clients (Plex, VLC, HDHR).' },
-        { key: 'output_height', label: 'Output Height', type: 'select', options: [
-          { value: '0', label: 'Original' },
-          { value: '1080', label: '1080p' },
-          { value: '720', label: '720p' },
-          { value: '480', label: '480p' },
-          { value: '360', label: '360p' },
-        ], default: '0', numeric: true, help: 'Downscale video before encoding. Reduces CPU/GPU load.' },
+        { key: 'output_height', label: 'Max Resolution', type: 'select', options: [
+          { value: '0', label: 'Original (up to 4K)' },
+          { value: '1080', label: '1080p (downscale 4K)' },
+        ], default: '0', numeric: true, help: 'Downscale 4K to 1080p. Sub-1080p content is always upscaled to 1080p.' },
         { key: 'audio_codec', label: 'Audio Codec', type: 'select', options: [
           { value: 'default', label: 'Match Source (auto copy/transcode)' },
           { value: 'aac', label: 'AAC' },

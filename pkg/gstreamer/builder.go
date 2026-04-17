@@ -167,29 +167,33 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 			decHW = HWNone
 		}
 		videoElements = append(videoElements, createHWDecoder(srcCodec, decHW)...)
-		if opts.Deinterlace && hw != HWVideoToolbox {
-			di, _ := gst.NewElement("vadeinterlace")
-			if di == nil {
-				di, _ = gst.NewElement("deinterlace")
-			}
+		if opts.Deinterlace {
+			di, _ := gst.NewElement("deinterlace")
 			if di != nil {
 				videoElements = append(videoElements, di)
 			}
 		}
-		if opts.OutputHeight > 0 {
-			vscale, _ := gst.NewElement("videoscale")
-			vconv0, _ := gst.NewElement("videoconvert")
-			scaleCaps, _ := gst.NewElement("capsfilter")
-			if vscale != nil && vconv0 != nil && scaleCaps != nil {
-				w := opts.OutputHeight * 16 / 9
-				w = (w + 1) &^ 1
-				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,width=%d,height=%d", w, opts.OutputHeight)))
-				videoElements = append(videoElements, vconv0, vscale, scaleCaps)
-			}
+		scaleHeight := opts.OutputHeight
+		if scaleHeight == 0 && opts.UseAppSink && opts.SourceHeight > 0 && opts.SourceHeight < 1080 {
+			scaleHeight = 1080
 		}
 		vconv, _ := gst.NewElement("videoconvert")
 		if vconv != nil {
 			videoElements = append(videoElements, vconv)
+		}
+		if scaleHeight > 0 {
+			vscale, _ := gst.NewElement("videoscale")
+			scaleCaps, _ := gst.NewElement("capsfilter")
+			if vscale != nil && scaleCaps != nil {
+				h := (scaleHeight + 1) &^ 1
+				w := h * 16 / 9
+				if opts.SourceWidth > 0 && opts.SourceHeight > 0 {
+					w = opts.SourceWidth * h / opts.SourceHeight
+				}
+				w = (w + 1) &^ 1
+				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,width=%d,height=%d", w, h)))
+				videoElements = append(videoElements, vscale, scaleCaps)
+			}
 		}
 		if opts.VideoEncoderElement != "" {
 			videoElements = append(videoElements, createExplicitEncoder(opts.VideoEncoderElement, outCodec, bitrate(opts))...)
@@ -381,29 +385,33 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 			decHW = HWNone
 		}
 		videoElements = append(videoElements, createHWDecoder(srcCodec, decHW)...)
-		if opts.Deinterlace && hw != HWVideoToolbox {
-			di, _ := gst.NewElement("vadeinterlace")
-			if di == nil {
-				di, _ = gst.NewElement("deinterlace")
-			}
+		if opts.Deinterlace {
+			di, _ := gst.NewElement("deinterlace")
 			if di != nil {
 				videoElements = append(videoElements, di)
 			}
 		}
-		if opts.OutputHeight > 0 {
-			vscale, _ := gst.NewElement("videoscale")
-			vconv0, _ := gst.NewElement("videoconvert")
-			scaleCaps, _ := gst.NewElement("capsfilter")
-			if vscale != nil && vconv0 != nil && scaleCaps != nil {
-				w := opts.OutputHeight * 16 / 9
-				w = (w + 1) &^ 1
-				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,width=%d,height=%d", w, opts.OutputHeight)))
-				videoElements = append(videoElements, vconv0, vscale, scaleCaps)
-			}
+		scaleHeight := opts.OutputHeight
+		if scaleHeight == 0 && opts.UseAppSink && opts.SourceHeight > 0 && opts.SourceHeight < 1080 {
+			scaleHeight = 1080
 		}
 		vconv, _ := gst.NewElement("videoconvert")
 		if vconv != nil {
 			videoElements = append(videoElements, vconv)
+		}
+		if scaleHeight > 0 {
+			vscale, _ := gst.NewElement("videoscale")
+			scaleCaps, _ := gst.NewElement("capsfilter")
+			if vscale != nil && scaleCaps != nil {
+				h := (scaleHeight + 1) &^ 1
+				w := h * 16 / 9
+				if opts.SourceWidth > 0 && opts.SourceHeight > 0 {
+					w = opts.SourceWidth * h / opts.SourceHeight
+				}
+				w = (w + 1) &^ 1
+				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,width=%d,height=%d", w, h)))
+				videoElements = append(videoElements, vscale, scaleCaps)
+			}
 		}
 		if opts.VideoEncoderElement != "" {
 			videoElements = append(videoElements, createExplicitEncoder(opts.VideoEncoderElement, outCodec, bitrate(opts))...)
