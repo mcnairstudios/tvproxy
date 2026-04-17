@@ -4354,20 +4354,23 @@
       if (playerCtx.signal.aborted) { clearInterval(ctrlUpdateTimer); return; }
       var cur = videoEl.currentTime || 0;
       var dur = videoEl.duration;
-      var knownDur = mseDuration || dvr.duration || epgDuration || (isFinite(dur) ? dur : 0);
+      var displayCur = cur + mseSeekTarget;
+      var knownDur = mseDuration || dvr.duration || epgTotalDuration || (isFinite(dur) ? dur : 0);
 
       var effectiveDur = knownDur > 0 ? knownDur : (isFinite(dur) ? dur : 0);
       if (effectiveDur > 0) {
-        seekPlayed.style.width = ((cur / effectiveDur) * 100) + '%';
-        seekThumb.style.left = ((cur / effectiveDur) * 100) + '%';
+        var displayPos = epgTotalDuration > 0 ? (epgElapsed + cur) : displayCur;
+        var displayTotal = epgTotalDuration > 0 ? epgTotalDuration : effectiveDur;
+        seekPlayed.style.width = ((displayPos / displayTotal) * 100) + '%';
+        seekThumb.style.left = ((displayPos / displayTotal) * 100) + '%';
         seekTranscoded.style.width = '100%';
         var bufEnd = 0;
         var mseBufSource = mseVideoSb || videoEl;
         if (mseBufSource.buffered && mseBufSource.buffered.length > 0) bufEnd = mseBufSource.buffered.end(mseBufSource.buffered.length - 1);
-        seekBuffered.style.width = ((bufEnd / effectiveDur) * 100) + '%';
-        timeDisplay.textContent = fmtCtrlTime(cur) + ' / ' + fmtCtrlTime(effectiveDur);
+        seekBuffered.style.width = (((bufEnd + mseSeekTarget) / displayTotal) * 100) + '%';
+        timeDisplay.textContent = fmtCtrlTime(displayPos) + ' / ' + fmtCtrlTime(displayTotal);
       } else {
-        timeDisplay.textContent = fmtCtrlTime(cur);
+        timeDisplay.textContent = fmtCtrlTime(displayCur);
       }
     }, 250);
 
@@ -4386,6 +4389,8 @@
 
     var streamSrc = dvr ? ('/vod/' + dvr.id + '/stream') : url;
     var epgDuration = 0;
+    var epgTotalDuration = 0;
+    var epgElapsed = 0;
 
     var savedVol = parseFloat(localStorage.getItem('tvproxy_volume') || '0.5');
     videoEl.volume = savedVol;
@@ -4427,7 +4432,13 @@
     var epgReady = tvgId ? api.get('/api/epg/now?channel_id=' + encodeURIComponent(tvgId)).then(function(program) {
       if (program && program.start && program.stop) {
         nowProgram = program;
-        var remaining = (new Date(program.stop).getTime() - Date.now()) / 1000;
+        var startMs = new Date(program.start).getTime();
+        var stopMs = new Date(program.stop).getTime();
+        var nowMs = Date.now();
+        epgTotalDuration = (stopMs - startMs) / 1000;
+        epgElapsed = (nowMs - startMs) / 1000;
+        if (epgElapsed < 0) epgElapsed = 0;
+        var remaining = (stopMs - nowMs) / 1000;
         epgDuration = remaining > 0 ? remaining : 0;
       }
     }).catch(function() {}) : Promise.resolve();
@@ -4554,7 +4565,13 @@
             nowPlayingEl.textContent = info;
           }
           if (program.start && program.stop && !dvr.duration) {
-            var progDur = (new Date(program.stop).getTime() - Date.now()) / 1000;
+            var startMs = new Date(program.start).getTime();
+            var stopMs = new Date(program.stop).getTime();
+            var nowMs = Date.now();
+            epgTotalDuration = (stopMs - startMs) / 1000;
+            epgElapsed = (nowMs - startMs) / 1000;
+            if (epgElapsed < 0) epgElapsed = 0;
+            var progDur = (stopMs - nowMs) / 1000;
             if (progDur > 0) {
               epgDuration = progDur;
             }
