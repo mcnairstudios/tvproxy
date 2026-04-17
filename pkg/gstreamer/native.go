@@ -249,6 +249,11 @@ func buildAudioChain(srcAudio string) []*gst.Element {
 		return []*gst.Element{aInParse, aDec, aConv, aResample, aCaps, aEnc, aOutParse}
 	case "aac":
 		aInParse, _ := gst.NewElement("aacparse")
+		aAlign, _ := gst.NewElement("capsfilter")
+		if aAlign != nil {
+			aAlign.SetProperty("caps", gst.NewCapsFromString("audio/mpeg,mpegversion=4,alignment=frame"))
+			return []*gst.Element{aInParse, aAlign}
+		}
 		return []*gst.Element{aInParse}
 	case "mp2":
 		aInParse, _ := gst.NewElement("mpegaudioparse")
