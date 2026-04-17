@@ -720,8 +720,10 @@ func (s *BoltStreamStore) SearchByName(query string, limit int) ([]models.Stream
 		idx := tx.Bucket(bktIdxName)
 		main := tx.Bucket(bktStream)
 		c := idx.Cursor()
-		pfx := []byte(q)
-		for k, _ := c.Seek(pfx); k != nil && hasPrefix(k, pfx); k, _ = c.Next() {
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			if !strings.Contains(string(k), q) {
+				continue
+			}
 			parts := strings.SplitN(string(k), "\x00", 2)
 			if len(parts) != 2 {
 				continue
