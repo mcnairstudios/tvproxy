@@ -1996,10 +1996,31 @@
       });
       searchInput.addEventListener('input', function() {
         clearTimeout(searchTimer);
-        searchTimer = setTimeout(function() {
+        searchTimer = setTimeout(async function() {
           searchTerm = searchInput.value.toLowerCase();
           renderGroups();
-        }, 200);
+          if (searchTerm.length >= 3) {
+            try {
+              var results = await api.get('/api/streams/search?q=' + encodeURIComponent(searchTerm) + '&limit=50');
+              if (results && results.length > 0 && searchTerm === searchInput.value.toLowerCase()) {
+                var filtered = results.filter(function(s) { return s.m3u_account_id === sourceId || sourceType !== 'm3u'; });
+                if (filtered.length > 0) {
+                  var html = '<details class="stream-group" open><summary>Search Results<span class="stream-group-count">' + filtered.length + '</span></summary>';
+                  html += '<table class="streams-table"><tbody>';
+                  filtered.forEach(function(s) {
+                    var logo = s.logo ? '<img src="/logo?url=' + encodeURIComponent(s.logo) + '" style="width:24px;height:24px;object-fit:contain;" loading="lazy">' : '';
+                    var actionHtml = '<div style="display:flex;gap:4px;justify-content:flex-end">';
+                    actionHtml += '<button class="btn btn-secondary btn-sm btn-icon" title="Play" data-sid="' + esc(s.id) + '" data-sname="' + esc(s.name) + '" data-tvgid="' + esc(s.tvg_id || '') + '">\u25B6</button>';
+                    actionHtml += '</div>';
+                    html += '<tr><td>' + logo + '</td><td>' + esc(s.name) + ' <span style="color:var(--text-muted);font-size:12px">' + esc(s.group || '') + '</span></td><td style="width:80px">' + actionHtml + '</td></tr>';
+                  });
+                  html += '</tbody></table></details>';
+                  groupsContainer.insertAdjacentHTML('afterbegin', html);
+                }
+              }
+            } catch(e) {}
+          }
+        }, 300);
       });
 
       groupsContainer.addEventListener('toggle', async function(e) {
