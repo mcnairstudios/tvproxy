@@ -52,3 +52,5 @@ users/
 streams.dat
 streams.bolt
 *.bolt
+hdhr_sources.json
+.claude/settings.local.json
