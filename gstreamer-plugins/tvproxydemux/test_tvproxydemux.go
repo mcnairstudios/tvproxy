@@ -12,7 +12,11 @@ import (
 func main() {
 	gst.Init(nil)
 
-	url := "http://192.168.1.186:5004/auto/v101"
+	url := os.Getenv("TEST_HDHR_URL")
+	if url == "" {
+		fmt.Println("Set TEST_HDHR_URL (e.g. http://192.168.1.100:5004/auto/v101)")
+		return
+	}
 	out := "/tmp/hdhr_tvproxydemux.mp4"
 	os.Remove(out)
 

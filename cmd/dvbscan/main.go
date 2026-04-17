@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	host := flag.String("host", "192.168.1.149:554", "Minisatip RTSP host:port")
+	host := flag.String("host", "", "Minisatip RTSP host:port (e.g. 192.168.1.100:554)")
 	httpPort := flag.Int("http-port", 8875, "Minisatip HTTP port (for capability discovery)")
 	timeout := flag.Duration("timeout", 60*time.Second, "Per-transponder scan timeout")
 	seedTimeout := flag.Duration("seed-timeout", 20*time.Second, "Timeout for blind seed scans (fast pass)")
