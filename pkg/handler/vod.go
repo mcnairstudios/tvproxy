@@ -723,8 +723,9 @@ async function fetchTrack(sessionId, name, gen, signal) {
       if (!resp.ok) {
         throw new Error('HTTP ' + resp.status);
       }
+      const startTime = parseFloat(resp.headers.get('X-Start-Time') || '-1');
       const data = await resp.arrayBuffer();
-      self.postMessage({type: 'segment', track: name, data: data, seq: seq}, [data]);
+      self.postMessage({type: 'segment', track: name, data: data, seq: seq, startTime: startTime}, [data]);
       seq++;
       backoff = 0;
     } catch(e) {
