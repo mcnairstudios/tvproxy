@@ -186,12 +186,7 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 			scaleCaps, _ := gst.NewElement("capsfilter")
 			if vscale != nil && scaleCaps != nil {
 				h := (scaleHeight + 1) &^ 1
-				w := h * 16 / 9
-				if opts.SourceWidth > 0 && opts.SourceHeight > 0 {
-					w = opts.SourceWidth * h / opts.SourceHeight
-				}
-				w = (w + 1) &^ 1
-				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,width=%d,height=%d", w, h)))
+				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,height=%d,pixel-aspect-ratio=1/1", h)))
 				videoElements = append(videoElements, vscale, scaleCaps)
 			}
 		}
@@ -404,12 +399,7 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 			scaleCaps, _ := gst.NewElement("capsfilter")
 			if vscale != nil && scaleCaps != nil {
 				h := (scaleHeight + 1) &^ 1
-				w := h * 16 / 9
-				if opts.SourceWidth > 0 && opts.SourceHeight > 0 {
-					w = opts.SourceWidth * h / opts.SourceHeight
-				}
-				w = (w + 1) &^ 1
-				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,width=%d,height=%d", w, h)))
+				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,height=%d,pixel-aspect-ratio=1/1", h)))
 				videoElements = append(videoElements, vscale, scaleCaps)
 			}
 		}
