@@ -254,15 +254,12 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 		return sessionArgs{Container: "mp4"}
 	}
 
-	globalHW, globalCodec := s.settingsService.ResolveGlobalDefaults(ctx)
+	globalHW, _ := s.settingsService.ResolveGlobalDefaults(ctx)
 	hwaccel := sp.HWAccel
 	if hwaccel == "default" || hwaccel == "" {
 		hwaccel = globalHW
 	}
 	videoCodec := sp.VideoCodec
-	if videoCodec == "default" || videoCodec == "" {
-		videoCodec = globalCodec
-	}
 	audioCodec := sp.AudioCodec
 	if audioCodec == "default" || audioCodec == "" {
 		audioCodec = "aac"
