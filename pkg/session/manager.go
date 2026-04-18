@@ -485,10 +485,6 @@ func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, c
 	m.sessions[opts.ChannelID] = s
 	m.mu.Unlock()
 
-	if !opts.SkipProbe {
-		go m.probeAsync(s, opts.StreamURL)
-	}
-
 	if !opts.MetadataOnly {
 		go m.runPipeline(sessionCtx, s)
 		if strings.HasPrefix(opts.StreamURL, "rtsp://") || strings.HasPrefix(opts.StreamURL, "rtsps://") {
@@ -675,13 +671,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	defer s.markDone()
 	m.log.Info().Str("session_id", s.ID).Str("channel_id", s.ChannelID).Msg("runPipeline started")
 
-	probe := m.ensureProbe(ctx, s.startOpts)
-	if ctx.Err() != nil {
-		return
-	}
-	if probe != nil {
-		s.SetProbeInfo(probe.Video, probe.AudioTracks, probe.Duration)
-	}
+	video, audioTracks, _ := s.GetProbeInfo()
 
 	srcVideo := ""
 	srcAudio := ""
@@ -692,20 +682,18 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	srcInterlaced := false
 	srcBitDepth := 0
 	srcChannels := 0
-	if probe != nil {
-		if probe.Video != nil {
-			srcVideo = probe.Video.Codec
-			srcPixFmt = probe.Video.PixFmt
-			srcInterlaced = probe.Video.Interlaced
-			srcBitDepth = probe.Video.BitDepth
-		}
-		srcWidth = probe.Width
-		srcHeight = probe.Height
-		if len(probe.AudioTracks) > 0 {
-			srcAudio = probe.AudioTracks[0].Codec
-			srcChannels = probe.AudioTracks[0].Channels
-		}
-		container = probe.FormatName
+	if video != nil {
+		srcVideo = video.Codec
+		srcPixFmt = video.PixFmt
+		srcInterlaced = video.Interlaced
+		srcBitDepth = video.BitDepth
+	}
+	if len(audioTracks) > 0 {
+		srcAudio = audioTracks[0].Codec
+		srcChannels = audioTracks[0].Channels
+	}
+	if s.startOpts.OutputContainer == "mpegts" {
+		container = "mpegts"
 	}
 
 	hwAccel := gstreamer.HWNone
@@ -768,7 +756,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		DecodeHWAccel:    decodeHW,
 		Decode10Bit:      gstreamer.Decode10BitSupported(),
 		RecordingPath:    s.FilePath,
-		IsLive:           probe == nil || probe.Duration == 0,
+		IsLive:           s.Duration == 0,
 
 		Deinterlace:       s.startOpts.Deinterlace,
 		AudioDelayMs:      s.startOpts.AudioDelayMs,
@@ -812,7 +800,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Float64("seek_offset", s.startOpts.SeekOffset).
 		Float64("known_duration", s.startOpts.KnownDuration).
 		Str("profile", s.startOpts.ProfileName).
-		Bool("is_live", probe == nil || probe.Duration == 0).
+		Bool("is_live", s.Duration == 0).
 		Str("output_file", s.FilePath).
 		Msg("building pipeline")
 

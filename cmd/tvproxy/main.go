@@ -454,7 +454,6 @@ func main() {
 	wm.Add("hdhr_servers", worker.NewHDHRServerWorker(hdhrStore, hdhrService, proxyService, settingsService, outputService, cfg, log))
 	wm.Add("dlna", worker.NewDLNAWorker(dlnaService, cfg.BaseURL, cfg.Port, cfg.Settings.Workers.RetryDelay, cfg.Settings.Workers.DLNAAnnounceInterval, log))
 	wm.Add("recording_scheduler", worker.NewSchedulerWorker(schedulerService, 30*time.Second, log))
-	wm.Add("probe_scheduler", worker.NewProbeWorker(probeCache, streamStore, 1*time.Hour, log))
 	wm.Add("wal_checkpoint", worker.NewWALCheckpointWorker(db, 5*time.Minute, log))
 	wm.Add("wireguard", worker.NewWireGuardWorker(wgService, 30*time.Second, log))
 	wm.Add("wireguard_multi", worker.NewMultiWireGuardWorker(wgMultiService, 30*time.Second, 60*time.Second, log))

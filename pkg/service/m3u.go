@@ -463,10 +463,6 @@ func (s *M3UService) upsertAndFinalize(ctx context.Context, account *models.M3UA
 	}
 	s.log.Info().Int("count", len(streams)).Msg("upserted streams")
 
-	if s.probeCache != nil {
-		s.ensureProbeEntries(streams)
-	}
-
 	now := time.Now()
 	if err := s.m3uAccountStore.UpdateLastRefreshed(ctx, account.ID, now); err != nil {
 		return fmt.Errorf("updating last refreshed: %w", err)
@@ -480,24 +476,6 @@ func (s *M3UService) upsertAndFinalize(ctx context.Context, account *models.M3UA
 		Msg("account refresh complete")
 
 	return nil
-}
-
-func (s *M3UService) ensureProbeEntries(streams []models.Stream) {
-	created := 0
-	for _, st := range streams {
-		if st.URL == "" {
-			continue
-		}
-		existing, _ := s.probeCache.GetProbe(st.ID)
-		if existing != nil {
-			continue
-		}
-		s.probeCache.SaveProbe(st.ID, &media.ProbeResult{})
-		created++
-	}
-	if created > 0 {
-		s.log.Info().Int("created", created).Int("total", len(streams)).Msg("created skeleton probe entries for new streams")
-	}
 }
 
 func (s *M3UService) CleanupOrphanedStreams(ctx context.Context) {
