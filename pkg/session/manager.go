@@ -817,8 +817,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Msg("building pipeline")
 
 	isMSE := s.startOpts.Delivery == "mse"
-	// tvproxyfmp4 plugin available but disabled pending quality debugging
-	// useFmp4Plugin := isMSE && gst.Find("tvproxyfmp4") != nil
+	// tvproxyfmp4 disabled: only emits first fragment then stalls (see FIXES.md)
 	useFmp4Plugin := false
 	if useFmp4Plugin {
 		opts.UseFmp4Plugin = true
@@ -862,6 +861,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 				} else {
 					s.AudioStore.(*fmp4.SegmentStore).AddSegment(b, startNs)
 				}
+				m.log.Debug().Str("track", track).Int("bytes", len(b)).Uint64("pts", pts).Uint("seq", seq).Msg("fmp4 media segment")
 			})
 		}
 
