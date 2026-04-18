@@ -354,6 +354,14 @@ var migrations = []migration{
 			return tx.Commit()
 		},
 	},
+	{
+		name: "add_default_decode_hwaccel",
+		fn: func(ctx context.Context, db *sql.DB) error {
+			_, err := db.ExecContext(ctx,
+				`INSERT OR IGNORE INTO core_settings (key, value) VALUES ('default_decode_hwaccel', '')`)
+			return err
+		},
+	},
 }
 
 func addDefaultHWAccelMigration(ctx context.Context, db *sql.DB) error {

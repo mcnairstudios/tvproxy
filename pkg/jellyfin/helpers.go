@@ -244,6 +244,6 @@ func (s *Server) buildMediaStreams(st *models.Stream) []MediaStream {
 
 	return []MediaStream{
 		{Type: "Video", Codec: videoCodec, Index: 0, IsDefault: true, Width: width, Height: height},
-		{Type: "Audio", Codec: audioCodec, Index: 1, IsDefault: true, Channels: channels, SampleRate: 48000},
+		{Type: "Audio", Codec: audioCodec, Index: 1, IsDefault: true, Channels: channels, SampleRate: 0},
 	}
 }

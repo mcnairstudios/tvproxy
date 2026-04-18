@@ -176,6 +176,21 @@ func (s *VODService) resolveEncoderElement(ctx context.Context, videoCodec strin
 	return ""
 }
 
+func (s *VODService) resolveDecoderElement(ctx context.Context, sourceVideoCodec string) string {
+	codec := strings.ToLower(sourceVideoCodec)
+	switch codec {
+	case "h264", "h265", "av1":
+		return s.settingsService.ResolveDecoderElement(ctx, codec)
+	case "mpeg2", "mpeg2video":
+		return s.settingsService.ResolveDecoderElement(ctx, "mpeg2")
+	}
+	return ""
+}
+
+func (s *VODService) resolveDecodeHWAccel(ctx context.Context) string {
+	return s.settingsService.ResolveDecodeHWAccel(ctx)
+}
+
 func (s *VODService) autoSelectSourceProfile(ctx context.Context, streamURL string) *models.SourceProfile {
 	if streamURL == "" {
 		return nil
@@ -349,6 +364,8 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		OutputHeight:     sa.OutputHeight,
 	}
 	startOpts.VideoEncoderElement = s.resolveEncoderElement(ctx, strategy.VideoCodec)
+	startOpts.VideoDecoderElement = s.resolveDecoderElement(ctx, probeVCodec)
+	startOpts.DecodeHWAccel = s.resolveDecodeHWAccel(ctx)
 	sp := s.lookupSourceProfile(ctx, rs.M3UAccountID, rs.SatIPSourceID, streamURL)
 	applySourceProfile(&startOpts, sp)
 
@@ -444,6 +461,8 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		OutputHeight:     sa.OutputHeight,
 	}
 	startOpts2.VideoEncoderElement = s.resolveEncoderElement(ctx, strategy.VideoCodec)
+	startOpts2.VideoDecoderElement = s.resolveDecoderElement(ctx, stream.VODVCodec)
+	startOpts2.DecodeHWAccel = s.resolveDecodeHWAccel(ctx)
 	applySourceProfile(&startOpts2, s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID, streamURL))
 
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, startOpts2, session.ConsumerViewer)
@@ -486,6 +505,7 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 		OutputContainer:      sa.Container,
 		OutputHWAccel:        sa.OutputHWAccel,
 		VideoEncoderElement:  s.resolveEncoderElement(ctx, sa.OutputVideoCodec),
+		DecodeHWAccel:        s.resolveDecodeHWAccel(ctx),
 		OutputDir:            s.config.VODOutputDir,
 		MetadataOnly:         false,
 		Delivery:             sa.Delivery,

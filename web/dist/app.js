@@ -4005,6 +4005,12 @@
             }
             vidEl.play().catch(function(e) { console.error('play:', e); });
           }
+        } else if (msg.type === 'genChanged') {
+          console.warn(msg.track + ' generation changed — restarting playback');
+          statusEl.textContent = 'Reconnecting...';
+          statusEl.style.color = '#ffaa00';
+          mseWorker.postMessage({type: 'stop'});
+          setTimeout(function() { startMSEPlayback(dvrObj, vidEl, statusEl, 0); }, 1000);
         } else if (msg.type === 'error') {
           console.error(msg.track + ' worker error:', msg.msg);
         }
@@ -4015,20 +4021,24 @@
       setTimeout(function() { initAc.abort(); }, 35000);
       statusEl.textContent = 'Initializing...';
       statusEl.style.color = '#ffaa00';
-      Promise.all([
-        fetch(basePath + 'video/init', {signal: initAc.signal, cache: 'no-store'}).then(function(r) {
-          if (!r.ok) throw new Error('video init: HTTP ' + r.status + ' ' + r.statusText);
-          return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; });
-        }),
-        fetch(basePath + 'audio/init', {signal: initAc.signal, cache: 'no-store'}).then(function(r) {
-          if (!r.ok) throw new Error('audio init: HTTP ' + r.status + ' ' + r.statusText);
-          return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; });
-        })
-      ]).then(function(initResults) {
-        var videoInit = initResults[0];
-        var audioInit = initResults[1];
-        return fetch(basePath + 'debug', {cache: 'no-store'}).then(function(r) { return r.json(); }).then(function(debugInfo) {
-          return { videoInit: videoInit, audioInit: audioInit, debugInfo: debugInfo };
+      fetch(basePath + 'debug', {cache: 'no-store'}).then(function(r) { return r.json(); }).then(function(debugInfo) {
+        var audioRejectedEarly = debugInfo.audio_rejected || false;
+        var initPromises = [
+          fetch(basePath + 'video/init', {signal: initAc.signal, cache: 'no-store'}).then(function(r) {
+            if (!r.ok) throw new Error('video init: HTTP ' + r.status + ' ' + r.statusText);
+            return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; });
+          })
+        ];
+        if (!audioRejectedEarly) {
+          initPromises.push(
+            fetch(basePath + 'audio/init', {signal: initAc.signal, cache: 'no-store'}).then(function(r) {
+              if (!r.ok) throw new Error('audio init: HTTP ' + r.status + ' ' + r.statusText);
+              return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; });
+            })
+          );
+        }
+        return Promise.all(initPromises).then(function(initResults) {
+          return { videoInit: initResults[0], audioInit: initResults[1] || null, debugInfo: debugInfo };
         });
       }).then(function(results) {
         var videoInit = results.videoInit;
@@ -4036,9 +4046,11 @@
         var debugInfo = results.debugInfo;
 
         mseDuration = debugInfo.duration || dvrObj.duration || 0;
+        var audioRejected = debugInfo.audio_rejected || false;
         var videoCodec = detectVideoCodec(videoInit.buf);
         var videoMime = 'video/mp4; codecs="' + videoCodec + '"';
-        var audioMime = 'audio/mp4; codecs="mp4a.40.2"';
+        var audioCodecStr = debugInfo.audio_codec || 'mp4a.40.2';
+        var audioMime = 'audio/mp4; codecs="' + audioCodecStr + '"';
 
         mseMediaSource = new MediaSource();
         vidEl.src = URL.createObjectURL(mseMediaSource);
@@ -4048,31 +4060,40 @@
             mseMediaSource.duration = mseDuration;
           }
           mseVideoSb = mseMediaSource.addSourceBuffer(videoMime);
-          mseAudioSb = mseMediaSource.addSourceBuffer(audioMime);
+          if (!audioRejected) {
+            mseAudioSb = mseMediaSource.addSourceBuffer(audioMime);
+            mseAudioSb.mode = 'segments';
+            mseAudioSb.addEventListener('error', function() { console.error('mseAudioSb ERROR', vidEl.error); });
+          }
           mseVideoSb.mode = 'segments';
-          mseAudioSb.mode = 'segments';
 
           mseVideoSb.addEventListener('error', function() { console.error('mseVideoSb ERROR', vidEl.error); });
-          mseAudioSb.addEventListener('error', function() { console.error('mseAudioSb ERROR', vidEl.error); });
           vidEl.addEventListener('error', function() { console.error('VIDEO ELEMENT ERROR', vidEl.error && vidEl.error.code, vidEl.error && vidEl.error.message); });
 
-          statusEl.textContent = 'Buffering...';
-          statusEl.style.color = '#ffaa00';
+          if (audioRejected) {
+            statusEl.textContent = 'Missing Audio Probe — video only';
+            statusEl.style.color = '#ff6600';
+          } else {
+            statusEl.textContent = 'Buffering...';
+            statusEl.style.color = '#ffaa00';
+          }
           var videoOffset = debugInfo.video_offset || 0;
           var audioOffset = debugInfo.audio_offset || 0;
           if (videoOffset > 0 || audioOffset > 0) {
             console.log('A/V offset: video=' + videoOffset.toFixed(3) + 's audio=' + audioOffset.toFixed(3) + 's');
           }
           mseVideoSb.timestampOffset = videoOffset;
-          mseAudioSb.timestampOffset = audioOffset;
+          if (mseAudioSb) mseAudioSb.timestampOffset = audioOffset;
           mseWaitUpdate(mseVideoSb).then(function() {
             mseVideoSb.appendBuffer(videoInit.buf);
             return mseWaitUpdate(mseVideoSb);
           }).then(function() {
-            mseAudioSb.appendBuffer(audioInit.buf);
-            return mseWaitUpdate(mseAudioSb);
+            if (mseAudioSb) {
+              mseAudioSb.appendBuffer(audioInit.buf);
+              return mseWaitUpdate(mseAudioSb);
+            }
           }).then(function() {
-            mseWorker.postMessage({type: 'start', sessionId: dvrObj.id, videoGen: videoInit.gen, audioGen: audioInit.gen});
+            mseWorker.postMessage({type: 'start', sessionId: dvrObj.id, videoGen: videoInit.gen, audioGen: audioInit.gen, audioDisabled: audioRejected});
           }).catch(function(e) {
             console.error('MSE init error:', e);
           });
@@ -7548,6 +7569,51 @@
             }
             capabilitiesContent.appendChild(columnsWrap);
 
+            var hwDecoders = (caps.video_decoders || []).filter(function(d) { return d.hw; });
+            var swDecoders = (caps.video_decoders || []).filter(function(d) { return !d.hw; });
+            if (hwDecoders.length > 0 || swDecoders.length > 0) {
+              var decColumnsWrap = h('div', { style: 'display:flex;gap:24px;margin-bottom:16px' });
+              if (hwDecoders.length > 0) {
+                var hwDecCol = h('div', { style: 'flex:1' });
+                hwDecCol.appendChild(h('div', { style: 'font-weight:500;font-size:13px;margin-bottom:8px;color:var(--text-muted)' }, 'Hardware Decoders'));
+                var hwDecBadges = h('div', { style: 'display:flex;flex-wrap:wrap;gap:6px' });
+                var hwDecGrouped = {};
+                hwDecoders.forEach(function(dec) {
+                  if (!hwDecGrouped[dec.name]) hwDecGrouped[dec.name] = { platform: dec.platform, codecs: [] };
+                  hwDecGrouped[dec.name].codecs.push(dec.codec.toUpperCase());
+                });
+                Object.keys(hwDecGrouped).forEach(function(name) {
+                  var g = hwDecGrouped[name];
+                  hwDecBadges.appendChild(h('span', {
+                    style: 'padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;color:#fff;background:#2ea043',
+                    title: g.platform + ' — ' + g.codecs.join(', ')
+                  }, name + ' (' + g.codecs.join('/') + ')'));
+                });
+                hwDecCol.appendChild(hwDecBadges);
+                decColumnsWrap.appendChild(hwDecCol);
+              }
+              if (swDecoders.length > 0) {
+                var swDecCol = h('div', { style: 'flex:1;text-align:right' });
+                swDecCol.appendChild(h('div', { style: 'font-weight:500;font-size:13px;margin-bottom:8px;color:var(--text-muted)' }, 'Software Decoders'));
+                var swDecBadges = h('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end' });
+                var swDecGrouped = {};
+                swDecoders.forEach(function(dec) {
+                  if (!swDecGrouped[dec.name]) swDecGrouped[dec.name] = { codecs: [] };
+                  swDecGrouped[dec.name].codecs.push(dec.codec.toUpperCase());
+                });
+                Object.keys(swDecGrouped).forEach(function(name) {
+                  var g = swDecGrouped[name];
+                  swDecBadges.appendChild(h('span', {
+                    style: 'padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;color:#fff;background:#6e7681',
+                    title: g.codecs.join(', ')
+                  }, name + ' (' + g.codecs.join('/') + ')'));
+                });
+                swDecCol.appendChild(swDecBadges);
+                decColumnsWrap.appendChild(swDecCol);
+              }
+              capabilitiesContent.appendChild(decColumnsWrap);
+            }
+
             if (caps.audio_encoders && caps.audio_encoders.length > 0) {
               var audioRow = h('div', { style: 'margin-top:12px;text-align:right' });
               audioRow.appendChild(h('div', { style: 'font-weight:500;font-size:13px;margin-bottom:8px;color:var(--text-muted)' }, 'Audio Encoders'));
@@ -7606,6 +7672,50 @@
             });
 
             capabilitiesContent.appendChild(encoderSection);
+
+            var allVideoDecoders = caps.video_decoders || [];
+            if (allVideoDecoders.length > 0) {
+              var decoderSection = h('div', { style: 'margin-top:16px;border-top:1px solid var(--border);padding-top:16px' });
+              decoderSection.appendChild(h('div', { style: 'font-weight:500;font-size:14px;margin-bottom:12px' }, 'Decoder Selection'));
+              decoderSection.appendChild(h('p', { style: 'color:var(--text-muted);font-size:13px;margin:0 0 12px 0' },
+                'Choose which decoder to use for each source codec. Hardware decoders offload CPU. Leave on Auto unless debugging.'));
+
+              var decoderCodecNames = { h264: 'H.264', h265: 'H.265 / HEVC', av1: 'AV1', mpeg2: 'MPEG-2' };
+              ['h264', 'h265', 'av1', 'mpeg2'].forEach(function(codec) {
+                var matching = allVideoDecoders.filter(function(d) { return d.codec === codec; });
+                if (matching.length === 0) return;
+                var currentVal = ((Array.isArray(settings) ? settings : []).find(function(s) { return s.key === 'decoder_' + codec; }) || {}).value || '';
+                var sel = h('select', { style: selectStyle });
+                sel.appendChild(h('option', { value: '' }, 'Auto (fallback chain)'));
+                var hwOpts = matching.filter(function(d) { return d.hw; });
+                var swOpts = matching.filter(function(d) { return !d.hw; });
+                if (hwOpts.length > 0) {
+                  var hwGroup = h('optgroup', { label: 'Hardware' });
+                  hwOpts.forEach(function(d) { hwGroup.appendChild(h('option', { value: d.name }, d.name + ' (' + d.platform + ')')); });
+                  sel.appendChild(hwGroup);
+                }
+                if (swOpts.length > 0) {
+                  var swGroup = h('optgroup', { label: 'Software' });
+                  swOpts.forEach(function(d) { swGroup.appendChild(h('option', { value: d.name }, d.name)); });
+                  sel.appendChild(swGroup);
+                }
+                sel.value = currentVal;
+                sel.onchange = async function() {
+                  sel.disabled = true;
+                  try {
+                    var payload = {};
+                    payload['decoder_' + codec] = sel.value;
+                    await api.put('/api/settings', payload);
+                    toast.success(decoderCodecNames[codec] + ' decoder updated');
+                  } catch (err) { toast.error(err.message); sel.value = currentVal; }
+                  sel.disabled = false;
+                };
+                decoderSection.appendChild(h('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:10px' },
+                  h('label', { style: 'margin:0;min-width:140px;font-size:14px' }, decoderCodecNames[codec] + ':'),
+                  sel));
+              });
+              capabilitiesContent.appendChild(decoderSection);
+            }
 
             var recSection = h('div', { style: 'margin-top:16px;border-top:1px solid var(--border);padding-top:16px' });
             recSection.appendChild(h('div', { style: 'font-weight:500;font-size:14px;margin-bottom:12px' }, 'Recording Codec'));

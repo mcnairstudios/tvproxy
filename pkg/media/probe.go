@@ -1,15 +1,19 @@
 package media
 
 type VideoInfo struct {
-	Codec          string `json:"codec"`
-	Profile        string `json:"profile,omitempty"`
-	PixFmt         string `json:"pix_fmt,omitempty"`
-	ColorSpace     string `json:"color_space,omitempty"`
-	ColorTransfer  string `json:"color_transfer,omitempty"`
-	ColorPrimaries string `json:"color_primaries,omitempty"`
-	FieldOrder     string `json:"field_order,omitempty"`
-	FPS            string `json:"fps,omitempty"`
-	BitRate        string `json:"bit_rate,omitempty"`
+	Codec          string  `json:"codec"`
+	Profile        string  `json:"profile,omitempty"`
+	PixFmt         string  `json:"pix_fmt,omitempty"`
+	BitDepth       int     `json:"bit_depth,omitempty"`
+	Interlaced     bool    `json:"interlaced,omitempty"`
+	ColorSpace     string  `json:"color_space,omitempty"`
+	ColorTransfer  string  `json:"color_transfer,omitempty"`
+	ColorPrimaries string  `json:"color_primaries,omitempty"`
+	FieldOrder     string  `json:"field_order,omitempty"`
+	FPS            string  `json:"fps,omitempty"`
+	BitRate        string  `json:"bit_rate,omitempty"`
+	StartTime      float64 `json:"start_time,omitempty"`
+	Duration       float64 `json:"duration,omitempty"`
 }
 
 type StreamDisposition struct {
@@ -30,6 +34,8 @@ type AudioTrack struct {
 	SampleRate  string             `json:"sample_rate,omitempty"`
 	Channels    int                `json:"channels,omitempty"`
 	BitRate     string             `json:"bit_rate,omitempty"`
+	StartTime   float64            `json:"start_time,omitempty"`
+	Duration    float64            `json:"duration,omitempty"`
 	Disposition StreamDisposition  `json:"disposition,omitempty"`
 }
 
@@ -42,16 +48,6 @@ type ProbeResult struct {
 	FormatName  string       `json:"format_name,omitempty"`
 	Video       *VideoInfo   `json:"video,omitempty"`
 	AudioTracks []AudioTrack `json:"audio_tracks,omitempty"`
-}
-
-func NormalizeVideoCodec(codec string) string {
-	switch codec {
-	case "hevc":
-		return "h265"
-	case "mpeg2video":
-		return "mpeg2"
-	}
-	return codec
 }
 
 func NormalizeContainer(formatName string) string {

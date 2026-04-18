@@ -3,6 +3,7 @@ package fmp4
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -58,9 +59,10 @@ type TrackStore struct {
 	partner      *TrackStore
 	maxSegments  int
 
-	durHistory  [10]uint32
-	durIdx      int
-	durCount    int
+	durHistory    [10]uint32
+	durIdx        int
+	durCount      int
+	audioRejected bool
 }
 
 func NewTrackStore(isVideo bool, videoCodec string) *TrackStore {
@@ -74,7 +76,7 @@ func NewTrackStore(isVideo bool, videoCodec string) *TrackStore {
 		maxSegments: 60,
 	}
 	if !isVideo {
-		ts.timescale = 48000
+		ts.timescale = 0
 	}
 	ts.cond = sync.NewCond(&ts.mu)
 	return ts
@@ -131,6 +133,51 @@ func (ts *TrackStore) IsClosed() bool {
 
 func (ts *TrackStore) IsInitReady() bool {
 	return atomic.LoadInt32(&ts.initReady) == 1
+}
+
+func (ts *TrackStore) SetAudioRate(rate int) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if rate > 0 && !ts.isVideo {
+		ts.timescale = uint32(rate)
+	}
+}
+
+func (ts *TrackStore) IsAudioRejected() bool {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return ts.audioRejected
+}
+
+func (ts *TrackStore) GetAudioCodecString() string {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if ts.audioObjType == 0 {
+		return "mp4a.40.2"
+	}
+	return fmt.Sprintf("mp4a.40.%d", ts.audioObjType)
+}
+
+type TimingDebug struct {
+	SegmentCount  int     `json:"segment_count"`
+	DecodeTimeSec float64 `json:"decode_time_sec"`
+	FirstPTSSec   float64 `json:"first_pts_sec"`
+	LastPTSSec    float64 `json:"last_pts_sec"`
+}
+
+func (ts *TrackStore) GetTimingDebug() TimingDebug {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	decodeSec := 0.0
+	if ts.timescale > 0 {
+		decodeSec = float64(ts.decodeTime) / float64(ts.timescale)
+	}
+	return TimingDebug{
+		SegmentCount:  len(ts.segments),
+		DecodeTimeSec: decodeSec,
+		FirstPTSSec:   float64(ts.firstPTSNs) / 1e9,
+		LastPTSSec:    float64(ts.lastPTSNs) / 1e9,
+	}
 }
 
 func (ts *TrackStore) Generation() int64 {
@@ -475,6 +522,14 @@ func (ts *TrackStore) PushAudioFrame(data []byte, ptsNs, bufDurNs int64) {
 
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
+
+	if ts.timescale == 0 {
+		if !ts.audioRejected {
+			ts.audioRejected = true
+			log.Printf("[audio] REFUSING audio: timescale is 0 (probe did not provide sample_rate). Fix the probe or source profile.")
+		}
+		return
+	}
 
 	if ts.initSeg == nil {
 		ts.audioObjType = aac.AAClc

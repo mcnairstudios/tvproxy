@@ -63,7 +63,7 @@ func TestGStreamerSession_TestPattern(t *testing.T) {
 }
 
 func TestGStreamerDiscoverer(t *testing.T) {
-	if !DiscovererAvailable() {
+	if _, err := exec.LookPath("gst-discoverer-1.0"); err != nil {
 		t.Skip("gst-discoverer-1.0 not installed")
 	}
 

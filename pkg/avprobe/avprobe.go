@@ -20,6 +20,8 @@ typedef struct {
 	char *pix_fmt;
 	char *video_profile;
 	char *color_space;
+	char *color_transfer;
+	char *color_primaries;
 	char *field_order;
 	char *video_bitrate;
 	char *audio_codec;
@@ -28,6 +30,10 @@ typedef struct {
 	char *audio_lang;
 	char *audio_bitrate;
 	double duration;
+	double video_start_time;
+	double video_duration;
+	double audio_start_time;
+	double audio_duration;
 	int is_vod;
 	char *format_name;
 	char *error;
@@ -88,6 +94,31 @@ static CProbeInfo c_probe(const char *url, const char *user_agent) {
 			info.interlaced = (par->field_order != AV_FIELD_PROGRESSIVE &&
 			                   par->field_order != AV_FIELD_UNKNOWN) ? 1 : 0;
 
+			const AVPixFmtDescriptor *pix_desc = av_pix_fmt_desc_get((enum AVPixelFormat)par->format);
+			if (pix_desc) {
+				if (pix_desc->nb_components > 0) {
+					info.video_bit_depth = pix_desc->comp[0].depth;
+				}
+			}
+
+			const char *cs = av_color_space_name(par->color_space);
+			if (cs && cs[0]) info.color_space = strdup(cs);
+
+			const char *ct = av_color_transfer_name(par->color_trc);
+			if (ct && ct[0]) info.color_transfer = strdup(ct);
+
+			const char *cp = av_color_primaries_name(par->color_primaries);
+			if (cp && cp[0]) info.color_primaries = strdup(cp);
+
+			switch (par->field_order) {
+				case AV_FIELD_PROGRESSIVE: info.field_order = strdup("progressive"); break;
+				case AV_FIELD_TT: info.field_order = strdup("tt"); break;
+				case AV_FIELD_BB: info.field_order = strdup("bb"); break;
+				case AV_FIELD_TB: info.field_order = strdup("tb"); break;
+				case AV_FIELD_BT: info.field_order = strdup("bt"); break;
+				default: break;
+			}
+
 			const char *pix = av_get_pix_fmt_name((enum AVPixelFormat)par->format);
 			if (pix) info.pix_fmt = strdup(pix);
 
@@ -101,6 +132,13 @@ static CProbeInfo c_probe(const char *url, const char *user_agent) {
 				snprintf(br, sizeof(br), "%lld", (long long)par->bit_rate);
 				info.video_bitrate = strdup(br);
 			}
+
+			if (fmt_ctx->streams[i]->start_time != AV_NOPTS_VALUE) {
+				info.video_start_time = (double)fmt_ctx->streams[i]->start_time * av_q2d(fmt_ctx->streams[i]->time_base);
+			}
+			if (fmt_ctx->streams[i]->duration > 0) {
+				info.video_duration = (double)fmt_ctx->streams[i]->duration * av_q2d(fmt_ctx->streams[i]->time_base);
+			}
 		}
 
 		if (par->codec_type == AVMEDIA_TYPE_AUDIO && !info.audio_codec) {
@@ -111,6 +149,13 @@ static CProbeInfo c_probe(const char *url, const char *user_agent) {
 
 			AVDictionaryEntry *lang = av_dict_get(fmt_ctx->streams[i]->metadata, "language", NULL, 0);
 			if (lang) info.audio_lang = strdup(lang->value);
+
+			if (fmt_ctx->streams[i]->start_time != AV_NOPTS_VALUE) {
+				info.audio_start_time = (double)fmt_ctx->streams[i]->start_time * av_q2d(fmt_ctx->streams[i]->time_base);
+			}
+			if (fmt_ctx->streams[i]->duration > 0) {
+				info.audio_duration = (double)fmt_ctx->streams[i]->duration * av_q2d(fmt_ctx->streams[i]->time_base);
+			}
 
 			if (par->bit_rate > 0) {
 				char br[32];
@@ -129,6 +174,8 @@ static void free_probe_info(CProbeInfo *info) {
 	if (info->pix_fmt) free(info->pix_fmt);
 	if (info->video_profile) free(info->video_profile);
 	if (info->color_space) free(info->color_space);
+	if (info->color_transfer) free(info->color_transfer);
+	if (info->color_primaries) free(info->color_primaries);
 	if (info->field_order) free(info->field_order);
 	if (info->video_bitrate) free(info->video_bitrate);
 	if (info->audio_codec) free(info->audio_codec);
@@ -189,11 +236,19 @@ func Probe(ctx context.Context, url, userAgent string) (*media.ProbeResult, erro
 		}
 
 		result.Video = &media.VideoInfo{
-			Codec:   C.GoString(info.video_codec),
-			Profile: goStringOrEmpty(info.video_profile),
-			PixFmt:  goStringOrEmpty(info.pix_fmt),
-			FPS:     fps,
-			BitRate: goStringOrEmpty(info.video_bitrate),
+			Codec:      C.GoString(info.video_codec),
+			Profile:    goStringOrEmpty(info.video_profile),
+			PixFmt:     goStringOrEmpty(info.pix_fmt),
+			BitDepth:   int(info.video_bit_depth),
+			Interlaced:     info.interlaced != 0,
+			ColorSpace:     goStringOrEmpty(info.color_space),
+			ColorTransfer:  goStringOrEmpty(info.color_transfer),
+			ColorPrimaries: goStringOrEmpty(info.color_primaries),
+			FieldOrder:     goStringOrEmpty(info.field_order),
+			FPS:        fps,
+			BitRate:    goStringOrEmpty(info.video_bitrate),
+			StartTime:  float64(info.video_start_time),
+			Duration:   float64(info.video_duration),
 		}
 	}
 
@@ -205,6 +260,8 @@ func Probe(ctx context.Context, url, userAgent string) (*media.ProbeResult, erro
 			SampleRate: strconv.Itoa(int(info.sample_rate)),
 			Channels:   int(info.channels),
 			BitRate:    goStringOrEmpty(info.audio_bitrate),
+			StartTime:  float64(info.audio_start_time),
+			Duration:   float64(info.audio_duration),
 		}}
 	}
 

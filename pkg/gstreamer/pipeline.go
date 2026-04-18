@@ -41,7 +41,10 @@ type PipelineOpts struct {
 	OutputFormat        OutputFormat
 
 	VideoEncoderElement string // explicit GStreamer encoder element name (e.g. "vaav1lpenc", "x264enc")
+	VideoDecoderElement string // explicit GStreamer decoder element name (e.g. "vah264dec", "avdec_h265")
 	HWAccel             HWAccel
+	DecodeHWAccel       HWAccel
+	Decode10Bit         bool   // allow HW decode of 10-bit content (requires sufficient VRAM)
 
 	RecordingPath   string
 
@@ -49,9 +52,7 @@ type PipelineOpts struct {
 	ExtraHeaders map[string]string
 
 	Deinterlace       bool
-	DeinterlaceMethod string
 	AudioDelayMs      int
-	AudioLanguage     string
 	VideoQueueMs      int
 	AudioQueueMs      int
 	RTSPLatency       int
@@ -65,9 +66,10 @@ type PipelineOpts struct {
 	SourceHeight       int
 	OutputHeight       int
 	SourcePixFmt       string
+	SourceInterlaced   bool
+	SourceChannels     int
+	SourceBitDepth     int
 
-	DualOutput   bool
-	SeekOffset   float64
 	UseAppSink   bool
 }
 
@@ -92,16 +94,27 @@ func BuildPipeline(opts PipelineOpts) *Pipeline {
 	}
 }
 
-func BuildFromProbe(probe *media.ProbeResult, inputURL string, opts PipelineOpts) *Pipeline {
-	if probe != nil {
-		if probe.Video != nil {
-			opts.VideoCodec = probe.Video.Codec
-		}
-		if len(probe.AudioTracks) > 0 {
-			opts.AudioCodec = probe.AudioTracks[0].Codec
-		}
-		opts.Container = probe.FormatName
+func applyProbe(opts *PipelineOpts, probe *media.ProbeResult) {
+	if probe == nil {
+		return
 	}
+	if probe.Video != nil {
+		opts.VideoCodec = probe.Video.Codec
+		opts.SourcePixFmt = probe.Video.PixFmt
+		opts.SourceBitDepth = probe.Video.BitDepth
+		opts.SourceInterlaced = probe.Video.Interlaced
+	}
+	opts.SourceWidth = probe.Width
+	opts.SourceHeight = probe.Height
+	if len(probe.AudioTracks) > 0 {
+		opts.AudioCodec = probe.AudioTracks[0].Codec
+		opts.SourceChannels = probe.AudioTracks[0].Channels
+	}
+	opts.Container = probe.FormatName
+}
+
+func BuildFromProbe(probe *media.ProbeResult, inputURL string, opts PipelineOpts) *Pipeline {
+	applyProbe(&opts, probe)
 	opts.InputURL = inputURL
 	return BuildPipeline(opts)
 }
@@ -111,7 +124,7 @@ func buildPipelineStr(opts PipelineOpts) string {
 	srcCodec := NormalizeCodec(opts.VideoCodec)
 	isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy" || outCodec == srcCodec
 
-	if PluginsAvailable() && isCopy {
+	if pluginsAvailable() && isCopy {
 		return buildPluginPipelineStr(opts)
 	}
 	return buildManualPipelineStr(opts)
@@ -131,9 +144,22 @@ func buildPluginPipelineStr(opts PipelineOpts) string {
 	if outCodec == "copy" || outCodec == NormalizeCodec(opts.VideoCodec) {
 		parts = append(parts, "d.video ! m.video")
 	} else {
-		dec := hwDecoder(NormalizeCodec(opts.VideoCodec), opts.HWAccel)
+		vcodec := NormalizeCodec(opts.VideoCodec)
+		decHW := resolveDecodeHW(opts, vcodec)
+		dec := hwDecoder(vcodec, decHW)
+		if opts.VideoDecoderElement != "" {
+			dec = videoParserStr(vcodec, vcodec) + " ! " + opts.VideoDecoderElement
+		}
 		enc := hwEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)
-		parts = append(parts, fmt.Sprintf("d.video ! %s ! %s ! m.video", dec, enc))
+		postprocess := ""
+		if opts.Deinterlace || opts.SourceInterlaced {
+			if decHW == HWVAAPI || decHW == HWQSV {
+				postprocess = " ! vapostproc deinterlace-method=2"
+			} else {
+				postprocess = " ! videoconvert ! deinterlace"
+			}
+		}
+		parts = append(parts, fmt.Sprintf("d.video ! %s%s ! %s ! m.video", dec, postprocess, enc))
 	}
 
 	parts = append(parts, "d.audio ! m.audio")
@@ -165,26 +191,6 @@ func buildManualPipelineStr(opts PipelineOpts) string {
 	return strings.Join(parts, " ")
 }
 
-func IsMPEGTS(container, inputURL string) bool {
-	c := strings.ToLower(container)
-	if c == "mpegts" || c == "mpeg-ts" || c == "ts" {
-		return true
-	}
-	url := strings.ToLower(inputURL)
-	if strings.HasSuffix(url, ".ts") || strings.Contains(url, ".ts?") {
-		return true
-	}
-	if strings.Contains(url, ":5004/") {
-		return true
-	}
-	if strings.HasSuffix(url, ".mp4") || strings.HasSuffix(url, ".mkv") ||
-		strings.HasSuffix(url, ".webm") || strings.HasSuffix(url, ".mov") ||
-		strings.HasSuffix(url, ".avi") {
-		return false
-	}
-	return true
-}
-
 func buildSource(opts PipelineOpts) string {
 	switch opts.InputType {
 	case "rtsp":
@@ -212,11 +218,24 @@ func buildVideoStr(opts PipelineOpts) string {
 		return fmt.Sprintf("demux. ! queue ! %s ! mux.", parser)
 	}
 
-	dec := hwDecoder(vcodec, opts.HWAccel)
+	decHW := resolveDecodeHW(opts, vcodec)
+	dec := hwDecoder(vcodec, decHW)
+	if opts.VideoDecoderElement != "" {
+		dec = videoParserStr(vcodec, vcodec) + " ! " + opts.VideoDecoderElement
+	}
 	enc := hwEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)
 	parser := videoParserStr(outCodec, "")
 
-	return fmt.Sprintf("demux. ! queue ! %s ! %s ! %s ! mux.", dec, enc, parser)
+	postprocess := ""
+	if opts.Deinterlace || opts.SourceInterlaced {
+		if decHW == HWVAAPI || decHW == HWQSV {
+			postprocess = " ! vapostproc deinterlace-method=2"
+		} else {
+			postprocess = " ! videoconvert ! deinterlace"
+		}
+	}
+
+	return fmt.Sprintf("demux. ! queue ! %s%s ! %s ! %s ! mux.", dec, postprocess, enc, parser)
 }
 
 func buildSinkStr(opts PipelineOpts) string {
@@ -249,7 +268,12 @@ func buildAudioStr(opts PipelineOpts) string {
 	inputParser := audioInputParser(acodec)
 	dec := audioDecoder(acodec)
 	aacEnc := aacEncoderName()
-	return fmt.Sprintf("demux. ! queue ! %s ! %s ! audioconvert ! audioresample ! audio/x-raw,channels=2 ! %s ! aacparse ! mux.", inputParser, dec, aacEnc)
+	ch := audioChannels(opts)
+	channelCaps := ""
+	if ch > 0 {
+		channelCaps = fmt.Sprintf(" ! audio/x-raw,channels=%d", ch)
+	}
+	return fmt.Sprintf("demux. ! queue ! %s ! %s ! audioconvert ! audioresample%s ! %s ! aacparse ! mux.", inputParser, dec, channelCaps, aacEnc)
 }
 
 func audioInputParser(codec string) string {

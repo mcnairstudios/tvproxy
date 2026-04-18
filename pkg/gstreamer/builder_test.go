@@ -88,7 +88,7 @@ func TestBuildAudioChain(t *testing.T) {
 		wantLen  int
 	}{
 		{"AAC LATM", "aac_latm", 7},
-		{"AAC copy", "aac", 1},
+		{"AAC copy", "aac", 2},
 		{"MP2", "mp2", 7},
 		{"AC3", "ac3", 6},
 		{"EAC3", "eac3", 6},
@@ -101,14 +101,36 @@ func TestBuildAudioChain(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			chain := buildAudioChain(tt.codec)
+			chain := buildAudioChain(tt.codec, 2)
 			if len(chain) != tt.wantLen {
-				t.Errorf("buildAudioChain(%q) length = %d, want %d", tt.codec, len(chain), tt.wantLen)
+				t.Errorf("buildAudioChain(%q, 2) length = %d, want %d", tt.codec, len(chain), tt.wantLen)
 			}
 			for i, el := range chain {
 				if el == nil {
 					t.Errorf("buildAudioChain(%q) element %d is nil", tt.codec, i)
 				}
+			}
+		})
+	}
+}
+
+func TestAudioChannels(t *testing.T) {
+	tests := []struct {
+		name     string
+		opts     PipelineOpts
+		want     int
+	}{
+		{"MSE always stereo", PipelineOpts{UseAppSink: true, SourceChannels: 6}, 2},
+		{"File with 5.1 source", PipelineOpts{UseAppSink: false, SourceChannels: 6}, 6},
+		{"File with mono source", PipelineOpts{UseAppSink: false, SourceChannels: 1}, 1},
+		{"File with unknown channels", PipelineOpts{UseAppSink: false, SourceChannels: 0}, 2},
+		{"MSE overrides source", PipelineOpts{UseAppSink: true, SourceChannels: 1}, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := audioChannels(tt.opts)
+			if got != tt.want {
+				t.Errorf("audioChannels() = %d, want %d", got, tt.want)
 			}
 		})
 	}

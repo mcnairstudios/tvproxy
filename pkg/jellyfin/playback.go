@@ -49,7 +49,7 @@ func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request) {
 	} else {
 		mediaStreams = []MediaStream{
 			{Type: "Video", Codec: videoCodec, Index: 0, IsDefault: true, Width: 1920, Height: 1080},
-			{Type: "Audio", Codec: audioCodec, Index: 1, IsDefault: true, Channels: 2, SampleRate: 48000},
+			{Type: "Audio", Codec: audioCodec, Index: 1, IsDefault: true, Channels: 2, SampleRate: 0},
 		}
 	}
 

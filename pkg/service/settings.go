@@ -82,6 +82,24 @@ func (s *SettingsService) ResolveEncoderElement(ctx context.Context, codec strin
 	return ""
 }
 
+func (s *SettingsService) ResolveDecoderElement(ctx context.Context, codec string) string {
+	key := "decoder_" + codec
+	if val, _ := s.Get(ctx, key); val != "" {
+		return val
+	}
+	return ""
+}
+
+func (s *SettingsService) ResolveDecodeHWAccel(ctx context.Context) string {
+	if val, _ := s.Get(ctx, "default_decode_hwaccel"); val != "" {
+		return val
+	}
+	if val, _ := s.Get(ctx, "default_hwaccel"); val != "" {
+		return val
+	}
+	return "none"
+}
+
 
 var apiVisibleKeys = map[string]bool{
 	"vod_profile_selector":       true,
@@ -90,6 +108,11 @@ var apiVisibleKeys = map[string]bool{
 	"encoder_h264":               true,
 	"encoder_h265":               true,
 	"encoder_av1":                true,
+	"default_decode_hwaccel":     true,
+	"decoder_h264":               true,
+	"decoder_h265":               true,
+	"decoder_av1":                true,
+	"decoder_mpeg2":              true,
 	"transcoder":                 true,
 	"dlna_enabled":               true,
 	"debug_enabled":              true,

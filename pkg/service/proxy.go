@@ -14,6 +14,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
@@ -53,6 +54,8 @@ type ProxyService struct {
 	streamProfileRepo store.ProfileStore
 	clientService     *ClientService
 	activity          *ActivityService
+	settingsService   *SettingsService
+	probeCache        store.ProbeCache
 	config            *config.Config
 	httpClient        *http.Client
 	log               zerolog.Logger
@@ -67,6 +70,8 @@ func NewProxyService(
 	streamProfileRepo store.ProfileStore,
 	clientService *ClientService,
 	activity *ActivityService,
+	settingsService *SettingsService,
+	probeCache store.ProbeCache,
 	cfg *config.Config,
 	httpClient *http.Client,
 	log zerolog.Logger,
@@ -80,6 +85,8 @@ func NewProxyService(
 		streamProfileRepo: streamProfileRepo,
 		clientService:     clientService,
 		activity:          activity,
+		settingsService:   settingsService,
+		probeCache:        probeCache,
 		config:            cfg,
 		httpClient:        httpClient,
 		log:               log.With().Str("service", "proxy").Logger(),
@@ -451,17 +458,54 @@ func (s *ProxyService) startGStreamerProxy(ctx context.Context, channelID string
 		inputType = "rtsp"
 	}
 
-	pipeline := gstreamer.BuildPipeline(gstreamer.PipelineOpts{
-		InputURL:         stream.URL,
-		InputType:        inputType,
-		IsLive:           true,
-		VideoCodec:       profile.VideoCodec,
-		AudioCodec:       "aac_latm",
-		OutputVideoCodec: profile.VideoCodec,
-		OutputAudioCodec: "aac",
-		OutputFormat:     gstreamer.OutputMPEGTS,
-		HWAccel:          gstreamer.HWAccel(profile.HWAccel),
-	})
+	var probe *media.ProbeResult
+	if s.probeCache != nil {
+		probe, _ = s.probeCache.GetProbe(stream.ID)
+	}
+	if probe == nil {
+		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		probe, _ = avprobe.Probe(probeCtx, stream.URL, s.config.UserAgent)
+		cancel()
+	}
+
+	srcAudio := "aac_latm"
+	if probe != nil && len(probe.AudioTracks) > 0 {
+		srcAudio = probe.AudioTracks[0].Codec
+	}
+
+	decodeHW := gstreamer.HWAccel(profile.HWAccel)
+	if s.settingsService != nil {
+		if dh := s.settingsService.ResolveDecodeHWAccel(ctx); dh != "" && dh != "none" {
+			decodeHW = gstreamer.HWAccel(dh)
+		}
+	}
+	var decoderElement string
+	if s.settingsService != nil && probe != nil && probe.Video != nil {
+		codec := probe.Video.Codec
+		switch codec {
+		case "mpeg2video":
+			decoderElement = s.settingsService.ResolveDecoderElement(ctx, "mpeg2")
+		case "h264", "h265", "av1":
+			decoderElement = s.settingsService.ResolveDecoderElement(ctx, codec)
+		}
+	}
+
+	opts := gstreamer.PipelineOpts{
+		InputType:           inputType,
+		IsLive:              true,
+		OutputVideoCodec:    profile.VideoCodec,
+		OutputAudioCodec:    "aac",
+		OutputFormat:        gstreamer.OutputMPEGTS,
+		HWAccel:             gstreamer.HWAccel(profile.HWAccel),
+		DecodeHWAccel:       decodeHW,
+		VideoDecoderElement: decoderElement,
+		Decode10Bit:         gstreamer.Decode10BitSupported(),
+	}
+	if srcAudio == "" {
+		opts.AudioCodec = "aac_latm"
+	}
+
+	pipeline := gstreamer.BuildFromProbe(probe, stream.URL, opts)
 
 	s.log.Info().
 		Str("channel_id", channelID).

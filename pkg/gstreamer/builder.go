@@ -42,34 +42,6 @@ func Build(opts PipelineOpts) (*gst.Pipeline, string, error) {
 	return p, fmt.Sprintf("vod-%s-%s", container, mode), err
 }
 
-// buildMPEGTSPluginCopy builds a string pipeline using tvproxy plugins.
-// NOTE: Currently not called — go-gst NewPipelineFromString produces 0 bytes with plugin bins.
-// The pipeline works with gst-launch-1.0 CLI. When the go-gst issue is resolved, this path
-// can be re-enabled for fastest MPEG-TS copy (bypasses tsdemux pad-added entirely).
-func buildMPEGTSPluginCopy(opts PipelineOpts, srcCodec string) (*gst.Pipeline, error) {
-	srcAudio := NormalizeCodec(opts.AudioCodec)
-	audioMode := "aac"
-	if srcAudio == "aac" {
-		audioMode = "copy"
-	}
-
-	audioLang := ""
-	if opts.AudioLanguage != "" {
-		audioLang = " audio-language=" + opts.AudioLanguage
-	}
-
-	pipeStr := fmt.Sprintf(
-		"tvproxysrc location=%s is-live=true"+
-			" ! tvproxydemux name=d container-hint=mpegts video-codec-hint=%s audio-codec-hint=%s audio-codec=%s%s"+
-			" d.video ! m.video"+
-			" d.audio ! m.audio"+
-			" tvproxymux name=m output-format=mp4"+
-			" ! filesink location=%s",
-		opts.InputURL, srcCodec, srcAudio, audioMode, audioLang, opts.RecordingPath)
-
-	return gst.NewPipelineFromString(pipeStr)
-}
-
 func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pipeline, error) {
 	pipeline, err := gst.NewPipeline("tvproxy")
 	if err != nil {
@@ -159,43 +131,7 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 	if isCopy {
 		videoElements = createOutputParser(srcCodec)
 	} else {
-		decHW := hw
-		if strings.Contains(opts.SourcePixFmt, "10") || strings.Contains(opts.SourcePixFmt, "12") {
-			decHW = HWNone
-		}
-		if hw == HWVideoToolbox && (srcCodec == "h265" || srcCodec == "hevc") {
-			decHW = HWNone
-		}
-		videoElements = append(videoElements, createHWDecoder(srcCodec, decHW)...)
-		if opts.Deinterlace {
-			di, _ := gst.NewElement("deinterlace")
-			if di != nil {
-				videoElements = append(videoElements, di)
-			}
-		}
-		scaleHeight := opts.OutputHeight
-		if scaleHeight == 0 && opts.UseAppSink && opts.SourceHeight > 0 && opts.SourceHeight < 1080 {
-			scaleHeight = 1080
-		}
-		vconv, _ := gst.NewElement("videoconvert")
-		if vconv != nil {
-			videoElements = append(videoElements, vconv)
-		}
-		if scaleHeight > 0 {
-			vscale, _ := gst.NewElement("videoscale")
-			scaleCaps, _ := gst.NewElement("capsfilter")
-			if vscale != nil && scaleCaps != nil {
-				h := (scaleHeight + 1) &^ 1
-				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,height=%d,pixel-aspect-ratio=1/1", h)))
-				videoElements = append(videoElements, vscale, scaleCaps)
-			}
-		}
-		if opts.VideoEncoderElement != "" {
-			videoElements = append(videoElements, createExplicitEncoder(opts.VideoEncoderElement, outCodec, bitrate(opts))...)
-		} else {
-			videoElements = append(videoElements, createHWEncoder(outCodec, hw, bitrate(opts))...)
-		}
-		videoElements = append(videoElements, createOutputParser(outCodec)...)
+		videoElements = buildVideoTranscodeChain(opts, srcCodec, outCodec, hw)
 	}
 
 	srcAudio := NormalizeCodec(opts.AudioCodec)
@@ -204,7 +140,7 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 		aPass, _ := gst.NewElement("aacparse")
 		audioElements = []*gst.Element{aPass}
 	} else {
-		audioElements = buildAudioChain(srcAudio)
+		audioElements = buildAudioChain(srcAudio, audioChannels(opts))
 	}
 	if opts.AudioDelayMs > 0 {
 		delayQueue, _ := gst.NewElement("queue")
@@ -372,43 +308,7 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 	if isCopy {
 		videoElements = createOutputParser(srcCodec)
 	} else {
-		decHW := hw
-		if strings.Contains(opts.SourcePixFmt, "10") || strings.Contains(opts.SourcePixFmt, "12") {
-			decHW = HWNone
-		}
-		if hw == HWVideoToolbox && (srcCodec == "h265" || srcCodec == "hevc") {
-			decHW = HWNone
-		}
-		videoElements = append(videoElements, createHWDecoder(srcCodec, decHW)...)
-		if opts.Deinterlace {
-			di, _ := gst.NewElement("deinterlace")
-			if di != nil {
-				videoElements = append(videoElements, di)
-			}
-		}
-		scaleHeight := opts.OutputHeight
-		if scaleHeight == 0 && opts.UseAppSink && opts.SourceHeight > 0 && opts.SourceHeight < 1080 {
-			scaleHeight = 1080
-		}
-		vconv, _ := gst.NewElement("videoconvert")
-		if vconv != nil {
-			videoElements = append(videoElements, vconv)
-		}
-		if scaleHeight > 0 {
-			vscale, _ := gst.NewElement("videoscale")
-			scaleCaps, _ := gst.NewElement("capsfilter")
-			if vscale != nil && scaleCaps != nil {
-				h := (scaleHeight + 1) &^ 1
-				scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,height=%d,pixel-aspect-ratio=1/1", h)))
-				videoElements = append(videoElements, vscale, scaleCaps)
-			}
-		}
-		if opts.VideoEncoderElement != "" {
-			videoElements = append(videoElements, createExplicitEncoder(opts.VideoEncoderElement, outCodec, bitrate(opts))...)
-		} else {
-			videoElements = append(videoElements, createHWEncoder(outCodec, hw, bitrate(opts))...)
-		}
-		videoElements = append(videoElements, createOutputParser(outCodec)...)
+		videoElements = buildVideoTranscodeChain(opts, srcCodec, outCodec, hw)
 	}
 
 	srcAudio := NormalizeCodec(opts.AudioCodec)
@@ -417,7 +317,7 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 		aPass, _ := gst.NewElement("aacparse")
 		audioElements = []*gst.Element{aPass}
 	} else {
-		audioElements = buildAudioChain(srcAudio)
+		audioElements = buildAudioChain(srcAudio, audioChannels(opts))
 	}
 	if opts.AudioDelayMs > 0 {
 		delayQueue, _ := gst.NewElement("queue")
@@ -522,199 +422,79 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 	return pipeline, nil
 }
 
-func buildVODTvproxyvod(opts PipelineOpts, srcCodec string) (*gst.Pipeline, error) {
-	vod := gst.Find("tvproxyvod")
-	if vod == nil {
-		return nil, fmt.Errorf("tvproxyvod element not available")
-	}
+func buildVideoTranscodeChain(opts PipelineOpts, srcCodec, outCodec string, hw HWAccel) []*gst.Element {
+	var elems []*gst.Element
+	decHW := resolveDecodeHW(opts, srcCodec)
+	elems = append(elems, createDecoderChain(opts, srcCodec)...)
 
-	outCodec := NormalizeCodec(opts.OutputVideoCodec)
-	isCopy := outCodec == "" || outCodec == "default" || outCodec == "copy"
+	isVAAPI := decHW == HWVAAPI || decHW == HWQSV
+	needDeinterlace := opts.Deinterlace || opts.SourceInterlaced
 
-	videoParser := "h264parse"
-	if srcCodec == "h265" {
-		videoParser = "h265parse"
-	} else if srcCodec == "av1" {
-		videoParser = "av1parse"
-	}
-
-	var pipeStr string
-	if isCopy {
-		pipeStr = fmt.Sprintf(
-			`tvproxyvod uri=%s name=tvproxyvod0 `+
-				`tvproxyvod0.video ! %s ! mp4mux name=mux fragment-duration=2000 streamable=true ! filesink location=%s `+
-				`tvproxyvod0.audio ! aacparse ! mux.`,
-			opts.InputURL, videoParser, opts.RecordingPath)
+	if isVAAPI {
+		vpp, _ := gst.NewElement("vapostproc")
+		if vpp != nil {
+			if needDeinterlace {
+				vpp.SetProperty("deinterlace-method", uint(2))
+			}
+			elems = append(elems, vpp)
+		}
 	} else {
-		hw := opts.HWAccel
-		enc := hwEncoder(outCodec, hw, bitrate(opts))
-		outParser := "h264parse"
-		if outCodec == "h265" {
-			outParser = "h265parse"
-		} else if outCodec == "av1" {
-			outParser = "av1parse"
+		vconv, _ := gst.NewElement("videoconvert")
+		if vconv != nil {
+			elems = append(elems, vconv)
 		}
-
-		encStr := enc
-		if opts.VideoEncoderElement != "" {
-			encStr = opts.VideoEncoderElement
-		}
-		br := bitrate(opts)
-
-		pipeStr = fmt.Sprintf(
-			`tvproxyvod uri=%s name=tvproxyvod0 `+
-				`tvproxyvod0.video ! %s ! %s bitrate=%d ! %s ! mp4mux name=mux fragment-duration=2000 streamable=true ! filesink location=%s `+
-				`tvproxyvod0.audio ! aacparse ! mux.`,
-			opts.InputURL, hwDecoder(srcCodec, hw), encStr, br, outParser, opts.RecordingPath)
-	}
-
-	//fmt.Printf("tvproxyvod pipeline: %s\n", pipeStr)
-	pipeline, err := gst.NewPipelineFromString(pipeStr)
-	if err != nil {
-		return nil, fmt.Errorf("tvproxyvod pipeline: %w", err)
-	}
-
-	if vodEl, err := pipeline.Bin.GetElementByName("tvproxyvod0"); err == nil && vodEl != nil {
-		if opts.SeekOffset > 0 {
-			vodEl.SetProperty("seek-position", int64(opts.SeekOffset*1e9))
+		if needDeinterlace {
+			di, _ := gst.NewElement("deinterlace")
+			if di != nil {
+				elems = append(elems, di)
+			}
 		}
 	}
-
-	return pipeline, nil
-}
-
-func buildVODDecodebin3(opts PipelineOpts) (*gst.Pipeline, error) {
-	pipeline, err := gst.NewPipeline("tvproxy")
-	if err != nil {
-		return nil, err
+	scaleHeight := opts.OutputHeight
+	if scaleHeight == 0 && opts.UseAppSink && opts.SourceHeight > 0 && opts.SourceHeight < 1080 {
+		scaleHeight = 1080
 	}
-
-	uridecodebin, _ := gst.NewElement("uridecodebin3")
-	if uridecodebin == nil {
-		return nil, fmt.Errorf("uridecodebin3 element not available")
-	}
-	uridecodebin.SetProperty("uri", opts.InputURL)
-
-	defaultQueueNs := uint64(10000000000)
-	if opts.UseAppSink {
-		defaultQueueNs = 3000000000
-	}
-	vQueueNs := defaultQueueNs
-	if opts.VideoQueueMs > 0 {
-		vQueueNs = uint64(opts.VideoQueueMs) * 1000000
-	}
-	aQueueNs := defaultQueueNs
-	if opts.AudioQueueMs > 0 {
-		aQueueNs = uint64(opts.AudioQueueMs) * 1000000
-	}
-	vQueue, _ := gst.NewElement("queue")
-	vQueue.SetProperty("max-size-time", vQueueNs)
-	aQueue, _ := gst.NewElement("queue")
-	aQueue.SetProperty("max-size-time", aQueueNs)
-
-	hw := opts.HWAccel
-	outCodec := NormalizeCodec(opts.OutputVideoCodec)
-	if outCodec == "" || outCodec == "default" || outCodec == "copy" {
-		outCodec = "h264"
-	}
-
-	var videoElements []*gst.Element
-	vconv, _ := gst.NewElement("videoconvert")
-	if vconv != nil {
-		videoElements = append(videoElements, vconv)
-	}
-	if opts.Deinterlace {
-		di, _ := gst.NewElement("deinterlace")
-		if di != nil {
-			videoElements = append(videoElements, di)
+	if scaleHeight > 0 {
+		vscale, _ := gst.NewElement("videoscale")
+		scaleCaps, _ := gst.NewElement("capsfilter")
+		if vscale != nil && scaleCaps != nil {
+			h := (scaleHeight + 1) &^ 1
+			scaleCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("video/x-raw,height=%d,pixel-aspect-ratio=1/1", h)))
+			elems = append(elems, vscale, scaleCaps)
 		}
 	}
 	if opts.VideoEncoderElement != "" {
-		videoElements = append(videoElements, createExplicitEncoder(opts.VideoEncoderElement, outCodec, bitrate(opts))...)
+		elems = append(elems, createExplicitEncoder(opts.VideoEncoderElement, outCodec, bitrate(opts))...)
 	} else {
-		videoElements = append(videoElements, createHWEncoder(outCodec, hw, bitrate(opts))...)
+		elems = append(elems, createHWEncoder(outCodec, hw, bitrate(opts))...)
 	}
-	videoElements = append(videoElements, createOutputParser(outCodec)...)
-
-	audioElements := buildAudioChainDecoded()
-	if opts.AudioDelayMs > 0 {
-		delayQueue, _ := gst.NewElement("queue")
-		if delayQueue != nil {
-			delayQueue.SetProperty("min-threshold-time", uint64(opts.AudioDelayMs)*1000000)
-			audioElements = append([]*gst.Element{delayQueue}, audioElements...)
-		}
-	}
-
-	mux, _ := gst.NewElement("mp4mux")
-	mux.SetProperty("fragment-duration", uint(2000))
-	mux.SetProperty("streamable", true)
-	sink, _ := gst.NewElement("filesink")
-	sink.SetProperty("location", opts.RecordingPath)
-	muxSink := []*gst.Element{mux, sink}
-
-	var all []*gst.Element
-	all = append(all, uridecodebin, vQueue, aQueue)
-	all = append(all, videoElements...)
-	all = append(all, audioElements...)
-	all = append(all, muxSink...)
-
-	if err := checkNilElements(all); err != nil {
-		return nil, err
-	}
-
-	pipeline.AddMany(all...)
-
-	muxEl := muxSink[0]
-
-	vChain := []*gst.Element{vQueue}
-	vChain = append(vChain, videoElements...)
-	vChain = append(vChain, muxEl)
-	gst.ElementLinkMany(vChain...)
-
-	aChain := []*gst.Element{aQueue}
-	aChain = append(aChain, audioElements...)
-	aChain = append(aChain, muxEl)
-	gst.ElementLinkMany(aChain...)
-
-	if len(muxSink) == 2 {
-		gst.ElementLinkMany(muxSink[0], muxSink[1])
-	}
-
-	var videoOnce, audioOnce sync.Once
-	uridecodebin.Connect("pad-added", func(self *gst.Element, pad *gst.Pad) {
-		caps := pad.GetCurrentCaps()
-		if caps == nil {
-			return
-		}
-		name := caps.GetStructureAt(0).Name()
-		linked := false
-		if name == "video/x-raw" {
-			videoOnce.Do(func() {
-				pad.Link(vQueue.GetStaticPad("sink"))
-				linked = true
-			})
-		} else if name == "audio/x-raw" {
-			audioOnce.Do(func() {
-				pad.Link(aQueue.GetStaticPad("sink"))
-				linked = true
-			})
-		}
-		if !linked {
-			drainUnlinkedPad(pipeline, pad)
-		}
-	})
-
-	return pipeline, nil
+	elems = append(elems, createOutputParser(outCodec)...)
+	return elems
 }
 
-func buildAudioChainDecoded() []*gst.Element {
+func audioChannels(opts PipelineOpts) int {
+	if opts.UseAppSink {
+		return 2
+	}
+	if opts.SourceChannels > 0 {
+		return opts.SourceChannels
+	}
+	return 2
+}
+
+func buildAudioChainDecoded(channels int) []*gst.Element {
 	aConv, _ := gst.NewElement("audioconvert")
 	aResample, _ := gst.NewElement("audioresample")
-	aCaps, _ := gst.NewElement("capsfilter")
-	aCaps.SetProperty("caps", gst.NewCapsFromString("audio/x-raw,channels=2"))
+	elems := []*gst.Element{aConv, aResample}
+	if channels > 0 {
+		aCaps, _ := gst.NewElement("capsfilter")
+		aCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("audio/x-raw,channels=%d", channels)))
+		elems = append(elems, aCaps)
+	}
 	aEnc := aacEncoder()
 	aOutParse, _ := gst.NewElement("aacparse")
-	return []*gst.Element{aConv, aResample, aCaps, aEnc, aOutParse}
+	elems = append(elems, aEnc, aOutParse)
+	return elems
 }
 
 func checkNilElements(elements []*gst.Element) error {
@@ -766,6 +546,9 @@ func bitrate(opts PipelineOpts) int {
 		return opts.EncoderBitrateKbps
 	}
 	if opts.OutputHeight > 0 {
+		if opts.SourceWidth > 0 && opts.SourceHeight > 0 {
+			return scaledBitrate(opts.OutputHeight * opts.SourceWidth / opts.SourceHeight)
+		}
 		return scaledBitrate(opts.OutputHeight * 16 / 9)
 	}
 	if opts.SourceWidth > 0 {

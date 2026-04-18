@@ -181,6 +181,114 @@ func TestBuildFromProbe(t *testing.T) {
 	}
 }
 
+func TestApplyProbe_PopulatesAllFields(t *testing.T) {
+	probe := &media.ProbeResult{
+		Width:    1920,
+		Height:   1080,
+		HasVideo: true,
+		Video: &media.VideoInfo{
+			Codec:      "h265",
+			Profile:    "Main 10",
+			PixFmt:     "yuv420p10le",
+			BitDepth:   10,
+			Interlaced: true,
+			ColorSpace: "bt2020nc",
+			FieldOrder: "tt",
+			FPS:        "25",
+		},
+		AudioTracks: []media.AudioTrack{{
+			Codec:      "ac3",
+			Channels:   6,
+			SampleRate: "48000",
+		}},
+		FormatName: "mpegts",
+	}
+
+	opts := PipelineOpts{}
+	applyProbe(&opts, probe)
+
+	if opts.VideoCodec != "h265" {
+		t.Errorf("VideoCodec = %q, want h265", opts.VideoCodec)
+	}
+	if opts.SourceBitDepth != 10 {
+		t.Errorf("SourceBitDepth = %d, want 10", opts.SourceBitDepth)
+	}
+	if !opts.SourceInterlaced {
+		t.Error("SourceInterlaced should be true")
+	}
+	if opts.SourceChannels != 6 {
+		t.Errorf("SourceChannels = %d, want 6", opts.SourceChannels)
+	}
+	if opts.SourceWidth != 1920 {
+		t.Errorf("SourceWidth = %d, want 1920", opts.SourceWidth)
+	}
+	if opts.AudioCodec != "ac3" {
+		t.Errorf("AudioCodec = %q, want ac3", opts.AudioCodec)
+	}
+	if opts.Container != "mpegts" {
+		t.Errorf("Container = %q, want mpegts", opts.Container)
+	}
+}
+
+func TestApplyProbe_NilProbe(t *testing.T) {
+	opts := PipelineOpts{VideoCodec: "original"}
+	applyProbe(&opts, nil)
+	if opts.VideoCodec != "original" {
+		t.Error("nil probe should not modify opts")
+	}
+}
+
+func TestBuildFromProbe_InterlacedDeinterlace(t *testing.T) {
+	probe := &media.ProbeResult{
+		HasVideo: true,
+		Video: &media.VideoInfo{
+			Codec:      "h264",
+			Interlaced: true,
+			FieldOrder: "tt",
+		},
+		AudioTracks: []media.AudioTrack{{Codec: "aac_latm"}},
+		FormatName:  "mpegts",
+	}
+
+	p := BuildFromProbe(probe, "http://device/stream", PipelineOpts{
+		InputType:        "http",
+		IsLive:           true,
+		OutputVideoCodec: "h264",
+		OutputFormat:     OutputMPEGTS,
+		RecordingPath:    "/tmp/deinterlace.ts",
+	})
+
+	if !strings.Contains(p.PipelineStr, "deinterlace") {
+		t.Error("interlaced probe should add deinterlace element to pipeline")
+	}
+}
+
+func TestBuildFromProbe_10BitFallsBackToSW(t *testing.T) {
+	probe := &media.ProbeResult{
+		HasVideo: true,
+		Video: &media.VideoInfo{
+			Codec:    "h265",
+			BitDepth: 10,
+			PixFmt:   "yuv420p10le",
+		},
+		AudioTracks: []media.AudioTrack{{Codec: "aac"}},
+		FormatName:  "mpegts",
+	}
+
+	p := BuildFromProbe(probe, "http://device/stream", PipelineOpts{
+		InputType:        "http",
+		IsLive:           true,
+		OutputVideoCodec: "h264",
+		OutputFormat:     OutputMPEGTS,
+		HWAccel:          HWVideoToolbox,
+		RecordingPath:    "/tmp/10bit.ts",
+	})
+
+	if strings.Contains(p.PipelineStr, "vtdec") {
+		t.Error("10-bit content should NOT use vtdec (fall back to SW)")
+	}
+}
+
 func TestBuildPipeline_AudioCopy(t *testing.T) {
 	p := BuildPipeline(PipelineOpts{
 		InputURL:         "http://device/stream",

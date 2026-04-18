@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +40,9 @@ type StartOpts struct {
 	OutputAudioCodec string
 	OutputContainer  string
 	OutputHWAccel        string
+	DecodeHWAccel        string
 	VideoEncoderElement  string
+	VideoDecoderElement  string
 	UseWireGuard         bool
 	KnownDuration    float64
 	SeekOffset       float64
@@ -118,9 +121,6 @@ func (m *Manager) cleanupDoneSession(channelID string, s *Session) {
 	s.cancel()
 	<-s.done
 	os.RemoveAll(s.TempDir)
-	if s.SegCtrl != nil {
-		s.SegCtrl.Close()
-	}
 	if s.VideoStore != nil {
 		s.VideoStore.Close()
 	}
@@ -204,9 +204,6 @@ func (m *Manager) stopAndCleanup(channelID string, s *Session) {
 
 	if !s.wasRecording {
 		os.RemoveAll(s.TempDir)
-	}
-	if s.SegCtrl != nil {
-		s.SegCtrl.Close()
 	}
 	if s.VideoStore != nil {
 		s.VideoStore.Close()
@@ -691,15 +688,21 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	srcWidth := 0
 	srcHeight := 0
 	srcPixFmt := ""
+	srcInterlaced := false
+	srcBitDepth := 0
+	srcChannels := 0
 	if probe != nil {
 		if probe.Video != nil {
 			srcVideo = probe.Video.Codec
 			srcPixFmt = probe.Video.PixFmt
+			srcInterlaced = probe.Video.Interlaced
+			srcBitDepth = probe.Video.BitDepth
 		}
 		srcWidth = probe.Width
 		srcHeight = probe.Height
 		if len(probe.AudioTracks) > 0 {
 			srcAudio = probe.AudioTracks[0].Codec
+			srcChannels = probe.AudioTracks[0].Channels
 		}
 		container = probe.FormatName
 	}
@@ -714,6 +717,22 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		hwAccel = gstreamer.HWVideoToolbox
 	case "nvenc":
 		hwAccel = gstreamer.HWNVENC
+	}
+
+	decodeHW := hwAccel
+	if s.startOpts.DecodeHWAccel != "" {
+		switch s.startOpts.DecodeHWAccel {
+		case "vaapi":
+			decodeHW = gstreamer.HWVAAPI
+		case "qsv":
+			decodeHW = gstreamer.HWQSV
+		case "videotoolbox":
+			decodeHW = gstreamer.HWVideoToolbox
+		case "nvenc":
+			decodeHW = gstreamer.HWNVENC
+		case "none":
+			decodeHW = gstreamer.HWNone
+		}
 	}
 
 	outFormat := gstreamer.OutputMP4
@@ -743,14 +762,15 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		OutputBitrate:    0,
 		OutputFormat:     outFormat,
 		VideoEncoderElement: s.startOpts.VideoEncoderElement,
+		VideoDecoderElement: s.startOpts.VideoDecoderElement,
 		HWAccel:          hwAccel,
+		DecodeHWAccel:    decodeHW,
+		Decode10Bit:      gstreamer.Decode10BitSupported(),
 		RecordingPath:    s.FilePath,
 		IsLive:           probe == nil || probe.Duration == 0,
 
 		Deinterlace:       s.startOpts.Deinterlace,
-		DeinterlaceMethod: s.startOpts.DeinterlaceMethod,
 		AudioDelayMs:      s.startOpts.AudioDelayMs,
-		AudioLanguage:     s.startOpts.AudioLanguage,
 		VideoQueueMs:      s.startOpts.VideoQueueMs,
 		AudioQueueMs:      s.startOpts.AudioQueueMs,
 		RTSPLatency:       s.startOpts.RTSPLatency,
@@ -764,7 +784,9 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		SourceHeight:       srcHeight,
 		OutputHeight:       s.startOpts.OutputHeight,
 		SourcePixFmt:       srcPixFmt,
-		SeekOffset:         s.startOpts.SeekOffset,
+		SourceInterlaced:   srcInterlaced,
+		SourceChannels:     srcChannels,
+		SourceBitDepth:     srcBitDepth,
 	}
 
 	m.log.Info().
@@ -783,6 +805,9 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Int("audio_delay", s.startOpts.AudioDelayMs).
 		Int("width", srcWidth).
 		Int("height", srcHeight).
+		Bool("src_interlaced", srcInterlaced).
+		Int("src_bit_depth", srcBitDepth).
+		Int("src_channels", srcChannels).
 		Float64("seek_offset", s.startOpts.SeekOffset).
 		Float64("known_duration", s.startOpts.KnownDuration).
 		Str("profile", s.startOpts.ProfileName).
@@ -809,6 +834,17 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		}
 		s.VideoStore = fmp4.NewTrackStore(true, outCodec)
 		s.AudioStore = fmp4.NewTrackStore(false, "")
+		if len(s.AudioTracks) > 0 {
+			m.log.Info().Str("sample_rate", s.AudioTracks[0].SampleRate).Str("codec", s.AudioTracks[0].Codec).Msg("probe audio info")
+			if s.AudioTracks[0].SampleRate != "" {
+				if rate, err := strconv.Atoi(s.AudioTracks[0].SampleRate); err == nil && rate > 0 {
+					s.AudioStore.SetAudioRate(rate)
+					m.log.Info().Int("rate", rate).Msg("audio timescale set from probe")
+				}
+			}
+		} else {
+			m.log.Warn().Msg("no audio tracks from probe — audio timescale unknown")
+		}
 		sharedBase := fmp4.NewSharedBasePTS()
 		s.VideoStore.SetSharedBase(sharedBase)
 		s.AudioStore.SetSharedBase(sharedBase)
@@ -870,30 +906,108 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		return
 	}
 
-	bus := pipeline.GetBus()
+	const maxRetries = 3
+	const retryBaseDelay = 2 * time.Second
+	retryCount := 0
 
+	for {
+		exitReason := m.runBusLoop(ctx, s, pipeline, isLive)
+
+		pipeline.SetState(gst.StateNull)
+
+		if ctx.Err() != nil {
+			m.log.Info().Str("session_id", s.ID).Msg("pipeline stopped (context cancelled)")
+			break
+		}
+
+		if !isLive || exitReason == "vod_complete" {
+			m.log.Info().Str("session_id", s.ID).Str("reason", exitReason).Msg("pipeline stopped")
+			break
+		}
+
+		retryCount++
+		if retryCount > maxRetries {
+			m.log.Error().Str("session_id", s.ID).Int("retries", retryCount-1).Msg("live pipeline failed — max retries exceeded")
+			s.setError(fmt.Errorf("live stream failed after %d retries", maxRetries))
+			break
+		}
+
+		delay := retryBaseDelay * time.Duration(retryCount)
+		m.log.Warn().Str("session_id", s.ID).Str("reason", exitReason).Int("retry", retryCount).Dur("delay", delay).Msg("live pipeline dropped — restarting")
+
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(delay):
+		}
+		if ctx.Err() != nil {
+			break
+		}
+
+		newPipeline, newPath, err := gstreamer.Build(opts)
+		if err != nil {
+			m.log.Error().Err(err).Str("session_id", s.ID).Msg("pipeline rebuild failed")
+			s.setError(fmt.Errorf("pipeline rebuild failed: %w", err))
+			break
+		}
+
+		m.log.Info().Str("session_id", s.ID).Str("path", newPath).Int("retry", retryCount).Msg("pipeline rebuilt")
+		s.SetStopPipeline(func() { newPipeline.SetState(gst.StateNull) })
+		pipeline = newPipeline
+
+		if opts.UseAppSink {
+			newGen := s.seekGen.Add(1)
+			s.VideoStore.Reset(newGen, 0)
+			s.AudioStore.Reset(newGen, 0)
+			if err := fmp4.SetupVideoSink(pipeline, s.VideoStore); err != nil {
+				m.log.Error().Err(err).Msg("failed to setup video appsink on retry")
+				break
+			}
+			if err := fmp4.SetupAudioSink(pipeline, s.AudioStore); err != nil {
+				m.log.Error().Err(err).Msg("failed to setup audio appsink on retry")
+				break
+			}
+		}
+
+		if stateErr := pipeline.SetState(gst.StatePlaying); stateErr != nil {
+			m.log.Error().Err(stateErr).Str("session_id", s.ID).Msg("pipeline restart SetState PLAYING failed")
+			break
+		}
+
+		m.log.Info().Str("session_id", s.ID).Int("retry", retryCount).Msg("live pipeline restarted — PLAYING")
+	}
+}
+
+func (m *Manager) runBusLoop(ctx context.Context, s *Session, pipeline *gst.Pipeline, isLive bool) string {
+	bus := pipeline.GetBus()
+	lastActivity := time.Now()
+	const watchdogTimeout = 30 * time.Second
 	bufferingPaused := false
 
-pipeloop:
 	for {
 		if ctx.Err() != nil {
-			break pipeloop
+			return "cancelled"
 		}
 		msg := bus.TimedPop(gst.ClockTime(500000000))
 		if ctx.Err() != nil {
-			break pipeloop
+			return "cancelled"
 		}
 		if msg == nil {
+			if isLive && time.Since(lastActivity) > watchdogTimeout {
+				m.log.Warn().Str("session_id", s.ID).Dur("timeout", watchdogTimeout).Msg("no pipeline activity — treating as EOS")
+				return "watchdog"
+			}
 			continue
 		}
+		lastActivity = time.Now()
 		switch msg.Type() {
 		case gst.MessageEOS:
 			if isLive {
 				m.log.Warn().Str("session_id", s.ID).Msg("gstreamer EOS on live stream (source dropped)")
-			} else {
-				m.log.Info().Str("session_id", s.ID).Msg("gstreamer EOS (VOD complete)")
+				return "eos_live"
 			}
-			break pipeloop
+			m.log.Info().Str("session_id", s.ID).Msg("gstreamer EOS (VOD complete)")
+			return "vod_complete"
 		case gst.MessageError:
 			gstErr := msg.ParseError()
 			errStr := gstErr.Error()
@@ -902,10 +1016,9 @@ pipeloop:
 				continue
 			}
 			m.log.Error().Str("session_id", s.ID).Err(gstErr).Msg("gstreamer error")
-			userErr := friendlyGstError(errStr)
-			s.setError(fmt.Errorf("%s", userErr))
+			s.setError(fmt.Errorf("%s", friendlyGstError(errStr)))
 			s.setLastStderr(gstErr.Error())
-			break pipeloop
+			return "error"
 		case gst.MessageBuffering:
 			pct := msg.ParseBuffering()
 			m.log.Debug().Str("session_id", s.ID).Int("percent", pct).Msg("buffering")
@@ -916,9 +1029,6 @@ pipeloop:
 			}
 		}
 	}
-
-	pipeline.SetState(gst.StateNull)
-	m.log.Info().Str("session_id", s.ID).Msg("pipeline stopped")
 }
 
 func (m *Manager) waitForAsyncDone(bus *gst.Bus, ctx context.Context, sessionID string, timeout time.Duration) bool {
@@ -1025,6 +1135,13 @@ func (m *Manager) pollFileProgress(ctx context.Context, s *Session) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if s.VideoStore != nil {
+				td := s.VideoStore.GetTimingDebug()
+				if td.DecodeTimeSec > 0 {
+					s.setBuffered(td.DecodeTimeSec)
+					continue
+				}
+			}
 			info, err := os.Stat(s.FilePath)
 			if err == nil && info.Size() > 0 {
 				secs := float64(info.Size()) / 500000.0

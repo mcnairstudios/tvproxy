@@ -45,6 +45,7 @@ func TestTrackStore_GetInit_Deadline(t *testing.T) {
 func TestTrackStore_SharedBasePTS(t *testing.T) {
 	video := NewTrackStore(true, "h265")
 	audio := NewTrackStore(false, "")
+	audio.SetAudioRate(48000)
 	base := NewSharedBasePTS()
 	video.SetSharedBase(base)
 	audio.SetSharedBase(base)
@@ -66,6 +67,28 @@ func TestTrackStore_SharedBasePTS(t *testing.T) {
 		t.Error("audio PTS after shared base should be > 0")
 	}
 	_ = audioTicks
+}
+
+func TestTrackStore_GetAudioCodecString(t *testing.T) {
+	ts := NewTrackStore(false, "")
+	if got := ts.GetAudioCodecString(); got != "mp4a.40.2" {
+		t.Errorf("default audio codec = %q, want mp4a.40.2", got)
+	}
+
+	ts.audioObjType = 2
+	if got := ts.GetAudioCodecString(); got != "mp4a.40.2" {
+		t.Errorf("AAC-LC = %q, want mp4a.40.2", got)
+	}
+
+	ts.audioObjType = 5
+	if got := ts.GetAudioCodecString(); got != "mp4a.40.5" {
+		t.Errorf("HE-AAC = %q, want mp4a.40.5", got)
+	}
+
+	ts.audioObjType = 29
+	if got := ts.GetAudioCodecString(); got != "mp4a.40.29" {
+		t.Errorf("HE-AACv2 = %q, want mp4a.40.29", got)
+	}
 }
 
 func TestTrackStore_RollingAverage(t *testing.T) {

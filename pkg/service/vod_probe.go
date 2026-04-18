@@ -61,7 +61,7 @@ func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName st
 
 	probe, probeErr := s.cachedOrFreshProbe(ctx, filePath)
 	if probeErr == nil && probe != nil && probe.Video != nil {
-		fileCodec := media.NormalizeVideoCodec(probe.Video.Codec)
+		fileCodec := gstreamer.NormalizeCodec(probe.Video.Codec)
 		fileContainer := media.NormalizeContainer(probe.FormatName)
 		videoMatch := sp.VideoCodec == "copy" || sp.VideoCodec == fileCodec
 		containerMatch := sp.Container == "" || sp.Container == fileContainer

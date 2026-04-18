@@ -105,18 +105,26 @@ func (h *VODHandler) ProbeStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if result.IsVOD {
-		respondJSON(w, http.StatusOK, map[string]any{
-			"type":     "vod",
-			"duration": result.Duration,
-			"width":    result.Width,
-			"height":   result.Height,
-		})
-	} else {
-		respondJSON(w, http.StatusOK, map[string]any{
-			"type": "live",
-		})
+	resp := map[string]any{
+		"duration": result.Duration,
+		"width":    result.Width,
+		"height":   result.Height,
 	}
+	if result.IsVOD {
+		resp["type"] = "vod"
+	} else {
+		resp["type"] = "live"
+	}
+	if result.Video != nil {
+		resp["video"] = result.Video
+	}
+	if len(result.AudioTracks) > 0 {
+		resp["audio_tracks"] = result.AudioTracks
+	}
+	if result.FormatName != "" {
+		resp["format"] = result.FormatName
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 func (h *VODHandler) DeleteProbe(w http.ResponseWriter, r *http.Request) {
@@ -538,29 +546,6 @@ func (h *VODHandler) PlayCompletedRecording(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-func (h *VODHandler) acquireController(channelID string, timeout time.Duration) (*fmp4.SegmentController, string) {
-	deadline := time.Now().Add(timeout)
-	sessionSeen := false
-	for time.Now().Before(deadline) {
-		sess := h.vodService.GetSession(channelID)
-		if sess == nil {
-			if sessionSeen {
-				return nil, "session ended"
-			}
-			return nil, "session not found"
-		}
-		sessionSeen = true
-		if sess.Delivery != "mse" {
-			return nil, "session delivery is not MSE"
-		}
-		if sess.SegCtrl != nil && !sess.SegCtrl.IsClosed() {
-			return sess.SegCtrl, ""
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	return nil, "pipeline not ready (timeout)"
-}
-
 func (h *VODHandler) acquireStore(channelID, track string, timeout time.Duration) (*fmp4.TrackStore, string) {
 	deadline := time.Now().Add(timeout)
 	sessionSeen := false
@@ -691,9 +676,29 @@ func (h *VODHandler) MSEDebug(w http.ResponseWriter, r *http.Request) {
 		resp["video_segments"] = sess.VideoStore.SegmentCount()
 		resp["gen"] = sess.VideoStore.Generation()
 		resp["video_offset"] = sess.VideoStore.TimestampOffset()
+		resp["video_timing"] = sess.VideoStore.GetTimingDebug()
+		resp["video_codec"] = sess.OutputVideoCodec
 	}
 	if sess.AudioStore != nil {
 		resp["audio_offset"] = sess.AudioStore.TimestampOffset()
+		resp["audio_timing"] = sess.AudioStore.GetTimingDebug()
+		resp["audio_codec"] = sess.AudioStore.GetAudioCodecString()
+		if sess.AudioStore.IsAudioRejected() {
+			resp["audio_rejected"] = true
+			resp["audio_rejected_reason"] = "Missing audio probe: sample rate unknown"
+		}
+	}
+	if sess.VideoStore != nil && sess.AudioStore != nil {
+		vt := sess.VideoStore.GetTimingDebug()
+		at := sess.AudioStore.GetTimingDebug()
+		drift := at.DecodeTimeSec - vt.DecodeTimeSec
+		resp["audio_drift_sec"] = drift
+	}
+	if sess.Video != nil {
+		resp["source_video"] = sess.Video
+	}
+	if len(sess.AudioTracks) > 0 {
+		resp["source_audio"] = sess.AudioTracks[0]
 	}
 	if errMsg := sess.GetError(); errMsg != "" {
 		resp["error"] = errMsg
@@ -745,7 +750,7 @@ self.onmessage = function(e) {
     ac = new AbortController();
     const signal = ac.signal;
     fetchTrack(msg.sessionId, 'video', msg.videoGen, signal);
-    fetchTrack(msg.sessionId, 'audio', msg.audioGen, signal);
+    if (!msg.audioDisabled) fetchTrack(msg.sessionId, 'audio', msg.audioGen, signal);
   } else if (msg.type === 'stop') {
     if (ac) ac.abort();
     ac = null;

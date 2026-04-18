@@ -37,7 +37,6 @@ type Session struct {
 	AudioTracks     []media.AudioTrack
 	VideoStore   *fmp4.TrackStore
 	AudioStore   *fmp4.TrackStore
-	SegCtrl      *fmp4.SegmentController
 	seekGen      atomic.Int64
 	startOpts    StartOpts
 	consumers    map[string]*Consumer

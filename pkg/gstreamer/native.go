@@ -2,8 +2,8 @@ package gstreamer
 
 import (
 	"fmt"
+	"log"
 	"strings"
-	"sync"
 
 	"github.com/go-gst/go-gst/gst"
 
@@ -15,195 +15,12 @@ func init() {
 }
 
 func BuildNativePipeline(name string, probe *media.ProbeResult, opts PipelineOpts) (*gst.Pipeline, error) {
-	if probe != nil {
-		if probe.Video != nil {
-			opts.VideoCodec = probe.Video.Codec
-		}
-		if len(probe.AudioTracks) > 0 {
-			opts.AudioCodec = probe.AudioTracks[0].Codec
-		}
-		opts.Container = probe.FormatName
-	}
+	applyProbe(&opts, probe)
 	pstr := buildPipelineStr(opts)
 	pipeline, err := gst.NewPipelineFromString(pstr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pipeline from: %s: %w", pstr, err)
 	}
-	return pipeline, nil
-}
-
-func mustElement(name string) (*gst.Element, error) {
-	el, err := gst.NewElement(name)
-	if err != nil || el == nil {
-		return nil, fmt.Errorf("GStreamer element %q not available", name)
-	}
-	return el, nil
-}
-
-func BuildNativeFromOpts(outputVideoCodec, audioCodec, hwAccel, inputURL, outputPath string, sourceVideoCodec ...string) (*gst.Pipeline, error) {
-	srcCodec := "h264"
-	if len(sourceVideoCodec) > 0 && sourceVideoCodec[0] != "" {
-		srcCodec = NormalizeCodec(sourceVideoCodec[0])
-	}
-	pipeline, err := gst.NewPipeline("tvproxy")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create pipeline: %w", err)
-	}
-	isRTSP := strings.HasPrefix(inputURL, "rtsp://") || strings.HasPrefix(inputURL, "rtsps://")
-	useTSDemux := isRTSP || IsMPEGTS("", inputURL)
-
-	var sourceElements []*gst.Element
-	if isRTSP {
-		src, _ := gst.NewElement("rtspsrc")
-		src.SetProperty("location", inputURL)
-		src.SetProperty("latency", uint(0))
-		src.SetProperty("protocols", uint(4))
-		depay, _ := gst.NewElement("rtpmp2tdepay")
-		src.Connect("pad-added", func(self *gst.Element, pad *gst.Pad) {
-			sinkPad := depay.GetStaticPad("sink")
-			if sinkPad != nil && !sinkPad.IsLinked() {
-				pad.Link(sinkPad)
-			}
-		})
-		sourceElements = []*gst.Element{src, depay}
-	} else {
-		src, _ := gst.NewElement("souphttpsrc")
-		src.SetProperty("location", inputURL)
-		if useTSDemux {
-			src.SetProperty("do-timestamp", true)
-			src.SetProperty("is-live", true)
-		}
-		sourceElements = []*gst.Element{src}
-	}
-
-	var demuxElements []*gst.Element
-	var demux *gst.Element
-
-	if useTSDemux {
-		tsparse, _ := gst.NewElement("tsparse")
-		tsparse.SetProperty("set-timestamps", true)
-		td, _ := gst.NewElement("tsdemux")
-		demuxElements = []*gst.Element{tsparse, td}
-		demux = td
-	} else {
-		qd, _ := gst.NewElement("qtdemux")
-		demuxElements = []*gst.Element{qd}
-		demux = qd
-	}
-
-	vQueue, _ := gst.NewElement("queue")
-	vQueue.SetProperty("max-size-time", uint64(10000000000))
-	vQueue.SetProperty("max-size-buffers", uint(0))
-	aQueue, _ := gst.NewElement("queue")
-	aQueue.SetProperty("max-size-time", uint64(10000000000))
-	aQueue.SetProperty("max-size-buffers", uint(0))
-
-	outVideo := NormalizeCodec(outputVideoCodec)
-	if outVideo == "" || outVideo == "default" {
-		outVideo = "copy"
-	}
-	hw := HWAccel(hwAccel)
-
-	var videoElements []*gst.Element
-	var audioElements []*gst.Element
-
-	if outVideo == "copy" {
-		parser := createOutputParser(srcCodec)
-		videoElements = parser
-	} else {
-		vDec := createHWDecoder(srcCodec, hw)
-		videoElements = append(videoElements, vDec...)
-		vconv, _ := gst.NewElement("videoconvert")
-		if vconv != nil {
-			videoElements = append(videoElements, vconv)
-		}
-		vEnc := createHWEncoder(outVideo, hw, 6000)
-		vOutParse := createOutputParser(outVideo)
-		videoElements = append(videoElements, vEnc...)
-		videoElements = append(videoElements, vOutParse...)
-	}
-
-	srcAudio := NormalizeCodec(audioCodec)
-	if useTSDemux {
-		audioElements = buildAudioChain(srcAudio)
-	} else {
-		aPass, _ := gst.NewElement("aacparse")
-		audioElements = []*gst.Element{aPass}
-	}
-
-	mux, _ := gst.NewElement("mp4mux")
-	mux.SetProperty("fragment-duration", uint(500))
-	mux.SetProperty("streamable", true)
-	sink, _ := gst.NewElement("filesink")
-	sink.SetProperty("location", outputPath)
-
-	var all []*gst.Element
-	all = append(all, sourceElements...)
-	all = append(all, demuxElements...)
-	all = append(all, vQueue, aQueue)
-	all = append(all, videoElements...)
-	all = append(all, audioElements...)
-	all = append(all, mux, sink)
-
-	for i, el := range all {
-		if el == nil {
-			return nil, fmt.Errorf("pipeline element at position %d is nil (missing GStreamer plugin)", i)
-		}
-	}
-
-	pipeline.AddMany(all...)
-
-	if isRTSP {
-		srcLink := []*gst.Element{sourceElements[1]}
-		srcLink = append(srcLink, demuxElements...)
-		gst.ElementLinkMany(srcLink...)
-	} else {
-		srcLink := []*gst.Element{sourceElements[0]}
-		srcLink = append(srcLink, demuxElements...)
-		gst.ElementLinkMany(srcLink...)
-	}
-
-	vChain := []*gst.Element{vQueue}
-	vChain = append(vChain, videoElements...)
-	vChain = append(vChain, mux)
-	gst.ElementLinkMany(vChain...)
-
-	aChain := []*gst.Element{aQueue}
-	aChain = append(aChain, audioElements...)
-	aChain = append(aChain, mux)
-	gst.ElementLinkMany(aChain...)
-
-	gst.ElementLinkMany(mux, sink)
-
-	var videoOnce, audioOnce sync.Once
-	demux.Connect("pad-added", func(self *gst.Element, pad *gst.Pad) {
-		padName := pad.GetName()
-		capsName := ""
-		caps := pad.GetCurrentCaps()
-		if caps != nil {
-			capsName = caps.GetStructureAt(0).Name()
-		}
-
-		isVideo := strings.HasPrefix(capsName, "video") || strings.HasPrefix(padName, "video")
-		isAudio := strings.Contains(capsName, "audio") || strings.HasPrefix(padName, "audio")
-
-		linked := false
-		if isVideo {
-			videoOnce.Do(func() {
-				pad.Link(vQueue.GetStaticPad("sink"))
-				linked = true
-			})
-		} else if isAudio {
-			audioOnce.Do(func() {
-				pad.Link(aQueue.GetStaticPad("sink"))
-				linked = true
-			})
-		}
-		if !linked {
-			drainUnlinkedPadNative(pipeline, pad)
-		}
-	})
-
 	return pipeline, nil
 }
 
@@ -227,26 +44,34 @@ func aacEncoder() *gst.Element {
 	if enc == nil {
 		enc, _ = gst.NewElement("avenc_aac")
 	}
+	if enc == nil {
+		log.Printf("[gstreamer] FATAL: no AAC encoder available (tried faac, voaacenc, avenc_aac) — install gst-plugins-bad or gst-libav")
+	}
 	return enc
 }
 
-func buildAudioChain(srcAudio string) []*gst.Element {
+func buildAudioChain(srcAudio string, channels int) []*gst.Element {
 	aConv, _ := gst.NewElement("audioconvert")
 	aResample, _ := gst.NewElement("audioresample")
-	aCaps, _ := gst.NewElement("capsfilter")
-	aCaps.SetProperty("caps", gst.NewCapsFromString("audio/x-raw,channels=2"))
+	encChain := []*gst.Element{aConv, aResample}
+	if channels > 0 {
+		aCaps, _ := gst.NewElement("capsfilter")
+		aCaps.SetProperty("caps", gst.NewCapsFromString(fmt.Sprintf("audio/x-raw,channels=%d", channels)))
+		encChain = append(encChain, aCaps)
+	}
 	aEnc := aacEncoder()
 	aOutParse, _ := gst.NewElement("aacparse")
+	encChain = append(encChain, aEnc, aOutParse)
 
 	switch srcAudio {
 	case "":
 		aInParse, _ := gst.NewElement("aacparse")
 		aDec, _ := gst.NewElement("avdec_aac_latm")
-		return []*gst.Element{aInParse, aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+		return append([]*gst.Element{aInParse, aDec}, encChain...)
 	case "aac_latm":
 		aInParse, _ := gst.NewElement("aacparse")
 		aDec, _ := gst.NewElement("avdec_aac_latm")
-		return []*gst.Element{aInParse, aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+		return append([]*gst.Element{aInParse, aDec}, encChain...)
 	case "aac":
 		aInParse, _ := gst.NewElement("aacparse")
 		aAlign, _ := gst.NewElement("capsfilter")
@@ -258,35 +83,87 @@ func buildAudioChain(srcAudio string) []*gst.Element {
 	case "mp2":
 		aInParse, _ := gst.NewElement("mpegaudioparse")
 		aDec, _ := gst.NewElement("mpg123audiodec")
-		return []*gst.Element{aInParse, aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+		return append([]*gst.Element{aInParse, aDec}, encChain...)
 	case "ac3", "eac3":
 		decName := "avdec_ac3"
 		if srcAudio == "eac3" {
 			decName = "avdec_eac3"
 		}
 		aDec, _ := gst.NewElement(decName)
-		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+		return append([]*gst.Element{aDec}, encChain...)
 	case "dts":
 		aDec, _ := gst.NewElement("avdec_dca")
-		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+		return append([]*gst.Element{aDec}, encChain...)
 	case "truehd":
 		aDec, _ := gst.NewElement("avdec_truehd")
-		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+		return append([]*gst.Element{aDec}, encChain...)
 	case "opus":
 		aDec, _ := gst.NewElement("opusdec")
-		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+		return append([]*gst.Element{aDec}, encChain...)
 	case "flac":
 		aParse, _ := gst.NewElement("flacparse")
 		aDec, _ := gst.NewElement("flacdec")
-		return []*gst.Element{aParse, aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+		return append([]*gst.Element{aParse, aDec}, encChain...)
 	case "vorbis":
 		aDec, _ := gst.NewElement("vorbisdec")
-		return []*gst.Element{aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+		return append([]*gst.Element{aDec}, encChain...)
 	default:
 		aInParse, _ := gst.NewElement("aacparse")
 		aDec, _ := gst.NewElement("avdec_aac_latm")
-		return []*gst.Element{aInParse, aDec, aConv, aResample, aCaps, aEnc, aOutParse}
+		return append([]*gst.Element{aInParse, aDec}, encChain...)
 	}
+}
+
+func createExplicitDecoder(elementName, codec string) []*gst.Element {
+	parser := createParserForCodec(codec)
+	decoder, _ := gst.NewElement(elementName)
+	if decoder == nil {
+		log.Printf("[gstreamer] explicit decoder %q not available, falling back to software", elementName)
+		return createHWDecoder(codec, HWNone)
+	}
+	log.Printf("[gstreamer] using explicit decoder %q for %s", elementName, codec)
+	return []*gst.Element{parser, decoder}
+}
+
+func createParserForCodec(codec string) *gst.Element {
+	var parser *gst.Element
+	switch codec {
+	case "h264":
+		parser, _ = gst.NewElement("h264parse")
+	case "h265":
+		parser, _ = gst.NewElement("h265parse")
+	case "av1":
+		parser, _ = gst.NewElement("av1parse")
+	case "mpeg2video":
+		parser, _ = gst.NewElement("mpegvideoparse")
+	case "mpeg4":
+		parser, _ = gst.NewElement("mpeg4videoparse")
+	default:
+		parser, _ = gst.NewElement("h264parse")
+	}
+	return parser
+}
+
+func resolveDecodeHW(opts PipelineOpts, srcCodec string) HWAccel {
+	hw := opts.DecodeHWAccel
+	if hw == "" {
+		hw = opts.HWAccel
+	}
+	is10bit := opts.SourceBitDepth > 8 || (opts.SourceBitDepth == 0 && (strings.Contains(opts.SourcePixFmt, "10") || strings.Contains(opts.SourcePixFmt, "12")))
+	if is10bit && !opts.Decode10Bit {
+		hw = HWNone
+	}
+	if hw == HWVideoToolbox && (srcCodec == "h265" || srcCodec == "hevc") {
+		hw = HWNone
+	}
+	return hw
+}
+
+func createDecoderChain(opts PipelineOpts, srcCodec string) []*gst.Element {
+	if opts.VideoDecoderElement != "" {
+		return createExplicitDecoder(opts.VideoDecoderElement, srcCodec)
+	}
+	return createHWDecoder(srcCodec, resolveDecodeHW(opts, srcCodec))
 }
 
 func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
