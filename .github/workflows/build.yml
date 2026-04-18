@@ -1,0 +1,44 @@
+name: Build TVProxy Image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IMAGE: gavinmcnair/tvproxy
+  TAG: latest
+
+jobs:
+  build-amd64:
+    runs-on: [self-hosted, linux, amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          VERSION=$(git rev-parse --short HEAD)
+          docker build --build-arg VERSION=$VERSION -t $IMAGE:$TAG-amd64 .
+      - name: Push
+        run: docker push $IMAGE:$TAG-amd64
+
+  build-arm64:
+    runs-on: [self-hosted, linux, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          VERSION=$(git rev-parse --short HEAD)
+          docker build --build-arg VERSION=$VERSION -t $IMAGE:$TAG-arm64 .
+      - name: Push
+        run: docker push $IMAGE:$TAG-arm64
+
+  manifest:
+    needs: [build-amd64, build-arm64]
+    runs-on: [self-hosted, linux, arm64]
+    steps:
+      - name: Create and push multi-arch manifest
+        run: |
+          docker manifest create $IMAGE:$TAG \
+            --amend $IMAGE:$TAG-amd64 \
+            --amend $IMAGE:$TAG-arm64
+          docker manifest push $IMAGE:$TAG
