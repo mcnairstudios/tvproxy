@@ -84,7 +84,7 @@ func (s *Server) hlsMasterPlaylist(w http.ResponseWriter, r *http.Request) {
 	var isLive bool
 
 	if channel, err := s.channels.GetByID(ctx, streamID); err == nil && channel != nil {
-		streamURL = fmt.Sprintf("%s/channel/%s?_port=8096", s.mainServerURL(), streamID)
+		streamURL = fmt.Sprintf("%s/channel/%s?_port=8096", s.mainServerURLFromRequest(r), streamID)
 		isLive = true
 		_ = channel
 	} else if stream, err := s.streams.GetByID(ctx, streamID); err == nil && stream != nil {
@@ -175,7 +175,7 @@ func (s *Server) videoStream(w http.ResponseWriter, r *http.Request) {
 
 	if channel, err := s.channels.GetByID(ctx, streamID); err == nil && channel != nil {
 		username := s.resolveUsername(r)
-		channelURL := fmt.Sprintf("%s/channel/%s?_port=8096&_user=%s", s.mainServerURL(), streamID, url.QueryEscape(username))
+		channelURL := fmt.Sprintf("%s/channel/%s?_port=8096&_user=%s", s.mainServerURLFromRequest(r), streamID, url.QueryEscape(username))
 		http.Redirect(w, r, channelURL, http.StatusTemporaryRedirect)
 		return
 	}

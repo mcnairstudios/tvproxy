@@ -12,6 +12,21 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 )
 
+func RequestBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	}
+	host := r.Host
+	if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
+		host = fwd
+	}
+	return scheme + "://" + host
+}
+
 func SetBrowserHeaders(req *http.Request, cfg *config.Config) {
 	req.Header.Set("User-Agent", cfg.UserAgent)
 	req.Header.Set("Accept", "*/*")

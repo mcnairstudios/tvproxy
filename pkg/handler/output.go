@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 
+	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
 
@@ -15,7 +16,7 @@ func NewOutputHandler(outputService *service.OutputService) *OutputHandler {
 }
 
 func (h *OutputHandler) M3U(w http.ResponseWriter, r *http.Request) {
-	content, err := h.outputService.GenerateM3U(r.Context())
+	content, err := h.outputService.GenerateM3U(r.Context(), httputil.RequestBaseURL(r))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to generate m3u")
 		return
@@ -28,7 +29,7 @@ func (h *OutputHandler) M3U(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *OutputHandler) M3U8(w http.ResponseWriter, r *http.Request) {
-	content, err := h.outputService.GenerateM3UWithExtension(r.Context(), ".mp4")
+	content, err := h.outputService.GenerateM3UWithExtension(r.Context(), httputil.RequestBaseURL(r), ".mp4")
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to generate m3u8")
 		return

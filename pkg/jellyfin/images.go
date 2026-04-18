@@ -69,7 +69,7 @@ func (s *Server) serveImage(w http.ResponseWriter, r *http.Request) {
 	if channel, err := s.channels.GetByID(ctx, addDashes(itemID)); err == nil && channel != nil && s.logoService != nil {
 		resolved := s.logoService.ResolveChannel(*channel)
 		if resolved != "" && resolved != logocache.Placeholder && !strings.HasPrefix(resolved, "data:") {
-			http.Redirect(w, r, s.mainServerURL()+resolved, http.StatusTemporaryRedirect)
+			http.Redirect(w, r, s.mainServerURLFromRequest(r)+resolved, http.StatusTemporaryRedirect)
 			return
 		}
 	}
@@ -82,7 +82,7 @@ func (s *Server) serveGroupImage(w http.ResponseWriter, r *http.Request, groupID
 	if err == nil && group != nil && group.ImageURL != "" && s.logoService != nil {
 		resolved := s.logoService.Resolve(group.ImageURL)
 		if resolved != "" && resolved != logocache.Placeholder && !strings.HasPrefix(resolved, "data:") {
-			http.Redirect(w, r, s.mainServerURL()+resolved, http.StatusTemporaryRedirect)
+			http.Redirect(w, r, s.mainServerURLFromRequest(r)+resolved, http.StatusTemporaryRedirect)
 			return
 		}
 	}
@@ -96,7 +96,7 @@ func (s *Server) serveGroupImage(w http.ResponseWriter, r *http.Request, groupID
 		if ch.ChannelGroupID != nil && *ch.ChannelGroupID == groupID {
 			resolved := s.logoService.ResolveChannel(ch)
 			if resolved != "" && resolved != logocache.Placeholder && !strings.HasPrefix(resolved, "data:") {
-				http.Redirect(w, r, s.mainServerURL()+resolved, http.StatusTemporaryRedirect)
+				http.Redirect(w, r, s.mainServerURLFromRequest(r)+resolved, http.StatusTemporaryRedirect)
 				return
 			}
 		}
@@ -136,7 +136,7 @@ func (s *Server) serveTMDBImage(w http.ResponseWriter, r *http.Request, size, pa
 }
 
 func (s *Server) redirectToLogo(w http.ResponseWriter, r *http.Request, logoURL string) {
-	http.Redirect(w, r, s.mainServerURL()+s.logoService.Resolve(logoURL), http.StatusTemporaryRedirect)
+	http.Redirect(w, r, s.mainServerURLFromRequest(r)+s.logoService.Resolve(logoURL), http.StatusTemporaryRedirect)
 }
 
 func (s *Server) servePersonImage(w http.ResponseWriter, r *http.Request) {
@@ -171,4 +171,22 @@ func (s *Server) servePersonImage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) mainServerURL() string {
 	return s.baseURL + ":8080"
+}
+
+func (s *Server) mainServerURLFromRequest(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	}
+	host := r.Host
+	if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
+		host = fwd
+	}
+	if scheme == "https" || strings.Contains(host, ":") {
+		return scheme + "://" + host
+	}
+	return scheme + "://" + host + ":8080"
 }

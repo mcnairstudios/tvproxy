@@ -52,17 +52,23 @@ func (s *OutputService) baseURL() string {
 	return fmt.Sprintf("%s:%d", s.config.BaseURL, s.config.Port)
 }
 
-func (s *OutputService) GenerateM3U(ctx context.Context) (string, error) {
-	return s.generateM3U(ctx, nil, s.baseURL(), "")
+func (s *OutputService) GenerateM3U(ctx context.Context, baseURL string) (string, error) {
+	if baseURL == "" {
+		baseURL = s.baseURL()
+	}
+	return s.generateM3U(ctx, nil, baseURL, "")
 }
 
-func (s *OutputService) GenerateM3UWithExtension(ctx context.Context, ext string) (string, error) {
-	return s.generateM3U(ctx, nil, s.baseURL(), ext)
+func (s *OutputService) GenerateM3UWithExtension(ctx context.Context, baseURL, ext string) (string, error) {
+	if baseURL == "" {
+		baseURL = s.baseURL()
+	}
+	return s.generateM3U(ctx, nil, baseURL, ext)
 }
 
 func (s *OutputService) GenerateM3UForGroups(ctx context.Context, groupIDs []string, baseURL string) (string, error) {
 	if len(groupIDs) == 0 {
-		return s.GenerateM3U(ctx)
+		return s.GenerateM3U(ctx, baseURL)
 	}
 	return s.generateM3U(ctx, xmlutil.ToStringSet(groupIDs), baseURL, "")
 }

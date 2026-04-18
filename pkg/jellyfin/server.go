@@ -238,9 +238,24 @@ func (s *Server) emptyQueryResult(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, emptyResult())
 }
 
+func (s *Server) jellyfinBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	}
+	host := r.Host
+	if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
+		host = fwd
+	}
+	return scheme + "://" + host
+}
+
 func (s *Server) systemInfoPublic(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, PublicSystemInfo{
-		LocalAddress:           s.baseURL,
+		LocalAddress:           s.jellyfinBaseURL(r),
 		ServerName:             s.serverName,
 		Version:                "10.10.6",
 		ProductName:            "Jellyfin Server",
@@ -253,7 +268,7 @@ func (s *Server) systemInfoPublic(w http.ResponseWriter, r *http.Request) {
 func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, SystemInfo{
 		PublicSystemInfo: PublicSystemInfo{
-			LocalAddress:           s.baseURL,
+			LocalAddress:           s.jellyfinBaseURL(r),
 			ServerName:             s.serverName,
 			Version:                "10.10.6",
 			ProductName:            "Jellyfin Server",
