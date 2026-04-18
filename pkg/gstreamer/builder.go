@@ -156,7 +156,35 @@ func buildMPEGTSNative(opts PipelineOpts, srcCodec string, isRTSP bool) (*gst.Pi
 	all = append(all, videoElements...)
 	all = append(all, audioElements...)
 
-	if opts.UseAppSink {
+	if opts.UseFmp4Plugin {
+		fmp4El, _ := gst.NewElement("tvproxyfmp4")
+		fmp4El.Set("name", "fmp4")
+		outCodec := NormalizeCodec(opts.OutputVideoCodec)
+		if outCodec == "" || outCodec == "copy" || outCodec == "default" {
+			outCodec = NormalizeCodec(opts.VideoCodec)
+		}
+		fmp4El.SetProperty("video-codec", outCodec)
+		fmp4El.SetProperty("segment-duration-ms", uint(2000))
+
+		all = append(all, fmp4El)
+		if err := checkNilElements(all); err != nil {
+			return nil, err
+		}
+		pipeline.AddMany(all...)
+		gst.ElementLinkMany(linkStart, tsparse, demux)
+
+		videoPad := fmp4El.GetRequestPad("video")
+		vChain := []*gst.Element{vQueue}
+		vChain = append(vChain, videoElements...)
+		gst.ElementLinkMany(vChain...)
+		vChain[len(vChain)-1].GetStaticPad("src").Link(videoPad)
+
+		audioPad := fmp4El.GetRequestPad("audio")
+		aChain := []*gst.Element{aQueue}
+		aChain = append(aChain, audioElements...)
+		gst.ElementLinkMany(aChain...)
+		aChain[len(aChain)-1].GetStaticPad("src").Link(audioPad)
+	} else if opts.UseAppSink {
 		vCaps, _ := gst.NewElement("capsfilter")
 		vCaps.SetProperty("caps", gst.NewCapsFromString("video/x-h265,stream-format=byte-stream,alignment=au;video/x-h264,stream-format=byte-stream,alignment=au;video/x-av1,alignment=frame"))
 		vSink, _ := gst.NewElement("appsink")
@@ -332,7 +360,35 @@ func buildNonMPEGTSNative(opts PipelineOpts, srcCodec string) (*gst.Pipeline, er
 	all = append(all, videoElements...)
 	all = append(all, audioElements...)
 
-	if opts.UseAppSink {
+	if opts.UseFmp4Plugin {
+		fmp4El, _ := gst.NewElement("tvproxyfmp4")
+		fmp4El.Set("name", "fmp4")
+		outCodec := NormalizeCodec(opts.OutputVideoCodec)
+		if outCodec == "" || outCodec == "copy" || outCodec == "default" {
+			outCodec = NormalizeCodec(opts.VideoCodec)
+		}
+		fmp4El.SetProperty("video-codec", outCodec)
+		fmp4El.SetProperty("segment-duration-ms", uint(2000))
+
+		all = append(all, fmp4El)
+		if err := checkNilElements(all); err != nil {
+			return nil, err
+		}
+		pipeline.AddMany(all...)
+		gst.ElementLinkMany(src, demux)
+
+		videoPad := fmp4El.GetRequestPad("video")
+		vChain := []*gst.Element{vQueue}
+		vChain = append(vChain, videoElements...)
+		gst.ElementLinkMany(vChain...)
+		vChain[len(vChain)-1].GetStaticPad("src").Link(videoPad)
+
+		audioPad := fmp4El.GetRequestPad("audio")
+		aChain := []*gst.Element{aQueue}
+		aChain = append(aChain, audioElements...)
+		gst.ElementLinkMany(aChain...)
+		aChain[len(aChain)-1].GetStaticPad("src").Link(audioPad)
+	} else if opts.UseAppSink {
 		vCaps, _ := gst.NewElement("capsfilter")
 		vCaps.SetProperty("caps", gst.NewCapsFromString("video/x-h265,stream-format=byte-stream,alignment=au;video/x-h264,stream-format=byte-stream,alignment=au;video/x-av1,alignment=frame"))
 		vSink, _ := gst.NewElement("appsink")

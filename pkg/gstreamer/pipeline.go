@@ -71,6 +71,7 @@ type PipelineOpts struct {
 	SourceBitDepth     int
 
 	UseAppSink   bool
+	UseFmp4Plugin bool
 }
 
 type Pipeline struct {

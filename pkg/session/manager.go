@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-gst/go-glib/glib"
 	"github.com/go-gst/go-gst/gst"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -815,7 +816,16 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Str("output_file", s.FilePath).
 		Msg("building pipeline")
 
-	opts.UseAppSink = s.startOpts.Delivery == "mse"
+	isMSE := s.startOpts.Delivery == "mse"
+	// tvproxyfmp4 plugin available but disabled pending quality debugging
+	// useFmp4Plugin := isMSE && gst.Find("tvproxyfmp4") != nil
+	useFmp4Plugin := false
+	if useFmp4Plugin {
+		opts.UseFmp4Plugin = true
+		m.log.Info().Str("session_id", s.ID).Msg("using tvproxyfmp4 plugin for MSE segments")
+	} else {
+		opts.UseAppSink = isMSE
+	}
 
 	pipeline, path, err := gstreamer.Build(opts)
 	if err != nil {
@@ -827,7 +837,43 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	m.log.Info().Str("session_id", s.ID).Str("path", path).Str("output", s.FilePath).Msg("pipeline built")
 	s.SetStopPipeline(func() { pipeline.SetState(gst.StateNull) })
 
-	if opts.UseAppSink {
+	if opts.UseFmp4Plugin {
+		s.VideoStore = fmp4.NewSegmentStore()
+		s.AudioStore = fmp4.NewSegmentStore()
+
+		fmp4El, fmp4Err := pipeline.GetElementByName("fmp4")
+		if fmp4Err != nil || fmp4El == nil {
+			m.log.Error().Err(fmp4Err).Msg("failed to get tvproxyfmp4 element from pipeline")
+		} else {
+			fmp4El.Connect("init-segment", func(self *gst.Element, data *glib.Bytes, track string) {
+				b := data.Data()
+				if track == "video" {
+					s.VideoStore.(*fmp4.SegmentStore).SetInit(b)
+				} else {
+					s.AudioStore.(*fmp4.SegmentStore).SetInit(b)
+				}
+				m.log.Debug().Str("track", track).Int("bytes", len(b)).Msg("fmp4 init segment")
+			})
+			fmp4El.Connect("media-segment", func(self *gst.Element, data *glib.Bytes, track string, pts uint64, seq uint) {
+				b := data.Data()
+				startNs := int64(pts)
+				if track == "video" {
+					s.VideoStore.(*fmp4.SegmentStore).AddSegment(b, startNs)
+				} else {
+					s.AudioStore.(*fmp4.SegmentStore).AddSegment(b, startNs)
+				}
+			})
+		}
+
+		s.SetSeekFunc(func(position float64) {
+			posNs := int64(position * 1e9)
+			newGen := s.seekGen.Add(1)
+			s.VideoStore.(*fmp4.SegmentStore).Reset(newGen)
+			s.AudioStore.(*fmp4.SegmentStore).Reset(newGen)
+			ok := fmp4.SeekPipeline(pipeline, posNs)
+			m.log.Info().Bool("ok", ok).Float64("position", position).Int64("gen", newGen).Msg("CGO seek")
+		})
+	} else if opts.UseAppSink {
 		outCodec := gstreamer.NormalizeCodec(opts.OutputVideoCodec)
 		if outCodec == "" || outCodec == "copy" || outCodec == "default" {
 			outCodec = gstreamer.NormalizeCodec(opts.VideoCodec)
@@ -838,7 +884,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 			m.log.Info().Str("sample_rate", s.AudioTracks[0].SampleRate).Str("codec", s.AudioTracks[0].Codec).Msg("probe audio info")
 			if s.AudioTracks[0].SampleRate != "" {
 				if rate, err := strconv.Atoi(s.AudioTracks[0].SampleRate); err == nil && rate > 0 {
-					s.AudioStore.SetAudioRate(rate)
+					s.AudioStore.(*fmp4.TrackStore).SetAudioRate(rate)
 					m.log.Info().Int("rate", rate).Msg("audio timescale set from probe")
 				}
 			}
@@ -846,27 +892,27 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 			m.log.Warn().Msg("no audio tracks from probe — audio timescale unknown")
 		}
 		sharedBase := fmp4.NewSharedBasePTS()
-		s.VideoStore.SetSharedBase(sharedBase)
-		s.AudioStore.SetSharedBase(sharedBase)
-		s.VideoStore.SetPartner(s.AudioStore)
+		s.VideoStore.(*fmp4.TrackStore).SetSharedBase(sharedBase)
+		s.AudioStore.(*fmp4.TrackStore).SetSharedBase(sharedBase)
+		s.VideoStore.(*fmp4.TrackStore).SetPartner(s.AudioStore.(*fmp4.TrackStore))
 		if s.startOpts.OutputHeight > 0 {
-			s.VideoStore.SetTargetHeight(s.startOpts.OutputHeight)
+			s.VideoStore.(*fmp4.TrackStore).SetTargetHeight(s.startOpts.OutputHeight)
 		}
 
-		if err := fmp4.SetupVideoSink(pipeline, s.VideoStore); err != nil {
+		if err := fmp4.SetupVideoSink(pipeline, s.VideoStore.(*fmp4.TrackStore)); err != nil {
 			m.log.Error().Err(err).Msg("failed to setup video appsink")
 		}
-		if err := fmp4.SetupAudioSink(pipeline, s.AudioStore); err != nil {
+		if err := fmp4.SetupAudioSink(pipeline, s.AudioStore.(*fmp4.TrackStore)); err != nil {
 			m.log.Error().Err(err).Msg("failed to setup audio appsink")
 		}
 
-		go fmp4.RunSegmentFlusher(ctx, s.VideoStore, s.AudioStore)
+		go fmp4.RunSegmentFlusher(ctx, s.VideoStore.(*fmp4.TrackStore), s.AudioStore.(*fmp4.TrackStore))
 
 		s.SetSeekFunc(func(position float64) {
 			posNs := int64(position * 1e9)
 			newGen := s.seekGen.Add(1)
-			s.VideoStore.Reset(newGen, posNs)
-			s.AudioStore.Reset(newGen, posNs)
+			s.VideoStore.(*fmp4.TrackStore).Reset(newGen, posNs)
+			s.AudioStore.(*fmp4.TrackStore).Reset(newGen, posNs)
 			ok := fmp4.SeekPipeline(pipeline, posNs)
 			m.log.Info().Bool("ok", ok).Float64("position", position).Int64("gen", newGen).Msg("CGO seek")
 		})
@@ -955,15 +1001,39 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		s.SetStopPipeline(func() { newPipeline.SetState(gst.StateNull) })
 		pipeline = newPipeline
 
-		if opts.UseAppSink {
+		if opts.UseFmp4Plugin {
 			newGen := s.seekGen.Add(1)
-			s.VideoStore.Reset(newGen, 0)
-			s.AudioStore.Reset(newGen, 0)
-			if err := fmp4.SetupVideoSink(pipeline, s.VideoStore); err != nil {
+			s.VideoStore.(*fmp4.SegmentStore).Reset(newGen)
+			s.AudioStore.(*fmp4.SegmentStore).Reset(newGen)
+			fmp4El, fmp4Err := pipeline.GetElementByName("fmp4")
+			if fmp4Err == nil && fmp4El != nil {
+				fmp4El.Connect("init-segment", func(self *gst.Element, data *glib.Bytes, track string) {
+					b := data.Data()
+					if track == "video" {
+						s.VideoStore.(*fmp4.SegmentStore).SetInit(b)
+					} else {
+						s.AudioStore.(*fmp4.SegmentStore).SetInit(b)
+					}
+				})
+				fmp4El.Connect("media-segment", func(self *gst.Element, data *glib.Bytes, track string, pts uint64, seq uint) {
+					b := data.Data()
+					startNs := int64(pts)
+					if track == "video" {
+						s.VideoStore.(*fmp4.SegmentStore).AddSegment(b, startNs)
+					} else {
+						s.AudioStore.(*fmp4.SegmentStore).AddSegment(b, startNs)
+					}
+				})
+			}
+		} else if opts.UseAppSink {
+			newGen := s.seekGen.Add(1)
+			s.VideoStore.(*fmp4.TrackStore).Reset(newGen, 0)
+			s.AudioStore.(*fmp4.TrackStore).Reset(newGen, 0)
+			if err := fmp4.SetupVideoSink(pipeline, s.VideoStore.(*fmp4.TrackStore)); err != nil {
 				m.log.Error().Err(err).Msg("failed to setup video appsink on retry")
 				break
 			}
-			if err := fmp4.SetupAudioSink(pipeline, s.AudioStore); err != nil {
+			if err := fmp4.SetupAudioSink(pipeline, s.AudioStore.(*fmp4.TrackStore)); err != nil {
 				m.log.Error().Err(err).Msg("failed to setup audio appsink on retry")
 				break
 			}

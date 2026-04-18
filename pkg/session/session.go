@@ -35,8 +35,8 @@ type Session struct {
 	SeekOffset      float64
 	Video           *media.VideoInfo
 	AudioTracks     []media.AudioTrack
-	VideoStore   *fmp4.TrackStore
-	AudioStore   *fmp4.TrackStore
+	VideoStore   fmp4.Store
+	AudioStore   fmp4.Store
 	seekGen      atomic.Int64
 	startOpts    StartOpts
 	consumers    map[string]*Consumer

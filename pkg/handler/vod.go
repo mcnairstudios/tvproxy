@@ -546,7 +546,7 @@ func (h *VODHandler) PlayCompletedRecording(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-func (h *VODHandler) acquireStore(channelID, track string, timeout time.Duration) (*fmp4.TrackStore, string) {
+func (h *VODHandler) acquireStore(channelID, track string, timeout time.Duration) (fmp4.Store, string) {
 	deadline := time.Now().Add(timeout)
 	sessionSeen := false
 	for time.Now().Before(deadline) {
@@ -561,13 +561,13 @@ func (h *VODHandler) acquireStore(channelID, track string, timeout time.Duration
 		if sess.Delivery != "mse" {
 			return nil, "session delivery is not MSE"
 		}
-		var store *fmp4.TrackStore
+		var store fmp4.Store
 		if track == "video" {
 			store = sess.VideoStore
 		} else {
 			store = sess.AudioStore
 		}
-		if store != nil && !store.IsClosed() {
+		if store != nil {
 			return store, ""
 		}
 		time.Sleep(200 * time.Millisecond)
