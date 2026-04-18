@@ -203,24 +203,20 @@ Demuxers expose subtitle and teletext pads. Unlinked pads get `fakesink` (`drain
 
 ## Code Review Cleanup
 
-### 34. Dead Code Removal
-**Status: IN PROGRESS**
+### 34. Dead Code Removal — DONE
+Removed 1151 lines: controller.go, SC appsink functions, dead builder functions, unused native.go exports.
 
-Remove ~1000 lines of unreferenced code:
-- `pkg/fmp4/controller.go` — entire file (SegmentController never instantiated, replaced by dual TrackStore)
-- `pkg/fmp4/appsink.go` — `SetupVideoSinkSC`, `SetupAudioSinkSC` (SegmentController functions)
-- `pkg/gstreamer/builder.go` — `buildMPEGTSPluginCopy`, `buildVODTvproxyvod`, `buildVODDecodebin3` (never called)
-- `pkg/gstreamer/native.go` — `BuildNativeFromOpts`, `mustElement` (never called)
-- `pkg/gstreamer/detect.go` — `DiscovererAvailable` (never called)
+### 35. Unused PipelineOpts Fields — DONE
+Removed DeinterlaceMethod, SourceFPS, SourceFieldOrder, SourceSampleRate, SourceColorSpace, SourceProfile, DualOutput, AudioLanguage.
 
-### 35. Unused PipelineOpts Fields
-Remove 8 fields that are populated but never read: `DeinterlaceMethod`, `SourceFPS`, `SourceFieldOrder`, `SourceSampleRate`, `SourceColorSpace`, `SourceProfile`, `DualOutput`, `AudioLanguage`.
+### 36. Redundant Codec Normalization — DONE
+Replaced media.NormalizeVideoCodec() with gstreamer.NormalizeCodec(), removed the function.
 
-### 36. Redundant Codec Normalization
-`media.NormalizeVideoCodec()` is a subset of `gstreamer.NormalizeCodec()`. Replace 1 call site in `vod_probe.go` and remove.
+### 37. Unexport Internal Functions — DONE
+PluginsAvailable → pluginsAvailable, IsMPEGTS removed (unused), DiscovererAvailable removed.
 
-### 37. Unexport Internal Functions
-`PluginsAvailable()`, `IsMPEGTS()`, `DiscovererAvailable()` — only used internally, should be unexported.
+### 38. Probe Removal — DONE
+Removed entire probe subsystem: avprobe package, probe scheduler, probe workers, ensureProbe, probeAsync, SkipProbe. Replaced with passive metadata cache populated from playback. ~985 lines removed.
 
 ## Reference
 
