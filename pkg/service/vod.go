@@ -13,7 +13,6 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/session"
@@ -514,7 +513,10 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 
 	var duration float64
 	var audioOnly bool
-	probe, _ := avprobe.Probe(ctx, filePath, "")
+	var probe *media.ProbeResult
+	if s.probeCache != nil {
+		probe, _ = s.probeCache.GetProbe(sessionKey)
+	}
 	if probe != nil {
 		duration = probe.Duration
 		audioOnly = probe.Video == nil && len(probe.AudioTracks) > 0

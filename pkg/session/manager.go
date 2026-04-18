@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,11 +17,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/fmp4"
 	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
-	"github.com/gavinmcnair/tvproxy/pkg/httputil"
 	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/tvsatipscan"
@@ -531,110 +528,6 @@ func (m *Manager) Shutdown() {
 	m.log.Info().Int("sessions", len(sessions)).Msg("session manager shutdown complete")
 }
 
-func (m *Manager) probeViaClient(ctx context.Context, client *http.Client, url string) (*media.ProbeResult, error) {
-	resp, err := httputil.Fetch(ctx, client, m.config, url)
-	if err != nil {
-		return nil, fmt.Errorf("probe upstream: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("probe upstream returned %d", resp.StatusCode)
-	}
-	return avprobe.ProbeReader(ctx, resp.Body)
-}
-
-func (m *Manager) ProbeURL(ctx context.Context, url string) (*media.ProbeResult, error) {
-	resp, err := httputil.Fetch(ctx, m.httpClient, m.config, url)
-	if err != nil {
-		return nil, fmt.Errorf("probe upstream: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("probe upstream returned %d", resp.StatusCode)
-	}
-
-	return avprobe.ProbeReader(ctx, resp.Body)
-}
-
-func (m *Manager) probeAsync(s *Session, streamURL string) {
-	if m.probeCache != nil && s.StreamID != "" {
-		if cached, _ := m.probeCache.GetProbe(s.StreamID); cached != nil && (cached.Duration > 0 || !media.IsHTTPURL(streamURL)) {
-			s.SetProbeInfo(cached.Video, cached.AudioTracks, cached.Duration)
-			m.log.Debug().Str("session_id", s.ID).Float64("duration", cached.Duration).Msg("probe cache hit")
-			return
-		}
-	}
-
-	probeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	var result *media.ProbeResult
-	var err error
-	client := m.clientForSession(s)
-
-	var extraHeaders []string
-	if m.config.BypassHeader != "" && m.config.BypassSecret != "" {
-		extraHeaders = append(extraHeaders, m.config.BypassHeader+": "+m.config.BypassSecret)
-	}
-	result, err = avprobe.Probe(probeCtx, streamURL, m.config.UserAgent)
-	if (err != nil || result == nil || result.Duration == 0) && media.IsHTTPURL(streamURL) {
-		m.log.Debug().Str("session_id", s.ID).Msg("direct probe incomplete, trying HTTP pipe probe")
-		pipeResult, pipeErr := m.probeViaClient(probeCtx, client, streamURL)
-		if pipeErr == nil && pipeResult != nil {
-			if result == nil || (pipeResult.Video != nil && result.Video == nil) {
-				result = pipeResult
-			} else if pipeResult.Duration > 0 && result.Duration == 0 {
-				result.Duration = pipeResult.Duration
-			}
-		}
-	}
-	if err != nil || result == nil || (result.Video == nil && len(result.AudioTracks) == 0) {
-		m.log.Warn().Err(err).Str("session_id", s.ID).Msg("source probe failed, falling back to output file")
-		result = m.probeOutputFile(s)
-	}
-
-	if result == nil || (result.Video == nil && len(result.AudioTracks) == 0) {
-		m.log.Warn().Str("session_id", s.ID).Msg("all probe methods failed")
-		return
-	}
-
-	s.SetProbeInfo(result.Video, result.AudioTracks, result.Duration)
-
-	if m.probeCache != nil && s.StreamID != "" {
-		m.probeCache.SaveProbe(s.StreamID, result)
-	}
-
-	m.log.Debug().Str("session_id", s.ID).Bool("is_vod", result.IsVOD).Int("audio_tracks", len(result.AudioTracks)).Msg("async probe complete")
-}
-
-func (m *Manager) probeOutputFile(s *Session) *media.ProbeResult {
-	for i := 0; i < 60; i++ {
-		if s.isDone() {
-			return nil
-		}
-		if s.getBuffered() > 0 {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if s.getBuffered() == 0 {
-		return nil
-	}
-
-	time.Sleep(time.Second)
-
-	probeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	result, err := avprobe.Probe(probeCtx, s.FilePath, "")
-	if err != nil {
-		m.log.Warn().Err(err).Str("session_id", s.ID).Msg("output file probe failed")
-		return nil
-	}
-	return result
-}
-
 func (m *Manager) logSignalAsync(sessionID, channelID, streamURL string) {
 	info, err := tvsatipscan.QuerySignal(streamURL, 5*time.Second)
 	if err != nil {
@@ -1138,51 +1031,6 @@ func friendlyGstError(err string) string {
 
 func isValidProbe(p *media.ProbeResult) bool {
 	return p != nil && (p.Video != nil || len(p.AudioTracks) > 0 || p.Duration > 0)
-}
-
-func (m *Manager) ensureProbe(ctx context.Context, opts StartOpts) *media.ProbeResult {
-	if m.probeCache != nil && opts.StreamID != "" {
-		if cached, _ := m.probeCache.GetProbe(opts.StreamID); isValidProbe(cached) {
-			m.log.Debug().Str("stream_id", opts.StreamID).Float64("duration", cached.Duration).Msg("probe cache hit")
-			return cached
-		}
-	}
-
-	probeURL := opts.StreamURL
-	if strings.HasPrefix(probeURL, "rtsp://") {
-		if u, err := url.Parse(probeURL); err == nil {
-			httpPort := "8875"
-			u.Scheme = "http"
-			if u.Port() == "" || u.Port() == "554" {
-				u.Host = u.Hostname() + ":" + httpPort
-			}
-			probeURL = u.String()
-		}
-	}
-
-	m.log.Info().Str("probe_url", probeURL).Msg("no probe cache — probing now (blocking)")
-	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	result, err := avprobe.Probe(probeCtx, probeURL, m.config.UserAgent)
-	if err != nil || result == nil {
-		m.log.Warn().Err(err).Str("stream_url", opts.StreamURL).Msg("pre-probe failed")
-		return nil
-	}
-
-	if m.probeCache != nil && opts.StreamID != "" {
-		m.probeCache.SaveProbe(opts.StreamID, result)
-	}
-
-	videoCodec := ""
-	if result.Video != nil {
-		videoCodec = result.Video.Codec
-	}
-	m.log.Info().
-		Str("video", videoCodec).
-		Str("container", result.FormatName).
-		Msg("pre-probe complete")
-	return result
 }
 
 func (m *Manager) pollFileProgress(ctx context.Context, s *Session) {

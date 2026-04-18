@@ -14,7 +14,6 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/httputil"
@@ -461,11 +460,6 @@ func (s *ProxyService) startGStreamerProxy(ctx context.Context, channelID string
 	var probe *media.ProbeResult
 	if s.probeCache != nil {
 		probe, _ = s.probeCache.GetProbe(stream.ID)
-	}
-	if probe == nil {
-		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		probe, _ = avprobe.Probe(probeCtx, stream.URL, s.config.UserAgent)
-		cancel()
 	}
 
 	srcAudio := "aac_latm"

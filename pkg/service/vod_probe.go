@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/gavinmcnair/tvproxy/pkg/avprobe"
 	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
@@ -20,22 +19,26 @@ func (s *VODService) ProbeFile(ctx context.Context, streamURL, filePath string) 
 			return cached, nil
 		}
 	}
-	result, err := avprobe.Probe(ctx, filePath, "")
-	if err != nil {
-		return nil, err
+	id := media.StreamID(filePath)
+	cached, _ := s.probeCache.GetProbe(id)
+	if cached != nil {
+		return cached, nil
 	}
-	if streamURL != "" && result != nil {
-		s.probeCache.SaveProbe(media.StreamID(streamURL), result)
-	}
-	return result, nil
+	return &media.ProbeResult{}, nil
 }
 
 func (s *VODService) ProbeStream(ctx context.Context, streamID string) (*media.ProbeResult, error) {
-	stream, err := s.streamStore.GetByID(ctx, streamID)
+	_, err := s.streamStore.GetByID(ctx, streamID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStreamNotFound, err)
 	}
-	return avprobe.Probe(ctx, stream.URL, s.config.UserAgent)
+	if s.probeCache != nil {
+		cached, _ := s.probeCache.GetProbe(streamID)
+		if cached != nil {
+			return cached, nil
+		}
+	}
+	return &media.ProbeResult{}, nil
 }
 
 func (s *VODService) DeleteProbe(ctx context.Context, streamID string) error {
@@ -59,8 +62,8 @@ func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName st
 		return f, "video/mp4", nil
 	}
 
-	probe, probeErr := s.cachedOrFreshProbe(ctx, filePath)
-	if probeErr == nil && probe != nil && probe.Video != nil {
+	probe, _ := s.cachedOrFreshProbe(ctx, filePath)
+	if probe != nil && probe.Video != nil {
 		fileCodec := gstreamer.NormalizeCodec(probe.Video.Codec)
 		fileContainer := media.NormalizeContainer(probe.FormatName)
 		videoMatch := sp.VideoCodec == "copy" || sp.VideoCodec == fileCodec
@@ -130,11 +133,7 @@ func (s *VODService) cachedOrFreshProbe(ctx context.Context, filePath string) (*
 	if cached, err := s.probeCache.GetProbe(id); err == nil && cached != nil {
 		return cached, nil
 	}
-	result, err := avprobe.Probe(ctx, filePath, "")
-	if err == nil && result != nil {
-		s.probeCache.SaveProbe(id, result)
-	}
-	return result, err
+	return nil, nil
 }
 
 func containerContentType(container string) string {
