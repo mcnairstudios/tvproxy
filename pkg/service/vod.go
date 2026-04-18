@@ -354,7 +354,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		OutputHWAccel:    strategy.HWAccel,
 		UseWireGuard:     useWG,
 		OutputDir:        s.config.VODOutputDir,
-		SkipProbe:         strategy.SkipProbe,
+
 		MetadataOnly:     strategy.MetadataOnly,
 		Delivery:         sa.Delivery,
 		OutputHeight:     sa.OutputHeight,
@@ -450,7 +450,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		OutputHWAccel:    strategy.HWAccel,
 		UseWireGuard:     stream.UseWireGuard,
 		OutputDir:        s.config.VODOutputDir,
-		SkipProbe:         strategy.SkipProbe,
+
 		KnownDuration:    stream.VODDuration,
 		MetadataOnly:     strategy.MetadataOnly,
 		Delivery:         sa.Delivery,

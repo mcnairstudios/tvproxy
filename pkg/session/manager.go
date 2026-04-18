@@ -45,7 +45,7 @@ type StartOpts struct {
 	KnownDuration    float64
 	SeekOffset       float64
 	OutputDir         string
-	SkipProbe         bool
+
 	MetadataOnly      bool
 
 	Deinterlace       bool
@@ -819,6 +819,31 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	isLive := opts.IsLive
 	go m.pollFileProgress(ctx, s)
 
+	if m.probeCache != nil && s.StreamID != "" {
+		go func() {
+			time.Sleep(5 * time.Second)
+			if ctx.Err() != nil {
+				return
+			}
+			video, audioTracks, duration := s.GetProbeInfo()
+			if video != nil || len(audioTracks) > 0 || duration > 0 {
+				result := &media.ProbeResult{
+					Duration:    duration,
+					IsVOD:       duration > 0,
+					HasVideo:    video != nil,
+					Video:       video,
+					AudioTracks: audioTracks,
+				}
+				if video != nil {
+					result.Width = 0
+					result.Height = 0
+				}
+				m.probeCache.SaveProbe(s.StreamID, result)
+				m.log.Debug().Str("stream_id", s.StreamID).Msg("passive metadata cached from playback")
+			}
+		}()
+	}
+
 	if s.VideoStore != nil {
 		<-ctx.Done()
 		m.log.Info().Str("session_id", s.ID).Msg("appsink session ended")
@@ -1029,9 +1054,7 @@ func friendlyGstError(err string) string {
 	}
 }
 
-func isValidProbe(p *media.ProbeResult) bool {
-	return p != nil && (p.Video != nil || len(p.AudioTracks) > 0 || p.Duration > 0)
-}
+
 
 func (m *Manager) pollFileProgress(ctx context.Context, s *Session) {
 	ticker := time.NewTicker(500 * time.Millisecond)

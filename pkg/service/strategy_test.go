@@ -215,17 +215,6 @@ func TestResolveSessionStrategy_LiveWithSourceProfile(t *testing.T) {
 	}
 }
 
-func TestResolveSessionStrategy_SkipProbe(t *testing.T) {
-	in := StrategyInput{
-		StreamURL: "http://provider.com/live/123.ts",
-		StreamID:  "test-skip",
-	}
-	out := StrategyOutput{Container: "mp4"}
-	s := resolveSessionStrategy(in, out)
-	if s.SkipProbe {
-		t.Error("SkipProbe should be false for probe_mode=auto")
-	}
-}
 
 func TestLiveStrategy_ForcesAudioTranscode_IPTV(t *testing.T) {
 	in := StrategyInput{

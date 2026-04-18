@@ -20,7 +20,6 @@ type SessionStrategy struct {
 	Category StreamCategory
 
 	MetadataOnly      bool
-	SkipProbe         bool
 
 	VideoCodec string
 	AudioCodec string
