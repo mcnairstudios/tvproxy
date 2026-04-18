@@ -14,7 +14,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=1 go build -ldflags="-s -w -X main.buildVersion=$VERSION" -o /tvproxy ./cmd/tvproxy/
+ARG GOMAXPROCS=0
+RUN GOMAXPROCS=$GOMAXPROCS CGO_ENABLED=1 go build -ldflags="-s -w -X main.buildVersion=$VERSION" -o /tvproxy ./cmd/tvproxy/
 
 FROM gavinmcnair/gstreamer:1.2
 
