@@ -159,11 +159,33 @@ func resolveDecodeHW(opts PipelineOpts, srcCodec string) HWAccel {
 	return hw
 }
 
+func hwAccelString(hw HWAccel) string {
+	switch hw {
+	case HWVAAPI:
+		return "vaapi"
+	case HWQSV:
+		return "qsv"
+	case HWVideoToolbox:
+		return "videotoolbox"
+	case HWNVENC:
+		return "nvenc"
+	default:
+		return "none"
+	}
+}
+
 func createDecoderChain(opts PipelineOpts, srcCodec string) []*gst.Element {
 	if opts.VideoDecoderElement != "" {
 		return createExplicitDecoder(opts.VideoDecoderElement, srcCodec)
 	}
-	return createHWDecoder(srcCodec, resolveDecodeHW(opts, srcCodec))
+	hw := resolveDecodeHW(opts, srcCodec)
+	dec, _ := gst.NewElement("tvproxydecode")
+	if dec != nil {
+		dec.SetProperty("hw-accel", hwAccelString(hw))
+		log.Printf("[gstreamer] using tvproxydecode hw-accel=%s for %s", hwAccelString(hw), srcCodec)
+		return []*gst.Element{dec}
+	}
+	return createHWDecoder(srcCodec, hw)
 }
 
 func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
@@ -271,6 +293,25 @@ func createHWDecoder(codec string, hw HWAccel) []*gst.Element {
 	}
 
 	return []*gst.Element{parser, decoder}
+}
+
+func createEncoderChain(opts PipelineOpts, outCodec string, hw HWAccel) []*gst.Element {
+	if opts.VideoEncoderElement != "" {
+		elems := createExplicitEncoder(opts.VideoEncoderElement, outCodec, bitrate(opts))
+		elems = append(elems, createOutputParser(outCodec)...)
+		return elems
+	}
+	enc, _ := gst.NewElement("tvproxyencode")
+	if enc != nil {
+		enc.SetProperty("hw-accel", hwAccelString(hw))
+		enc.SetProperty("codec", outCodec)
+		enc.SetProperty("bitrate", bitrate(opts))
+		log.Printf("[gstreamer] using tvproxyencode hw-accel=%s codec=%s bitrate=%d", hwAccelString(hw), outCodec, bitrate(opts))
+		return []*gst.Element{enc}
+	}
+	elems := createHWEncoder(outCodec, hw, bitrate(opts))
+	elems = append(elems, createOutputParser(outCodec)...)
+	return elems
 }
 
 func createHWEncoder(codec string, hw HWAccel, bitrate int) []*gst.Element {

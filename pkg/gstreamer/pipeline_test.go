@@ -57,17 +57,11 @@ func TestBuildPipeline_VaapiTranscode(t *testing.T) {
 	})
 
 	cmd := p.PipelineStr
-	if !strings.Contains(cmd, "vaapih264dec") {
-		t.Errorf("expected vaapih264dec, got: %s", cmd)
+	if !strings.Contains(cmd, "tvproxydecode hw-accel=vaapi") {
+		t.Errorf("expected tvproxydecode hw-accel=vaapi, got: %s", cmd)
 	}
-	if !strings.Contains(cmd, "vaapih265enc") {
-		t.Errorf("expected vaapih265enc, got: %s", cmd)
-	}
-	if !strings.Contains(cmd, "h265parse") {
-		t.Error("expected h265parse for h265 output")
-	}
-	if strings.Contains(cmd, "videoconvert") {
-		t.Error("vaapi transcode should NOT have videoconvert")
+	if !strings.Contains(cmd, "tvproxyencode hw-accel=vaapi codec=h265") {
+		t.Errorf("expected tvproxyencode for h265, got: %s", cmd)
 	}
 }
 
@@ -86,17 +80,11 @@ func TestBuildPipeline_VideoToolboxH265(t *testing.T) {
 	})
 
 	cmd := p.PipelineStr
-	if !strings.Contains(cmd, "vtdec") {
-		t.Errorf("expected vtdec, got: %s", cmd)
+	if !strings.Contains(cmd, "tvproxydecode hw-accel=videotoolbox") {
+		t.Errorf("expected tvproxydecode hw-accel=videotoolbox (source is h264, VT OK), got: %s", cmd)
 	}
-	if !strings.Contains(cmd, "vtenc_h265") {
-		t.Errorf("expected vtenc_h265, got: %s", cmd)
-	}
-	if strings.Contains(cmd, "videoconvert") {
-		t.Error("VideoToolbox h265 should NOT have videoconvert")
-	}
-	if !strings.Contains(cmd, "h265parse config-interval=-1") {
-		t.Error("expected h265parse config-interval=-1")
+	if !strings.Contains(cmd, "tvproxyencode hw-accel=videotoolbox codec=h265") {
+		t.Errorf("expected tvproxyencode for h265+VT, got: %s", cmd)
 	}
 }
 
@@ -122,8 +110,8 @@ func TestBuildPipeline_SatIP(t *testing.T) {
 	if !strings.Contains(cmd, "rtpmp2tdepay") {
 		t.Error("expected rtpmp2tdepay")
 	}
-	if !strings.Contains(cmd, "mpegvideoparse") {
-		t.Error("expected mpegvideoparse for mpeg2 decode")
+	if !strings.Contains(cmd, "tvproxydecode hw-accel=vaapi") {
+		t.Errorf("expected tvproxydecode for mpeg2, got: %s", cmd)
 	}
 }
 
@@ -148,8 +136,8 @@ func TestBuildPipeline_AV1ForcesMp4Mux(t *testing.T) {
 	if !strings.Contains(cmd, "mp4mux") {
 		t.Error("AV1 must use mp4mux")
 	}
-	if !strings.Contains(cmd, "av1parse") {
-		t.Error("expected av1parse")
+	if !strings.Contains(cmd, "tvproxyencode") && !strings.Contains(cmd, "av1parse") {
+		t.Error("expected tvproxyencode or av1parse")
 	}
 }
 

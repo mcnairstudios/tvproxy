@@ -463,12 +463,7 @@ func buildVideoTranscodeChain(opts PipelineOpts, srcCodec, outCodec string, hw H
 			elems = append(elems, vscale, scaleCaps)
 		}
 	}
-	if opts.VideoEncoderElement != "" {
-		elems = append(elems, createExplicitEncoder(opts.VideoEncoderElement, outCodec, bitrate(opts))...)
-	} else {
-		elems = append(elems, createHWEncoder(outCodec, hw, bitrate(opts))...)
-	}
-	elems = append(elems, createOutputParser(outCodec)...)
+	elems = append(elems, createEncoderChain(opts, outCodec, hw)...)
 	return elems
 }
 

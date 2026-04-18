@@ -146,11 +146,11 @@ func buildPluginPipelineStr(opts PipelineOpts) string {
 	} else {
 		vcodec := NormalizeCodec(opts.VideoCodec)
 		decHW := resolveDecodeHW(opts, vcodec)
-		dec := hwDecoder(vcodec, decHW)
+		dec := fmt.Sprintf("tvproxydecode hw-accel=%s", hwAccelString(decHW))
 		if opts.VideoDecoderElement != "" {
 			dec = videoParserStr(vcodec, vcodec) + " ! " + opts.VideoDecoderElement
 		}
-		enc := hwEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)
+		enc := fmt.Sprintf("tvproxyencode hw-accel=%s codec=%s bitrate=%d", hwAccelString(opts.HWAccel), outCodec, opts.OutputBitrate)
 		postprocess := ""
 		if opts.Deinterlace || opts.SourceInterlaced {
 			if decHW == HWVAAPI || decHW == HWQSV {
@@ -219,12 +219,14 @@ func buildVideoStr(opts PipelineOpts) string {
 	}
 
 	decHW := resolveDecodeHW(opts, vcodec)
-	dec := hwDecoder(vcodec, decHW)
+	dec := fmt.Sprintf("tvproxydecode hw-accel=%s", hwAccelString(decHW))
 	if opts.VideoDecoderElement != "" {
 		dec = videoParserStr(vcodec, vcodec) + " ! " + opts.VideoDecoderElement
 	}
-	enc := hwEncoder(outCodec, opts.HWAccel, opts.OutputBitrate)
-	parser := videoParserStr(outCodec, "")
+	enc := fmt.Sprintf("tvproxyencode hw-accel=%s codec=%s bitrate=%d", hwAccelString(opts.HWAccel), outCodec, opts.OutputBitrate)
+	if opts.VideoEncoderElement != "" {
+		enc = opts.VideoEncoderElement + " ! " + videoParserStr(outCodec, "")
+	}
 
 	postprocess := ""
 	if opts.Deinterlace || opts.SourceInterlaced {
@@ -235,7 +237,7 @@ func buildVideoStr(opts PipelineOpts) string {
 		}
 	}
 
-	return fmt.Sprintf("demux. ! queue ! %s%s ! %s ! %s ! mux.", dec, postprocess, enc, parser)
+	return fmt.Sprintf("demux. ! queue ! %s%s ! %s ! mux.", dec, postprocess, enc)
 }
 
 func buildSinkStr(opts PipelineOpts) string {
