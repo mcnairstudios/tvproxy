@@ -698,8 +698,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Msg("building pipeline")
 
 	isMSE := s.startOpts.Delivery == "mse"
-	// tvproxyfmp4 disabled: only emits first fragment then stalls (see FIXES.md)
-	useFmp4Plugin := false
+	useFmp4Plugin := isMSE && gst.Find("tvproxyfmp4") != nil
 	if useFmp4Plugin {
 		opts.UseFmp4Plugin = true
 		m.log.Info().Str("session_id", s.ID).Msg("using tvproxyfmp4 plugin for MSE segments")
@@ -729,8 +728,20 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 				b := data.Data()
 				if track == "video" {
 					s.VideoStore.(*fmp4.SegmentStore).SetInit(b)
+					if vo, err := self.GetProperty("video-offset"); err == nil {
+						if v, ok := vo.(float64); ok {
+							s.VideoStore.(*fmp4.SegmentStore).SetTimestampOffset(v)
+							m.log.Debug().Float64("video_offset", v).Msg("fmp4 video offset")
+						}
+					}
 				} else {
 					s.AudioStore.(*fmp4.SegmentStore).SetInit(b)
+					if ao, err := self.GetProperty("audio-offset"); err == nil {
+						if v, ok := ao.(float64); ok {
+							s.AudioStore.(*fmp4.SegmentStore).SetTimestampOffset(v)
+							m.log.Debug().Float64("audio_offset", v).Msg("fmp4 audio offset")
+						}
+					}
 				}
 				m.log.Debug().Str("track", track).Int("bytes", len(b)).Msg("fmp4 init segment")
 			})

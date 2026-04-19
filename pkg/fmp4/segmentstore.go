@@ -14,6 +14,7 @@ type SegmentStore struct {
 	segments []segmentEntry
 	seqNum   int
 	maxSegs  int
+	offset   float64
 }
 
 func NewSegmentStore() *SegmentStore {
@@ -114,8 +115,16 @@ func (ss *SegmentStore) SegmentCount() int {
 	return len(ss.segments)
 }
 
+func (ss *SegmentStore) SetTimestampOffset(offset float64) {
+	ss.mu.Lock()
+	ss.offset = offset
+	ss.mu.Unlock()
+}
+
 func (ss *SegmentStore) TimestampOffset() float64 {
-	return 0
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.offset
 }
 
 func (ss *SegmentStore) IsAudioRejected() bool {
