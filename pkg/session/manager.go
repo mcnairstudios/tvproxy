@@ -728,26 +728,28 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 				b := data.Data()
 				if track == "video" {
 					s.VideoStore.(*fmp4.SegmentStore).SetInit(b)
-					if vo, err := self.GetProperty("video-offset"); err == nil {
-						if v, ok := vo.(float64); ok {
-							s.VideoStore.(*fmp4.SegmentStore).SetTimestampOffset(v)
-							m.log.Debug().Float64("video_offset", v).Msg("fmp4 video offset")
-						}
-					}
 				} else {
 					s.AudioStore.(*fmp4.SegmentStore).SetInit(b)
-					if ao, err := self.GetProperty("audio-offset"); err == nil {
-						if v, ok := ao.(float64); ok {
-							s.AudioStore.(*fmp4.SegmentStore).SetTimestampOffset(v)
-							m.log.Debug().Float64("audio_offset", v).Msg("fmp4 audio offset")
-						}
-					}
 				}
 				m.log.Debug().Str("track", track).Int("bytes", len(b)).Msg("fmp4 init segment")
 			})
 			fmp4El.Connect("media-segment", func(self *gst.Element, data *glib.Bytes, track string, pts uint64, seq uint) {
 				b := data.Data()
 				startNs := int64(pts)
+				if seq == 1 {
+					if vo, err := self.GetProperty("video-offset"); err == nil {
+						if v, ok := vo.(float64); ok && v != 0 {
+							s.VideoStore.(*fmp4.SegmentStore).SetTimestampOffset(v)
+							m.log.Info().Float64("video_offset", v).Msg("fmp4 video offset from plugin")
+						}
+					}
+					if ao, err := self.GetProperty("audio-offset"); err == nil {
+						if v, ok := ao.(float64); ok && v != 0 {
+							s.AudioStore.(*fmp4.SegmentStore).SetTimestampOffset(v)
+							m.log.Info().Float64("audio_offset", v).Msg("fmp4 audio offset from plugin")
+						}
+					}
+				}
 				if track == "video" {
 					s.VideoStore.(*fmp4.SegmentStore).AddSegment(b, startNs)
 				} else {
