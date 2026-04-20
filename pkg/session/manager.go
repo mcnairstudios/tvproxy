@@ -698,7 +698,10 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Msg("building pipeline")
 
 	isMSE := s.startOpts.Delivery == "mse"
-	useFmp4Plugin := isMSE && gst.Find("tvproxyfmp4") != nil
+	// tvproxyfmp4 disabled — go-gst string pipeline doesn't activate GstBin ghost pads correctly
+	// See /gstreamer-plugin/TVPROXY_INTEGRATION_ISSUES.md for details
+	// Re-enable when native element creation path is tested with patched cmafmux in Docker
+	useFmp4Plugin := false
 
 	var pipeline *gst.Pipeline
 	var path string
@@ -725,13 +728,22 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 			audioLang = fmt.Sprintf(" audio-language=%s", s.startOpts.AudioLanguage)
 		}
 
+		pipelineURL := s.StreamURL
+		if s.UseWireGuard && strings.HasPrefix(pipelineURL, "http") && m.wgProxyMgr != nil {
+			if proxy := m.wgProxyMgr.GetAny(); proxy != nil {
+				pipelineURL = proxy.ProxyURL(s.StreamURL)
+				m.log.Info().Str("session_id", s.ID).Str("proxy_url", pipelineURL).Msg("routing through WG proxy for plugin pipeline")
+			}
+		}
+		srcElement := fmt.Sprintf("tvproxysrc location=%s is-live=%t", pipelineURL, isLive)
+
 		pipeStr := fmt.Sprintf(
-			"tvproxysrc location=%s is-live=%t ! "+
+			"%s ! "+
 				"tvproxydemux name=d audio-channels=2%s%s "+
 				"d.video ! fmp4.video "+
 				"d.audio ! fmp4.audio "+
 				"tvproxyfmp4 name=fmp4 video-codec=%s segment-duration-ms=2000",
-			s.StreamURL, isLive, containerHint, audioLang, videoCodec)
+			srcElement, containerHint, audioLang, videoCodec)
 
 		pipeline, err = gst.NewPipelineFromString(pipeStr)
 		path = "plugin-fmp4"

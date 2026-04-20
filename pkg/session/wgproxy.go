@@ -158,6 +158,15 @@ func (m *WGProxyManager) GetOrCreate(profileID string, wgClient *http.Client, cf
 	return p, nil
 }
 
+func (m *WGProxyManager) GetAny() *WGProxy {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, p := range m.proxies {
+		return p
+	}
+	return nil
+}
+
 func (m *WGProxyManager) Get(profileID string) *WGProxy {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
