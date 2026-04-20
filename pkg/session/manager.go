@@ -699,18 +699,56 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 
 	isMSE := s.startOpts.Delivery == "mse"
 	useFmp4Plugin := isMSE && gst.Find("tvproxyfmp4") != nil
+
+	var pipeline *gst.Pipeline
+	var path string
+	var err error
+
 	if useFmp4Plugin {
-		opts.UseFmp4Plugin = true
-		m.log.Info().Str("session_id", s.ID).Msg("using tvproxyfmp4 plugin for MSE segments")
+		isLive := s.Duration == 0
+		videoCodec := srcVideo
+		if videoCodec == "" {
+			videoCodec = "h264"
+		}
+		videoCodec = gstreamer.NormalizeCodec(videoCodec)
+		if videoCodec == "mpeg2video" {
+			videoCodec = "mpeg2"
+		}
+
+		containerHint := ""
+		if container == "mpegts" || isLive {
+			containerHint = " container-hint=mpegts"
+		}
+
+		audioLang := ""
+		if s.startOpts.AudioLanguage != "" {
+			audioLang = fmt.Sprintf(" audio-language=%s", s.startOpts.AudioLanguage)
+		}
+
+		pipeStr := fmt.Sprintf(
+			"tvproxysrc location=%s is-live=%t ! "+
+				"tvproxydemux name=d audio-channels=2%s%s "+
+				"d.video ! fmp4.video "+
+				"d.audio ! fmp4.audio "+
+				"tvproxyfmp4 name=fmp4 video-codec=%s segment-duration-ms=2000",
+			s.StreamURL, isLive, containerHint, audioLang, videoCodec)
+
+		pipeline, err = gst.NewPipelineFromString(pipeStr)
+		path = "plugin-fmp4"
+		if err != nil {
+			m.log.Error().Err(err).Str("session_id", s.ID).Str("pipeline", pipeStr).Msg("plugin pipeline build failed")
+			s.setError(fmt.Errorf("plugin pipeline build failed: %w", err))
+			return
+		}
+		m.log.Info().Str("session_id", s.ID).Str("pipeline", pipeStr).Msg("using plugin pipeline for MSE")
 	} else {
 		opts.UseAppSink = isMSE
-	}
-
-	pipeline, path, err := gstreamer.Build(opts)
-	if err != nil {
-		m.log.Error().Err(err).Str("session_id", s.ID).Msg("pipeline build failed")
-		s.setError(fmt.Errorf("pipeline build failed: %w", err))
-		return
+		pipeline, path, err = gstreamer.Build(opts)
+		if err != nil {
+			m.log.Error().Err(err).Str("session_id", s.ID).Msg("pipeline build failed")
+			s.setError(fmt.Errorf("pipeline build failed: %w", err))
+			return
+		}
 	}
 
 	m.log.Info().Str("session_id", s.ID).Str("path", path).Str("output", s.FilePath).Msg("pipeline built")
