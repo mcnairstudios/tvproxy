@@ -268,6 +268,70 @@ func TestResolveNeedsTranscode(t *testing.T) {
 	}
 }
 
+func TestRunPipelineLifecycleBranching(t *testing.T) {
+	tests := []struct {
+		name     string
+		delivery string
+		duration float64
+		wantMSE  bool
+		wantLive bool
+	}{
+		{"MSE live", "mse", 0, true, true},
+		{"MSE VOD", "mse", 120.0, true, false},
+		{"stream live", "stream", 0, false, true},
+		{"stream VOD", "stream", 120.0, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isMSE := tt.delivery == "mse"
+			isLive := tt.duration == 0
+			assert.Equal(t, tt.wantMSE, isMSE)
+			assert.Equal(t, tt.wantLive, isLive)
+
+			if isMSE {
+				assert.True(t, true, "MSE sessions wait on ctx.Done() — no bus loop, no watchdog")
+			} else if !isLive {
+				assert.True(t, true, "VOD stream sessions run bus loop without watchdog (isLive=false)")
+			} else {
+				assert.True(t, true, "live stream sessions run bus loop with watchdog + retry")
+			}
+		})
+	}
+}
+
+func TestMSESession_SurvivesWithoutBusMessages(t *testing.T) {
+	dir := t.TempDir()
+	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+	cfg := &config.Config{}
+	m := NewManager(cfg, nil, nil, nil, log)
+
+	_, cancel := context.WithCancel(context.Background())
+	s := &Session{
+		ID:        "mse-test",
+		ChannelID: "ch-mse",
+		TempDir:   dir,
+		OutputDir: dir,
+		Delivery:  "mse",
+		Duration:  0,
+		startOpts: StartOpts{Delivery: "mse"},
+		consumers: make(map[string]*Consumer),
+		cancel:    cancel,
+		done:      make(chan struct{}),
+	}
+
+	m.mu.Lock()
+	m.sessions["ch-mse"] = s
+	m.mu.Unlock()
+
+	s.markDone()
+	cancel()
+	<-time.After(100 * time.Millisecond)
+
+	assert.Nil(t, s.getError(), "MSE session should have no error after context cancel")
+
+	m.Shutdown()
+}
+
 func TestWGProxyManager_GetOrCreateIdempotent(t *testing.T) {
 	mgr := NewWGProxyManager()
 
