@@ -8,6 +8,10 @@ import (
 	"github.com/go-gst/go-gst/gst"
 )
 
+func init() {
+	gst.Init(nil)
+}
+
 func Available() bool {
 	_, err := exec.LookPath("gst-launch-1.0")
 	return err == nil

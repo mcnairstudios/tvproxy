@@ -256,6 +256,13 @@ func buildSinkStr(opts PipelineOpts) string {
 	return "mpegtsmux name=mux ! fdsink fd=1"
 }
 
+func audioChannels(opts PipelineOpts) int {
+	if opts.SourceChannels > 0 {
+		return opts.SourceChannels
+	}
+	return 2
+}
+
 func buildAudioStr(opts PipelineOpts) string {
 	acodec := NormalizeCodec(opts.AudioCodec)
 	outAudio := NormalizeCodec(opts.OutputAudioCodec)
@@ -505,4 +512,34 @@ func NormalizeCodec(codec string) string {
 		return "av1"
 	}
 	return c
+}
+
+func resolveDecodeHW(opts PipelineOpts, srcCodec string) HWAccel {
+	hw := opts.DecodeHWAccel
+	if hw == "" {
+		hw = opts.HWAccel
+	}
+	is10bit := opts.SourceBitDepth > 8 || (opts.SourceBitDepth == 0 && (strings.Contains(opts.SourcePixFmt, "10") || strings.Contains(opts.SourcePixFmt, "12")))
+	if is10bit && !opts.Decode10Bit {
+		hw = HWNone
+	}
+	if hw == HWVideoToolbox && (srcCodec == "h265" || srcCodec == "hevc") {
+		hw = HWNone
+	}
+	return hw
+}
+
+func hwAccelString(hw HWAccel) string {
+	switch hw {
+	case HWVAAPI:
+		return "vaapi"
+	case HWQSV:
+		return "qsv"
+	case HWVideoToolbox:
+		return "videotoolbox"
+	case HWNVENC:
+		return "nvenc"
+	default:
+		return "none"
+	}
 }

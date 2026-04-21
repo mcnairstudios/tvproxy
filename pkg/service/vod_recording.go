@@ -164,7 +164,7 @@ func (s *VODService) completeRecording(sess *session.Session, rs *recordingState
 		ChannelID:    sess.ChannelID,
 		ChannelName:  sess.ChannelName,
 		ProfileName:  sess.ProfileName,
-		FileName:     filepath.Base(sess.FilePath),
+		FileName:     "source.ts",
 		StartedAt:    rs.StartedAt,
 		ProgramTitle: rs.Title,
 		UserID:       rs.UserID,

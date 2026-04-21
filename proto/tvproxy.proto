@@ -1,0 +1,25 @@
+syntax = "proto3";
+package tvproxy;
+
+option go_package = "github.com/gavinmcnair/tvproxy/pkg/proto";
+
+message Probe {
+    string video_codec = 1;
+    string video_codec_string = 2;
+    int32 video_width = 3;
+    int32 video_height = 4;
+    bool video_interlaced = 5;
+    string audio_source_codec = 6;
+    int32 audio_source_channels = 7;
+    int32 audio_source_sample_rate = 8;
+    string audio_output_codec = 9;
+    int32 audio_output_channels = 10;
+    int32 audio_output_sample_rate = 11;
+}
+
+message Signal {
+    float strength = 1;
+    float quality = 2;
+    float snr = 3;
+    int64 timestamp = 4;
+}

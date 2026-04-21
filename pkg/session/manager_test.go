@@ -121,6 +121,153 @@ func TestManager_Shutdown(t *testing.T) {
 	assert.Equal(t, 0, len(m.sessions))
 }
 
+func TestSession_RecordFlag(t *testing.T) {
+	s := &Session{
+		done:      make(chan struct{}),
+		consumers: make(map[string]*Consumer),
+	}
+	assert.False(t, s.IsRecorded())
+
+	s.Record()
+	assert.True(t, s.IsRecorded())
+	assert.True(t, s.Recorded)
+}
+
+func TestSession_PathHelpers(t *testing.T) {
+	s := &Session{
+		OutputDir: "/record/stream1/uuid1",
+		done:      make(chan struct{}),
+	}
+	assert.Equal(t, "/record/stream1/uuid1/source.ts", s.SourceTSPath())
+	assert.Equal(t, "/record/stream1/uuid1/probe.pb", s.ProbePBPath())
+}
+
+func TestSession_RecordPreservesOnCleanup(t *testing.T) {
+	dir := t.TempDir()
+	sessionDir := filepath.Join(dir, "session1")
+	require.NoError(t, os.MkdirAll(sessionDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "source.ts"), []byte("data"), 0644))
+
+	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+	cfg := &config.Config{}
+	m := NewManager(cfg, nil, nil, nil, log)
+	defer m.Shutdown()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Session{
+		ID:        "test-rec",
+		ChannelID: "ch1",
+		TempDir:   sessionDir,
+		OutputDir: sessionDir,
+		Recorded:  true,
+		consumers: make(map[string]*Consumer),
+		cancel:    cancel,
+		done:      make(chan struct{}),
+	}
+	s.markDone()
+
+	m.mu.Lock()
+	m.sessions["ch1"] = s
+	m.mu.Unlock()
+
+	_ = ctx
+
+	m.stopAndCleanup("ch1", s)
+
+	_, err := os.Stat(sessionDir)
+	assert.NoError(t, err, "recorded session directory should be preserved")
+	_, err = os.Stat(filepath.Join(sessionDir, "source.ts"))
+	assert.NoError(t, err, "source.ts should be preserved")
+}
+
+func TestSession_UnrecordedCleanup(t *testing.T) {
+	dir := t.TempDir()
+	sessionDir := filepath.Join(dir, "session2")
+	require.NoError(t, os.MkdirAll(sessionDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "source.ts"), []byte("data"), 0644))
+
+	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+	cfg := &config.Config{}
+	m := NewManager(cfg, nil, nil, nil, log)
+	defer m.Shutdown()
+
+	_, cancel := context.WithCancel(context.Background())
+	s := &Session{
+		ID:        "test-norec",
+		ChannelID: "ch2",
+		TempDir:   sessionDir,
+		OutputDir: sessionDir,
+		Recorded:  false,
+		consumers: make(map[string]*Consumer),
+		cancel:    cancel,
+		done:      make(chan struct{}),
+	}
+	s.markDone()
+
+	m.mu.Lock()
+	m.sessions["ch2"] = s
+	m.mu.Unlock()
+
+	m.stopAndCleanup("ch2", s)
+
+	_, err := os.Stat(sessionDir)
+	assert.True(t, os.IsNotExist(err), "unrecorded session directory should be deleted")
+}
+
+func TestManager_AddRecordingConsumerSetsFlag(t *testing.T) {
+	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
+	cfg := &config.Config{}
+	m := NewManager(cfg, nil, nil, nil, log)
+
+	_, cancel := context.WithCancel(context.Background())
+	s := &Session{
+		ID:        "test-addrec",
+		ChannelID: "ch3",
+		consumers: make(map[string]*Consumer),
+		cancel:    cancel,
+		done:      make(chan struct{}),
+	}
+	s.markDone()
+
+	m.mu.Lock()
+	m.sessions["ch3"] = s
+	m.mu.Unlock()
+
+	consumerID := m.AddRecordingConsumer("ch3")
+	assert.NotEmpty(t, consumerID)
+	assert.True(t, s.IsRecorded(), "AddRecordingConsumer should set Recorded flag")
+	assert.True(t, s.HasRecordingConsumer())
+
+	m.Shutdown()
+}
+
+func TestResolveNeedsTranscode(t *testing.T) {
+	tests := []struct {
+		name     string
+		outCodec string
+		srcCodec string
+		want     bool
+	}{
+		{"mpeg2 source, h264 output", "h264", "mpeg2video", true},
+		{"h264 source, copy output", "copy", "h264", false},
+		{"h265 source, copy output", "copy", "h265", false},
+		{"empty output (default)", "", "h264", false},
+		{"default output", "default", "h265", false},
+		{"h264 source, h264 output (same)", "h264", "h264", false},
+		{"h265 source, h264 output (different)", "h264", "h265", true},
+		{"unknown source, h264 output (safe default)", "h264", "", true},
+		{"unknown source, copy output", "copy", "", false},
+		{"unknown source, empty output", "", "", false},
+		{"av1 source, h265 output", "h265", "av1", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveNeedsTranscode(tt.outCodec, tt.srcCodec)
+			assert.Equal(t, tt.want, got, "resolveNeedsTranscode(%q, %q)", tt.outCodec, tt.srcCodec)
+		})
+	}
+}
+
 func TestFriendlyGstError(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"Could not multiplex stream.", "Stream encoding error — audio/video sync issue"},

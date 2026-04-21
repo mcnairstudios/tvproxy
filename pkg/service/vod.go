@@ -348,6 +348,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		StreamName:       streamName,
 		ChannelName:      channelName,
 		ProfileName:      profileName,
+		SourceVideoCodec: probeVCodec,
 		OutputVideoCodec: strategy.VideoCodec,
 		OutputAudioCodec: strategy.AudioCodec,
 		OutputContainer:  strategy.Container,
@@ -444,6 +445,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		StreamName:       stream.Name,
 		ChannelName:      stream.Name,
 		ProfileName:      profileName,
+		SourceVideoCodec: stream.VODVCodec,
 		OutputVideoCodec: strategy.VideoCodec,
 		OutputAudioCodec: strategy.AudioCodec,
 		OutputContainer:  strategy.Container,
@@ -489,6 +491,13 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 
 	sessionKey := "file:" + filepath.Base(filePath)
 
+	var fileSrcCodec string
+	if s.probeCache != nil {
+		if pr, err := s.probeCache.GetProbe(sessionKey); err == nil && pr != nil && pr.Video != nil {
+			fileSrcCodec = pr.Video.Codec
+		}
+	}
+
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
 		ChannelID:            sessionKey,
 		StreamID:             sessionKey,
@@ -496,6 +505,7 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 		StreamName:           name,
 		ChannelName:          name,
 		ProfileName:          profileName,
+		SourceVideoCodec:     fileSrcCodec,
 		OutputVideoCodec:     sa.OutputVideoCodec,
 		OutputAudioCodec:     sa.OutputAudioCodec,
 		OutputContainer:      sa.Container,

@@ -12,9 +12,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 
-	"github.com/gavinmcnair/tvproxy/pkg/fmp4"
 	"github.com/gavinmcnair/tvproxy/pkg/middleware"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
+	"github.com/gavinmcnair/tvproxy/pkg/session"
 )
 
 type VODHandler struct {
@@ -537,16 +537,22 @@ func (h *VODHandler) PlayCompletedRecording(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	delivery := "stream"
+	if sess := h.vodService.GetSession(sessionID); sess != nil && sess.Delivery == "mse" {
+		delivery = "mse"
+	}
+
 	respondJSON(w, http.StatusOK, map[string]any{
 		"session_id":  sessionID,
 		"consumer_id": consumerID,
 		"container":   container,
 		"duration":    duration,
 		"audio_only":  audioOnly,
+		"delivery":    delivery,
 	})
 }
 
-func (h *VODHandler) acquireStore(channelID, track string, timeout time.Duration) (fmp4.Store, string) {
+func (h *VODHandler) acquireWatcher(channelID string, timeout time.Duration) (*session.Watcher, string) {
 	deadline := time.Now().Add(timeout)
 	sessionSeen := false
 	for time.Now().Before(deadline) {
@@ -561,14 +567,8 @@ func (h *VODHandler) acquireStore(channelID, track string, timeout time.Duration
 		if sess.Delivery != "mse" {
 			return nil, "session delivery is not MSE"
 		}
-		var store fmp4.Store
-		if track == "video" {
-			store = sess.VideoStore
-		} else {
-			store = sess.AudioStore
-		}
-		if store != nil {
-			return store, ""
+		if sess.SessionWatcher != nil {
+			return sess.SessionWatcher, ""
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -579,8 +579,8 @@ func (h *VODHandler) MSEInit(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "sessionID")
 	track := chi.URLParam(r, "track")
 
-	store, reason := h.acquireStore(channelID, track, 30*time.Second)
-	if store == nil {
+	watcher, reason := h.acquireWatcher(channelID, 30*time.Second)
+	if watcher == nil {
 		code := http.StatusServiceUnavailable
 		if reason == "session not found" {
 			code = http.StatusNotFound
@@ -589,16 +589,26 @@ func (h *VODHandler) MSEInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, gen := store.GetInit()
+	var data []byte
+	switch track {
+	case "video":
+		data = watcher.VideoInit()
+	case "audio":
+		data = watcher.AudioInit()
+	default:
+		respondError(w, http.StatusBadRequest, "invalid track: "+track)
+		return
+	}
+
 	if data == nil {
 		w.Header().Set("Cache-Control", "no-store")
-		respondError(w, http.StatusGone, "init segment not available — pipeline may have failed")
+		respondError(w, http.StatusServiceUnavailable, "init segment not yet available")
 		return
 	}
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Gen", strconv.FormatInt(gen, 10))
+	w.Header().Set("X-Gen", strconv.FormatInt(watcher.Generation(), 10))
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Expose-Headers", "X-Gen")
 	w.Write(data)
@@ -613,8 +623,8 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 	gen, _ := strconv.ParseInt(genStr, 10, 64)
 	seq, _ := strconv.Atoi(seqStr)
 
-	store, reason := h.acquireStore(channelID, track, 10*time.Second)
-	if store == nil {
+	watcher, reason := h.acquireWatcher(channelID, 10*time.Second)
+	if watcher == nil {
 		code := http.StatusServiceUnavailable
 		if reason == "session not found" {
 			code = http.StatusNotFound
@@ -622,19 +632,34 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 		respondError(w, code, reason)
 		return
 	}
-	data, startTimeNs, ok := store.GetSegment(gen, seq)
-	if !ok {
+
+	if gen != watcher.Generation() {
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusGone)
+		return
+	}
+
+	var data []byte
+	var ok bool
+	switch track {
+	case "video":
+		data, ok = watcher.VideoSegment(seq)
+	case "audio":
+		data, ok = watcher.AudioSegment(seq)
+	default:
+		respondError(w, http.StatusBadRequest, "invalid track: "+track)
+		return
+	}
+
+	if !ok {
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	if startTimeNs >= 0 {
-		w.Header().Set("X-Start-Time", fmt.Sprintf("%.6f", float64(startTimeNs)/1e9))
-	}
 	w.Write(data)
 }
 
@@ -654,8 +679,8 @@ func (h *VODHandler) MSESeek(w http.ResponseWriter, r *http.Request) {
 
 	sess := h.vodService.GetSession(channelID)
 	gen := int64(0)
-	if sess != nil && sess.VideoStore != nil {
-		gen = sess.VideoStore.Generation()
+	if sess != nil && sess.SessionWatcher != nil {
+		gen = sess.SessionWatcher.Generation()
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{"gen": gen, "pos": pos})
@@ -670,29 +695,25 @@ func (h *VODHandler) MSEDebug(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]any{
-		"duration": sess.Duration,
+		"duration":    sess.Duration,
+		"video_codec": sess.OutputVideoCodec,
 	}
-	if sess.VideoStore != nil {
-		resp["video_segments"] = sess.VideoStore.SegmentCount()
-		resp["gen"] = sess.VideoStore.Generation()
-		resp["video_offset"] = sess.VideoStore.TimestampOffset()
-		resp["video_timing"] = sess.VideoStore.GetTimingDebug()
-		resp["video_codec"] = sess.OutputVideoCodec
-	}
-	if sess.AudioStore != nil {
-		resp["audio_offset"] = sess.AudioStore.TimestampOffset()
-		resp["audio_timing"] = sess.AudioStore.GetTimingDebug()
-		resp["audio_codec"] = sess.AudioStore.GetAudioCodecString()
-		if sess.AudioStore.IsAudioRejected() {
-			resp["audio_rejected"] = true
-			resp["audio_rejected_reason"] = "Missing audio probe: sample rate unknown"
+	if sess.SessionWatcher != nil {
+		w := sess.SessionWatcher
+		resp["gen"] = w.Generation()
+		resp["video_segments"] = w.VideoSegmentCount()
+		resp["audio_segments"] = w.AudioSegmentCount()
+		resp["probe_ready"] = w.Probe() != nil
+		if probe := w.Probe(); probe != nil {
+			resp["probe"] = map[string]any{
+				"video_codec":        probe.VideoCodec,
+				"video_codec_string": probe.VideoCodecString,
+				"video_width":        probe.VideoWidth,
+				"video_height":       probe.VideoHeight,
+				"audio_source_codec": probe.AudioSourceCodec,
+				"audio_output_codec": probe.AudioOutputCodec,
+			}
 		}
-	}
-	if sess.VideoStore != nil && sess.AudioStore != nil {
-		vt := sess.VideoStore.GetTimingDebug()
-		at := sess.AudioStore.GetTimingDebug()
-		drift := at.DecodeTimeSec - vt.DecodeTimeSec
-		resp["audio_drift_sec"] = drift
 	}
 	if sess.Video != nil {
 		resp["source_video"] = sess.Video

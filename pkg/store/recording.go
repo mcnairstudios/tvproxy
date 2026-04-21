@@ -220,8 +220,12 @@ func (s *RecordingStoreImpl) CompleteRecording(streamID string, meta SessionMeta
 
 	srcPath := filepath.Join(activeDir, meta.FileName)
 	baseName := media.SanitizeFilename(meta.ProgramTitle, meta.StoppedAt)
-	mp4Name := baseName + ".mp4"
-	destPath := filepath.Join(recordedDir, mp4Name)
+	ext := filepath.Ext(meta.FileName)
+	if ext == "" {
+		ext = ".ts"
+	}
+	outName := baseName + ext
+	destPath := filepath.Join(recordedDir, outName)
 
 	for i := 1; i <= 1000; i++ {
 		if _, err := os.Stat(destPath); os.IsNotExist(err) {
@@ -230,21 +234,25 @@ func (s *RecordingStoreImpl) CompleteRecording(streamID string, meta SessionMeta
 		if i == 1000 {
 			return "", fmt.Errorf("too many filename collisions for %s", baseName)
 		}
-		mp4Name = fmt.Sprintf("%s_%d.mp4", baseName, i)
-		destPath = filepath.Join(recordedDir, mp4Name)
+		outName = fmt.Sprintf("%s_%d%s", baseName, i, ext)
+		destPath = filepath.Join(recordedDir, outName)
 	}
 
 	if err := moveOrCopy(srcPath, destPath); err != nil {
 		return "", fmt.Errorf("moving recording to completed: %w", err)
 	}
 
+	probeSrc := filepath.Join(activeDir, "probe.pb")
+	probeDst := filepath.Join(recordedDir, strings.TrimSuffix(outName, ext)+".probe.pb")
+	moveOrCopy(probeSrc, probeDst)
+
 	meta.Status = SessionCompleted
-	meta.FileName = mp4Name
+	meta.FileName = outName
 	metaData, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshaling metadata: %w", err)
 	}
-	jsonName := strings.TrimSuffix(mp4Name, ".mp4") + ".json"
+	jsonName := strings.TrimSuffix(outName, ext) + ".json"
 	if err := os.WriteFile(filepath.Join(recordedDir, jsonName), metaData, 0644); err != nil {
 		s.log.Warn().Err(err).Str("path", jsonName).Msg("failed to write recording metadata")
 	}
@@ -255,7 +263,7 @@ func (s *RecordingStoreImpl) CompleteRecording(streamID string, meta SessionMeta
 	delete(s.sessions, streamID)
 	s.mu.Unlock()
 
-	return mp4Name, nil
+	return outName, nil
 }
 
 func (s *RecordingStoreImpl) ListActiveRecordings() ([]SessionMeta, error) {

@@ -1,11 +1,11 @@
 package session
 
 import (
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/gavinmcnair/tvproxy/pkg/fmp4"
 	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
@@ -35,8 +35,9 @@ type Session struct {
 	SeekOffset      float64
 	Video           *media.VideoInfo
 	AudioTracks     []media.AudioTrack
-	VideoStore   fmp4.Store
-	AudioStore   fmp4.Store
+	OutputDir    string
+	Recorded     bool
+	SessionWatcher *Watcher
 	seekGen      atomic.Int64
 	startOpts    StartOpts
 	consumers    map[string]*Consumer
@@ -228,4 +229,25 @@ func (s *Session) RecordingConsumerID() string {
 		}
 	}
 	return ""
+}
+
+func (s *Session) Record() {
+	s.mu.Lock()
+	s.Recorded = true
+	s.mu.Unlock()
+}
+
+func (s *Session) IsRecorded() bool {
+	s.mu.RLock()
+	v := s.Recorded
+	s.mu.RUnlock()
+	return v
+}
+
+func (s *Session) SourceTSPath() string {
+	return filepath.Join(s.OutputDir, "source.ts")
+}
+
+func (s *Session) ProbePBPath() string {
+	return filepath.Join(s.OutputDir, "probe.pb")
 }
