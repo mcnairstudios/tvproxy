@@ -658,16 +658,24 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var data []byte
-	var ok bool
-	switch track {
-	case "video":
-		data, ok = watcher.VideoSegment(seq)
-	case "audio":
-		data, ok = watcher.AudioSegment(seq)
-	default:
+	if track != "video" && track != "audio" {
 		respondError(w, http.StatusBadRequest, "invalid track: "+track)
 		return
+	}
+
+	var data []byte
+	var ok bool
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if track == "video" {
+			data, ok = watcher.VideoSegment(seq)
+		} else {
+			data, ok = watcher.AudioSegment(seq)
+		}
+		if ok {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	if !ok {
@@ -767,7 +775,7 @@ const mseWorkerJS = `
 let ac = null;
 
 async function fetchTrack(sessionId, name, gen, signal) {
-  let seq = 0;
+  let seq = 1;
   let backoff = 0;
   while (!signal.aborted) {
     try {
