@@ -705,7 +705,7 @@ func (h *VODHandler) MSEDebug(w http.ResponseWriter, r *http.Request) {
 		resp["audio_segments"] = w.AudioSegmentCount()
 		resp["probe_ready"] = w.Probe() != nil
 		if probe := w.Probe(); probe != nil {
-			resp["probe"] = map[string]any{
+			probeData := map[string]any{
 				"video_codec":        probe.VideoCodec,
 				"video_codec_string": probe.VideoCodecString,
 				"video_width":        probe.VideoWidth,
@@ -713,6 +713,17 @@ func (h *VODHandler) MSEDebug(w http.ResponseWriter, r *http.Request) {
 				"audio_source_codec": probe.AudioSourceCodec,
 				"audio_output_codec": probe.AudioOutputCodec,
 			}
+			if probe.VideoBitDepth > 0 {
+				probeData["video_bit_depth"] = probe.VideoBitDepth
+			}
+			if probe.VideoFramerateNum > 0 {
+				probeData["video_framerate_num"] = probe.VideoFramerateNum
+				probeData["video_framerate_den"] = probe.VideoFramerateDen
+			}
+			if probe.VideoBitrateKbps > 0 {
+				probeData["video_bitrate_kbps"] = probe.VideoBitrateKbps
+			}
+			resp["probe"] = probeData
 		}
 	}
 	if sess.Video != nil {

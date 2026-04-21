@@ -15,6 +15,10 @@ message Probe {
     string audio_output_codec = 9;
     int32 audio_output_channels = 10;
     int32 audio_output_sample_rate = 11;
+    int32 video_bit_depth = 12;
+    int32 video_framerate_num = 13;
+    int32 video_framerate_den = 14;
+    int32 video_bitrate_kbps = 15;
 }
 
 message Signal {

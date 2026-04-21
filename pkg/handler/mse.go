@@ -34,7 +34,7 @@ func (h *MSEHandler) Probe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	json.NewEncoder(w).Encode(map[string]any{
+	resp := map[string]any{
 		"video_codec":              probe.VideoCodec,
 		"video_codec_string":       probe.VideoCodecString,
 		"video_width":              probe.VideoWidth,
@@ -46,7 +46,18 @@ func (h *MSEHandler) Probe(w http.ResponseWriter, r *http.Request) {
 		"audio_output_codec":       probe.AudioOutputCodec,
 		"audio_output_channels":    probe.AudioOutputChannels,
 		"audio_output_sample_rate": probe.AudioOutputSampleRate,
-	})
+	}
+	if probe.VideoBitDepth > 0 {
+		resp["video_bit_depth"] = probe.VideoBitDepth
+	}
+	if probe.VideoFramerateNum > 0 {
+		resp["video_framerate_num"] = probe.VideoFramerateNum
+		resp["video_framerate_den"] = probe.VideoFramerateDen
+	}
+	if probe.VideoBitrateKbps > 0 {
+		resp["video_bitrate_kbps"] = probe.VideoBitrateKbps
+	}
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (h *MSEHandler) Init(w http.ResponseWriter, r *http.Request) {
