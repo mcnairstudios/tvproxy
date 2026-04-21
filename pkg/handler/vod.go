@@ -665,7 +665,7 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 
 	var data []byte
 	var ok bool
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if track == "video" {
 			data, ok = watcher.VideoSegment(seq)
@@ -675,7 +675,7 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 		if ok {
 			break
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	if !ok {
@@ -776,13 +776,16 @@ let ac = null;
 
 async function fetchTrack(sessionId, name, gen, signal) {
   let seq = 1;
-  let backoff = 0;
   while (!signal.aborted) {
     try {
       const resp = await fetch('/vod/' + sessionId + '/mse/' + name + '/segment?gen=' + gen + '&seq=' + seq, {signal});
       if (resp.status === 410) {
         self.postMessage({type: 'genChanged', track: name});
         return;
+      }
+      if (resp.status === 404) {
+        await new Promise(r => setTimeout(r, 500));
+        continue;
       }
       if (!resp.ok) {
         throw new Error('HTTP ' + resp.status);
@@ -791,13 +794,10 @@ async function fetchTrack(sessionId, name, gen, signal) {
       const data = await resp.arrayBuffer();
       self.postMessage({type: 'segment', track: name, data: data, seq: seq, startTime: startTime}, [data]);
       seq++;
-      backoff = 0;
     } catch(e) {
       if (e.name === 'AbortError') return;
-      const delay = Math.pow(2, backoff) * 1000;
-      backoff = Math.min(backoff + 1, 5);
-      self.postMessage({type: 'error', track: name, msg: e.toString() + ' (retry in ' + (delay/1000) + 's)'});
-      await new Promise(r => setTimeout(r, delay));
+      self.postMessage({type: 'error', track: name, msg: e.toString()});
+      await new Promise(r => setTimeout(r, 1000));
     }
   }
 }
