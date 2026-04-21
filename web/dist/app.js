@@ -4021,20 +4021,31 @@
       setTimeout(function() { initAc.abort(); }, 35000);
       statusEl.textContent = 'Initializing...';
       statusEl.style.color = '#ffaa00';
+
+      function fetchInitWithRetry(url, signal, maxRetries, delayMs) {
+        var attempt = 0;
+        function tryFetch() {
+          return fetch(url, {signal: signal, cache: 'no-store'}).then(function(r) {
+            if (r.ok) return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; });
+            if (r.status === 503 && attempt < maxRetries) {
+              attempt++;
+              statusEl.textContent = 'Waiting for pipeline... (' + attempt + '/' + maxRetries + ')';
+              return new Promise(function(resolve) { setTimeout(resolve, delayMs); }).then(tryFetch);
+            }
+            throw new Error('HTTP ' + r.status + ' ' + r.statusText);
+          });
+        }
+        return tryFetch();
+      }
+
       fetch(basePath + 'debug', {cache: 'no-store'}).then(function(r) { return r.json(); }).then(function(debugInfo) {
         var audioRejectedEarly = debugInfo.audio_rejected || false;
         var initPromises = [
-          fetch(basePath + 'video/init', {signal: initAc.signal, cache: 'no-store'}).then(function(r) {
-            if (!r.ok) throw new Error('video init: HTTP ' + r.status + ' ' + r.statusText);
-            return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; });
-          })
+          fetchInitWithRetry(basePath + 'video/init', initAc.signal, 60, 500)
         ];
         if (!audioRejectedEarly) {
           initPromises.push(
-            fetch(basePath + 'audio/init', {signal: initAc.signal, cache: 'no-store'}).then(function(r) {
-              if (!r.ok) throw new Error('audio init: HTTP ' + r.status + ' ' + r.statusText);
-              return r.arrayBuffer().then(function(buf) { return { buf: buf, gen: r.headers.get('X-Gen') || '0' }; });
-            })
+            fetchInitWithRetry(basePath + 'audio/init', initAc.signal, 60, 500)
           );
         }
         return Promise.all(initPromises).then(function(initResults) {
