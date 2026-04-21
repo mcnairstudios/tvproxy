@@ -587,7 +587,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	needsTranscode := resolveNeedsTranscode(outCodec, srcCodec)
 
 	containerHint := ""
-	if s.startOpts.OutputContainer == "mpegts" || isLive {
+	if s.startOpts.OutputContainer == "mpegts" {
 		containerHint = "mpegts"
 	}
 

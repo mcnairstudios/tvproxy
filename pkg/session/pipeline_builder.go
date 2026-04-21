@@ -21,12 +21,14 @@ func BuildMSEPipeline(opts gstreamer.SessionOpts) gstreamer.PipelineSpec {
 	}
 	spec.LinkPads("d", "audio", "fmp4", "audio")
 
-	videoCodec := resolveOutputCodec(opts)
-	spec.AddElement("fmp4", "tvproxyfmp4", gstreamer.Props{
+	fmp4Props := gstreamer.Props{
 		"output-dir":          opts.OutputDir,
-		"video-codec":         videoCodec,
 		"segment-duration-ms": segmentDuration(opts),
-	})
+	}
+	if videoCodec := resolveOutputCodec(opts); videoCodec != "" {
+		fmp4Props["video-codec"] = videoCodec
+	}
+	spec.AddElement("fmp4", "tvproxyfmp4", fmp4Props)
 
 	return spec
 }
@@ -176,13 +178,13 @@ func demuxProps(opts gstreamer.SessionOpts, passthrough bool) gstreamer.Props {
 }
 
 func resolveOutputCodec(opts gstreamer.SessionOpts) string {
-	if opts.OutputCodec != "" {
+	if opts.NeedsTranscode && opts.OutputCodec != "" {
 		return opts.OutputCodec
 	}
 	if opts.VideoCodec != "" {
 		return opts.VideoCodec
 	}
-	return "h264"
+	return ""
 }
 
 func segmentDuration(opts gstreamer.SessionOpts) uint {
