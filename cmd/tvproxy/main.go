@@ -21,6 +21,7 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/config"
 	"github.com/gavinmcnair/tvproxy/pkg/database"
 	"github.com/gavinmcnair/tvproxy/pkg/defaults"
+	"github.com/gavinmcnair/tvproxy/pkg/fileserver"
 	"github.com/gavinmcnair/tvproxy/pkg/handler"
 	"github.com/gavinmcnair/tvproxy/pkg/hls"
 	"github.com/gavinmcnair/tvproxy/pkg/jellyfin"
@@ -261,8 +262,15 @@ func main() {
 	m3uService.SetWGClient(wgPool.Client())
 	log.Info().Int("proxies", wgPool.Count()).Msg("wireguard pool active with failover")
 
+	fileSrv := fileserver.New(log)
+	if err := fileSrv.Start(); err != nil {
+		log.Fatal().Err(err).Msg("failed to start internal file server")
+	}
+	defer fileSrv.Stop()
+
 	vodService := service.NewVODService(channelStore, streamStore, profileStore, sourceProfileStore, m3uAccountStore, satipSourceStore, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
 	vodService.SetProbeCache(probeCache)
+	vodService.SetFileServer(fileSrv)
 	go vodService.RecoverRecordings(ctx)
 	schedulerService := service.NewSchedulerService(scheduledRecStore, channelStore, vodService, cfg, log)
 	dlnaService := service.NewDLNAService(channelStore, channelGroupStore, userStore, favoriteStore, streamStore, settingsService, logoService, vodService, cfg, log)

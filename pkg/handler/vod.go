@@ -665,7 +665,7 @@ func (h *VODHandler) MSESegment(w http.ResponseWriter, r *http.Request) {
 
 	var data []byte
 	var ok bool
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if track == "video" {
 			data, ok = watcher.VideoSegment(seq)

@@ -41,13 +41,15 @@ type VODService struct {
 	recordingStore     store.RecordingStore
 	probeCache         store.ProbeCache
 	activity           *ActivityService
+	fileServer         interface{ Register(string) string }
 	log                zerolog.Logger
 
 	mu         sync.RWMutex
 	recordings map[string]*recordingState
 }
 
-func (s *VODService) SetProbeCache(pc store.ProbeCache) { s.probeCache = pc }
+func (s *VODService) SetProbeCache(pc store.ProbeCache)                    { s.probeCache = pc }
+func (s *VODService) SetFileServer(fs interface{ Register(string) string }) { s.fileServer = fs }
 
 func NewVODService(
 	channelStore store.ChannelStore,
@@ -492,10 +494,15 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 		}
 	}
 
+	streamURL := filePath
+	if s.fileServer != nil {
+		streamURL = s.fileServer.Register(filePath)
+	}
+
 	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
 		ChannelID:            sessionKey,
 		StreamID:             sessionKey,
-		StreamURL:            filePath,
+		StreamURL:            streamURL,
 		StreamName:           name,
 		ChannelName:          name,
 		ProfileName:          profileName,

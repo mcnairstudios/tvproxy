@@ -3869,6 +3869,8 @@
     var mseAppendQueues = { video: [], audio: [] };
     var mseAppending = { video: false, audio: false };
     var mseSeekTarget = 0;
+    var mseSeekCounter = 0;
+    var mseSeekingPct = -1;
     var mseDuration = 0;
 
 
@@ -3936,25 +3938,41 @@
       });
     }
 
+    function mseEvictBuffer(sb, vidEl) {
+      if (!sb || !vidEl || sb.updating) return Promise.resolve();
+      var keepBehind = 10;
+      if (sb.buffered.length > 0 && vidEl.currentTime - sb.buffered.start(0) > keepBehind) {
+        var removeEnd = vidEl.currentTime - keepBehind;
+        sb.remove(sb.buffered.start(0), removeEnd);
+        return mseWaitUpdate(sb);
+      }
+      return Promise.resolve();
+    }
+
     function mseProcessQueue(track) {
       var sb = track === 'video' ? mseVideoSb : mseAudioSb;
+      var vidEl = document.querySelector('video');
       if (!sb || mseAppending[track]) return;
       mseAppending[track] = true;
       function next() {
         if (mseAppendQueues[track].length === 0) { mseAppending[track] = false; return; }
         var data = mseAppendQueues[track].shift();
-        try {
-          mseWaitUpdate(sb).then(function() {
-            sb.appendBuffer(data);
-            return mseWaitUpdate(sb);
-          }).then(next).catch(function(e) {
-            console.error(track + ' append error:', e);
-            mseAppending[track] = false;
-          });
-        } catch(e) {
+        mseEvictBuffer(sb, vidEl).then(function() {
+          return mseWaitUpdate(sb);
+        }).then(function() {
+          sb.appendBuffer(data);
+          return mseWaitUpdate(sb);
+        }).then(next).catch(function(e) {
+          if (e.name === 'QuotaExceededError') {
+            mseEvictBuffer(sb, vidEl).then(function() {
+              mseAppendQueues[track].unshift(data);
+              setTimeout(next, 500);
+            });
+            return;
+          }
           console.error(track + ' append error:', e);
           mseAppending[track] = false;
-        }
+        });
       }
       next();
     }
@@ -4323,7 +4341,7 @@
     seekRow.addEventListener('mouseleave', function() { seekTrack.style.height = '4px'; seekThumb.style.opacity = '0'; });
     seekRow.addEventListener('click', function(e) {
       e.stopPropagation();
-      var rect = seekTrack.getBoundingClientRect();
+      var rect = seekRow.getBoundingClientRect();
       var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       seekPlayed.style.width = (pct * 100) + '%';
       seekThumb.style.left = (pct * 100) + '%';
@@ -4331,11 +4349,21 @@
       if (dvr && dvr.delivery === 'mse') {
         var targetPos = Math.floor(pct * (mseDuration || dvr.duration || 0));
         statusEl.style.color = '#ffa726';
-        statusEl.textContent = 'Seeking...';
+        statusEl.textContent = 'Seeking to ' + fmtCtrlTime(targetPos) + '...';
+        seekPlayed.style.width = (pct * 100) + '%';
+        seekThumb.style.left = (pct * 100) + '%';
+        seekThumb.style.opacity = '1';
+        mseSeekingPct = pct;
         if (mseWorker) mseWorker.postMessage({type: 'stop'});
+        var seekId = ++mseSeekCounter;
         api.post('/vod/' + dvr.id + '/mse/seek?position=' + targetPos).then(function(info) {
+          if (seekId !== mseSeekCounter) return;
+          mseSeekingPct = -1;
+          mseCleanup();
           startMSEPlayback(videoEl, dvr, info.pos);
         }).catch(function(err) {
+          if (seekId !== mseSeekCounter) return;
+          mseSeekingPct = -1;
           console.error('MSE seek error:', err);
           statusEl.style.color = '#ff6b6b';
           statusEl.textContent = 'Seek failed';
@@ -4407,20 +4435,25 @@
       if (playerCtx.signal.aborted) { clearInterval(ctrlUpdateTimer); return; }
       var cur = videoEl.currentTime || 0;
       var dur = videoEl.duration;
-      var displayCur = cur + mseSeekTarget;
+      var displayCur = cur;
       var knownDur = mseDuration || dvr.duration || epgTotalDuration || (isFinite(dur) ? dur : 0);
 
       var effectiveDur = knownDur > 0 ? knownDur : (isFinite(dur) ? dur : 0);
       if (effectiveDur > 0) {
         var displayPos = epgTotalDuration > 0 ? (epgElapsed + cur) : displayCur;
         var displayTotal = epgTotalDuration > 0 ? epgTotalDuration : effectiveDur;
-        seekPlayed.style.width = ((displayPos / displayTotal) * 100) + '%';
-        seekThumb.style.left = ((displayPos / displayTotal) * 100) + '%';
+        if (mseSeekingPct >= 0) {
+          seekPlayed.style.width = (mseSeekingPct * 100) + '%';
+          seekThumb.style.left = (mseSeekingPct * 100) + '%';
+        } else {
+          seekPlayed.style.width = ((displayPos / displayTotal) * 100) + '%';
+          seekThumb.style.left = ((displayPos / displayTotal) * 100) + '%';
+        }
         seekTranscoded.style.width = '100%';
         var bufEnd = 0;
         var mseBufSource = mseVideoSb || videoEl;
         if (mseBufSource.buffered && mseBufSource.buffered.length > 0) bufEnd = mseBufSource.buffered.end(mseBufSource.buffered.length - 1);
-        seekBuffered.style.width = (((bufEnd + mseSeekTarget) / displayTotal) * 100) + '%';
+        seekBuffered.style.width = ((bufEnd / displayTotal) * 100) + '%';
         timeDisplay.textContent = fmtCtrlTime(displayPos) + ' / ' + fmtCtrlTime(displayTotal);
       } else {
         timeDisplay.textContent = fmtCtrlTime(displayCur);

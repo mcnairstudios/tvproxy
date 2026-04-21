@@ -346,26 +346,44 @@ func (m *Manager) RestartWithSeek(ctx context.Context, channelID string, positio
 		return
 	}
 
-	m.log.Info().Str("channel_id", channelID).Float64("position", position).Msg("restarting session with seek")
-	m.mu.Lock()
-	opts := s.startOpts
-	oldFile := s.FilePath
+	m.log.Info().Str("channel_id", channelID).Float64("position", position).Msg("restarting pipeline in-place with seek")
+
+	s.StopPipeline()
 	s.cancel()
-	delete(m.sessions, channelID)
-	m.mu.Unlock()
 
 	select {
 	case <-s.done:
 	case <-time.After(3 * time.Second):
 	}
 
-	if oldFile != "" {
-		os.Remove(oldFile)
+	if s.SessionWatcher != nil {
+		s.SessionWatcher.Reset()
 	}
 
-	opts.KnownDuration = s.Duration
-	opts.SeekOffset = position
-	m.GetOrCreateWithConsumer(ctx, opts, ConsumerViewer)
+	segDir := filepath.Join(s.OutputDir, "segments")
+	os.RemoveAll(segDir)
+	os.MkdirAll(segDir, 0755)
+	os.Remove(filepath.Join(s.OutputDir, "probe.pb"))
+
+	if s.FilePath != "" {
+		os.Remove(s.FilePath)
+	}
+	sourceTSPath := filepath.Join(s.OutputDir, "source.ts")
+	os.Remove(sourceTSPath)
+
+	s.startOpts.KnownDuration = s.Duration
+	s.startOpts.SeekOffset = position
+	s.SeekOffset = position
+
+	newCtx, newCancel := context.WithCancel(context.Background())
+	s.cancel = newCancel
+	s.done = make(chan struct{})
+	s.doneOnce = sync.Once{}
+	s.setError(nil)
+
+	go m.runPipeline(newCtx, s)
+
+	m.log.Info().Str("channel_id", channelID).Str("session_id", s.ID).Float64("position", position).Msg("pipeline restarted for seek")
 }
 
 func (m *Manager) GetOrCreateWithConsumer(ctx context.Context, opts StartOpts, consumerType string) (*Session, string, error) {
@@ -674,12 +692,6 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 			return
 		}
 		s.SessionWatcher = w
-
-		s.SetSeekFunc(func(position float64) {
-			m.log.Info().Str("session_id", s.ID).Float64("position", position).Msg("seek — restarting pipeline")
-			w.Reset()
-			pipeline.SetState(gst.StateNull)
-		})
 	}
 
 	if err := pipeline.SetState(gst.StatePlaying); err != nil {
@@ -693,8 +705,15 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 			time.Sleep(3 * time.Second)
 			seekNs := int64(s.startOpts.SeekOffset * 1e9)
 			m.log.Info().Str("session_id", s.ID).Float64("seek_to", s.startOpts.SeekOffset).Msg("deferred seek after preroll")
-			seekEvt := gst.NewSeekEvent(1.0, gst.FormatTime, gst.SeekFlagFlush|gst.SeekFlagKeyUnit, gst.SeekTypeSet, seekNs, gst.SeekTypeNone, 0)
-			pipeline.SendEvent(seekEvt)
+			src, srcErr := pipeline.GetElementByName("src")
+			if srcErr == nil && src != nil {
+				seekEvt := gst.NewSeekEvent(1.0, gst.FormatTime, gst.SeekFlagFlush|gst.SeekFlagKeyUnit, gst.SeekTypeSet, seekNs, gst.SeekTypeNone, 0)
+				ok := src.SendEvent(seekEvt)
+				if ok && s.SessionWatcher != nil {
+					s.SessionWatcher.Reset()
+				}
+				m.log.Info().Str("session_id", s.ID).Bool("ok", ok).Msg("deferred seek result")
+			}
 		}()
 	}
 
@@ -704,10 +723,20 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		go m.cachePassiveMetadata(ctx, s)
 	}
 
-	if isMSE {
+	if isMSE && isLive {
 		<-ctx.Done()
-		m.log.Info().Str("session_id", s.ID).Msg("MSE session ended (context cancelled)")
+		m.log.Info().Str("session_id", s.ID).Msg("MSE live session ended (context cancelled)")
 		pipeline.SetState(gst.StateNull)
+		return
+	}
+
+	if isMSE && !isLive {
+		result := m.executor.RunBusLoop(ctx, pipeline, false)
+		pipeline.SetState(gst.StateNull)
+		if result.Err != nil {
+			s.setError(fmt.Errorf("%s", friendlyGstError(result.Err.Error())))
+		}
+		m.log.Info().Str("session_id", s.ID).Str("reason", result.ExitReason).Msg("MSE VOD session ended")
 		return
 	}
 

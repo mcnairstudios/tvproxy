@@ -874,6 +874,66 @@ if sess.Duration == 0 {
 
 ---
 
+## Phase 16: Local File Server for VOD/Recordings
+
+**Goal**: Serve local files (recordings, VOD) over HTTP so tvproxysrc treats them identically to IPTV streams. Eliminates the `IsFileSource` code path — one pipeline topology for everything.
+
+### Why
+
+The native go-gst executor + tvproxysrc `is-live=false` file mode doesn't produce segments through tvproxyfmp4 on macOS (timing/state difference vs `gst_parse_launch`). HTTP sources work perfectly — 1917 (4K HDR, 2 hours) plays through the full pipeline. Serving local files over HTTP makes them behave identically to IPTV VOD: tvproxysrc fetches via HTTP, Range headers enable seeking, one code path for all sources.
+
+### Implementation
+
+New package: `pkg/fileserver/fileserver.go`
+
+```go
+package fileserver
+
+type FileServer struct {
+    roots []string  // directories to serve (e.g., /record, /config/recordings)
+    port  int
+    srv   *http.Server
+}
+
+func New(roots []string, log zerolog.Logger) *FileServer
+
+func (fs *FileServer) Start() (int, error)  // returns port
+func (fs *FileServer) Stop()
+func (fs *FileServer) URL(filePath string) string  // converts file path to HTTP URL
+```
+
+The handler: `http.ServeFile(w, r, resolvedPath)` — same as tvproxy-streams. Handles Range requests automatically (Go stdlib). Path validation prevents directory traversal.
+
+Route: `GET /file/{hash}` where hash maps to a validated file path. No raw filesystem paths exposed over HTTP.
+
+### Wiring
+
+In `main.go`:
+```go
+fileSrv := fileserver.New([]string{cfg.RecordDir, cfg.VODOutputDir}, log)
+port, _ := fileSrv.Start()
+defer fileSrv.Stop()
+```
+
+In `StartWatchingFile`: instead of `StreamURL = filePath`, use `StreamURL = fileSrv.URL(filePath)`.
+
+In `BuildRecordingPlaybackPipeline`: remove `IsFileSource` — it's always HTTP now.
+
+### What changes
+
+- `SessionOpts.IsFileSource` becomes unused — all sources are HTTP/RTSP
+- No tee bypass for file sources — all sources get the tee + raw recording path (but for recording playback, the raw recording already exists, so the tee writes a duplicate — acceptable, or skip tee when source is localhost)
+- Recording playback seeking works via HTTP Range requests to tvproxysrc
+- VOD file playback works identically to IPTV VOD
+
+### Validation
+- Play a completed recording via the file server → segments produced, MSE plays
+- Seek within a recording → tvproxysrc handles Range, pipeline restarts from new position
+- `go build ./...` succeeds
+- All tests pass
+
+---
+
 ## Key Constraints (from INTERFACES.md)
 
 1. go-gst is a dumb executor — no media knowledge in the executor layer
