@@ -183,6 +183,145 @@ func TestPhase1_ExecutorElementOrder(t *testing.T) {
 	assert.Less(t, dIdx, fmp4Idx, "demux must be before fmp4")
 }
 
+func TestPhase10_MaxBitDepthProperty(t *testing.T) {
+	opts := gstreamer.SessionOpts{
+		SourceURL:      "/tmp/test.ts",
+		IsLive:         false,
+		IsFileSource:   true,
+		VideoCodec:     "h265",
+		NeedsTranscode: true,
+		HWAccel:        "vaapi",
+		DecodeHWAccel:  "vaapi",
+		OutputCodec:    "h264",
+		MaxBitDepth:    8,
+		OutputDir:      "/tmp/out",
+	}
+
+	spec := BuildMSEPipeline(opts)
+
+	dec := spec.ElementByName("dec")
+	require.NotNil(t, dec)
+	assert.Equal(t, 8, dec.Properties["max-bit-depth"])
+}
+
+func TestPhase10_MaxBitDepthZeroOmitted(t *testing.T) {
+	opts := gstreamer.SessionOpts{
+		SourceURL:      "/tmp/test.ts",
+		IsLive:         false,
+		IsFileSource:   true,
+		VideoCodec:     "h264",
+		NeedsTranscode: true,
+		HWAccel:        "none",
+		OutputCodec:    "h264",
+		MaxBitDepth:    0,
+		OutputDir:      "/tmp/out",
+	}
+
+	spec := BuildMSEPipeline(opts)
+
+	dec := spec.ElementByName("dec")
+	require.NotNil(t, dec)
+	_, hasMaxBitDepth := dec.Properties["max-bit-depth"]
+	assert.False(t, hasMaxBitDepth, "max-bit-depth=0 should not be set")
+}
+
+func TestPhase10_ElementOverrides(t *testing.T) {
+	opts := gstreamer.SessionOpts{
+		SourceURL:           "/tmp/test.ts",
+		IsLive:              false,
+		IsFileSource:        true,
+		VideoCodec:          "h264",
+		NeedsTranscode:      true,
+		HWAccel:             "vaapi",
+		DecodeHWAccel:       "vaapi",
+		OutputCodec:         "h264",
+		VideoDecoderElement: "vah264dec",
+		VideoEncoderElement: "vah264lpenc",
+		OutputDir:           "/tmp/out",
+	}
+
+	spec := BuildMSEPipeline(opts)
+
+	dec := spec.ElementByName("dec")
+	require.NotNil(t, dec)
+	assert.Equal(t, "vah264dec", dec.Properties["element-override"])
+
+	enc := spec.ElementByName("enc")
+	require.NotNil(t, enc)
+	assert.Equal(t, "vah264lpenc", enc.Properties["element-override"])
+}
+
+func TestPhase10_NoOverridesOmitted(t *testing.T) {
+	opts := gstreamer.SessionOpts{
+		SourceURL:      "/tmp/test.ts",
+		IsLive:         false,
+		IsFileSource:   true,
+		VideoCodec:     "mpeg2video",
+		NeedsTranscode: true,
+		HWAccel:        "none",
+		OutputCodec:    "h264",
+		OutputDir:      "/tmp/out",
+	}
+
+	spec := BuildMSEPipeline(opts)
+
+	dec := spec.ElementByName("dec")
+	require.NotNil(t, dec)
+	_, hasOverride := dec.Properties["element-override"]
+	assert.False(t, hasOverride, "no override should not set element-override")
+
+	enc := spec.ElementByName("enc")
+	require.NotNil(t, enc)
+	_, hasEncOverride := enc.Properties["element-override"]
+	assert.False(t, hasEncOverride, "no override should not set element-override")
+}
+
+func TestPhase11_SourceProfileProperties(t *testing.T) {
+	opts := gstreamer.SessionOpts{
+		SourceURL:     "rtsp://192.168.1.100/?freq=586&msys=dvbt2",
+		IsLive:        true,
+		UserAgent:     "TVProxy/1.0",
+		HTTPTimeout:   10,
+		RTSPLatency:   200,
+		RTSPTransport: "tcp",
+		VideoCodec:    "h264",
+		AudioChannels: 2,
+		OutputDir:     "/tmp/out",
+	}
+
+	spec := BuildMSEPipeline(opts)
+
+	src := spec.ElementByName("src")
+	require.NotNil(t, src)
+	assert.Equal(t, "TVProxy/1.0", src.Properties["user-agent"])
+	assert.Equal(t, 10, src.Properties["timeout"])
+	assert.Equal(t, 200, src.Properties["rtsp-latency"])
+	assert.Equal(t, "tcp", src.Properties["rtsp-transport"])
+}
+
+func TestPhase11_SourceProfileDefaults(t *testing.T) {
+	opts := gstreamer.SessionOpts{
+		SourceURL:     "http://example.com/stream.ts",
+		IsLive:        true,
+		VideoCodec:    "h264",
+		AudioChannels: 2,
+		OutputDir:     "/tmp/out",
+	}
+
+	spec := BuildMSEPipeline(opts)
+
+	src := spec.ElementByName("src")
+	require.NotNil(t, src)
+	_, hasUA := src.Properties["user-agent"]
+	assert.False(t, hasUA, "empty user-agent should not be set")
+	_, hasTimeout := src.Properties["timeout"]
+	assert.False(t, hasTimeout, "zero timeout should not be set")
+	_, hasLatency := src.Properties["rtsp-latency"]
+	assert.False(t, hasLatency, "zero rtsp-latency should not be set")
+	_, hasTransport := src.Properties["rtsp-transport"]
+	assert.False(t, hasTransport, "empty rtsp-transport should not be set")
+}
+
 func indexOf(slice []string, item string) int {
 	for i, s := range slice {
 		if s == item {

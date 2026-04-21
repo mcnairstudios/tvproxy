@@ -33,6 +33,7 @@ type Server struct {
 	logoService     *service.LogoService
 	tmdbClient      *tmdb.Client
 	hlsManager      *hls.Manager
+	WGProxyFunc     func(string) string
 	log             zerolog.Logger
 	tokens          sync.Map
 }

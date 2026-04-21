@@ -131,17 +131,11 @@ func applySourceProfile(opts *session.StartOpts, sp *models.SourceProfile) {
 	}
 	opts.Deinterlace = sp.Deinterlace
 	opts.DeinterlaceMethod = sp.DeinterlaceMethod
-	opts.AudioDelayMs = sp.AudioDelayMs
 	opts.AudioLanguage = sp.AudioLanguage
-	opts.VideoQueueMs = sp.VideoQueueMs
-	opts.AudioQueueMs = sp.AudioQueueMs
 	opts.RTSPLatency = sp.RTSPLatency
 	opts.RTSPProtocols = sp.RTSPProtocols
-	opts.RTSPBufferMode = sp.RTSPBufferMode
 	opts.HTTPTimeoutSec = sp.HTTPTimeoutSec
-	opts.HTTPRetries = sp.HTTPRetries
 	opts.HTTPUserAgent = sp.HTTPUserAgent
-	opts.TSSetTimestamps = sp.TSSetTimestamps
 	opts.EncoderBitrateKbps = sp.EncoderBitrateKbps
 }
 

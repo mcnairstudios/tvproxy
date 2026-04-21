@@ -186,16 +186,22 @@ func (s *Server) videoStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	streamURL := stream.URL
+	if stream.UseWireGuard && s.WGProxyFunc != nil && strings.HasPrefix(streamURL, "http") {
+		streamURL = s.WGProxyFunc(streamURL)
+		s.log.Info().Str("stream", streamID).Str("proxy_url", streamURL).Msg("routing jellyfin video stream through WG proxy")
+	}
+
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.Header().Set("Connection", "keep-alive")
 
 	inputType := "http"
 	isLive := true
-	if strings.HasPrefix(stream.URL, "/") || strings.HasPrefix(stream.URL, "file://") {
+	if strings.HasPrefix(streamURL, "/") || strings.HasPrefix(streamURL, "file://") {
 		inputType = "file"
 		isLive = false
-	} else if strings.HasPrefix(stream.URL, "rtsp://") {
+	} else if strings.HasPrefix(streamURL, "rtsp://") {
 		inputType = "rtsp"
 	}
 
@@ -204,7 +210,7 @@ func (s *Server) videoStream(w http.ResponseWriter, r *http.Request) {
 
 	if gstreamer.Available() {
 		pipeline := gstreamer.BuildPipeline(gstreamer.PipelineOpts{
-			InputURL:         stream.URL,
+			InputURL:         streamURL,
 			InputType:        inputType,
 			IsLive:           isLive,
 			VideoCodec:       "h264",
@@ -236,7 +242,7 @@ func (s *Server) videoStream(w http.ResponseWriter, r *http.Request) {
 		}
 
 		args = append(args,
-			"-i", stream.URL,
+			"-i", streamURL,
 			"-c:v", "copy",
 			"-c:a", "aac",
 			"-b:a", "192k",
@@ -246,7 +252,7 @@ func (s *Server) videoStream(w http.ResponseWriter, r *http.Request) {
 			"pipe:1",
 		)
 		command = "ffmpeg"
-		s.log.Info().Str("stream", streamID).Str("url", stream.URL).Msg("starting jellyfin video stream (ffmpeg fallback)")
+		s.log.Info().Str("stream", streamID).Str("url", streamURL).Msg("starting jellyfin video stream (ffmpeg fallback)")
 	}
 
 	cmd := exec.CommandContext(ctx, command, args...)

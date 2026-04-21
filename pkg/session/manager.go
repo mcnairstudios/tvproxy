@@ -60,17 +60,11 @@ type StartOpts struct {
 
 	Deinterlace       bool   // deferred: needs vapostproc/deinterlace element
 	DeinterlaceMethod string // deferred
-	AudioDelayMs      int    // tvproxydemux handles internally
 	AudioLanguage     string
-	VideoQueueMs      int    // executor uses unbounded queues
-	AudioQueueMs      int    // executor uses unbounded queues
-	RTSPLatency       int    // tvproxysrc handles internally
-	RTSPProtocols     string // tvproxysrc handles internally
-	RTSPBufferMode    int    // tvproxysrc handles internally
-	HTTPTimeoutSec    int    // tvproxysrc handles internally
-	HTTPRetries       int    // tvproxysrc handles internally
-	HTTPUserAgent     string // tvproxysrc handles internally
-	TSSetTimestamps   bool   // tvproxydemux handles internally
+	RTSPLatency       int    // wired to tvproxysrc rtsp-latency
+	RTSPProtocols     string // wired to tvproxysrc rtsp-transport
+	HTTPTimeoutSec    int    // wired to tvproxysrc timeout
+	HTTPUserAgent     string // wired to tvproxysrc user-agent
 	EncoderBitrateKbps int
 	Delivery           string
 	OutputHeight       int   // deferred: needs videoscale element
@@ -599,33 +593,41 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 
 	// StartOpts fields intentionally NOT mapped to SessionOpts:
 	//
-	// Handled by tvproxysrc internally:
-	//   HTTPTimeoutSec, HTTPRetries, HTTPUserAgent, RTSPProtocols, RTSPBufferMode, RTSPLatency
-	//
-	// Handled by tvproxydemux internally:
-	//   TSSetTimestamps, AudioDelayMs
-	//
-	// Handled by executor (unbounded queues):
-	//   VideoQueueMs, AudioQueueMs
-	//
 	// Deferred (no native builder element yet):
 	//   Deinterlace, DeinterlaceMethod — needs vapostproc/deinterlace in pipeline builder
 	//   OutputHeight — needs videoscale + capsfilter in pipeline builder
 	//
 	// These fields remain in StartOpts for the string pipeline builder (proxy.go)
 	// and the source profile UI. They are not dead code.
+	maxBitDepth := 0
+	if !gstreamer.Decode10BitSupported() {
+		maxBitDepth = 8
+	}
+
+	userAgent := m.config.UserAgent
+	if s.startOpts.HTTPUserAgent != "" {
+		userAgent = s.startOpts.HTTPUserAgent
+	}
+
 	sessionOpts := gstreamer.SessionOpts{
 		SourceURL:     pipelineURL,
 		IsLive:        isLive,
 		IsFileSource:  !strings.HasPrefix(pipelineURL, "http") && !strings.HasPrefix(pipelineURL, "rtsp"),
+		UserAgent:     userAgent,
+		HTTPTimeout:   s.startOpts.HTTPTimeoutSec,
+		RTSPLatency:   s.startOpts.RTSPLatency,
+		RTSPTransport: s.startOpts.RTSPProtocols,
 		VideoCodec:    srcCodec,
 		ContainerHint: containerHint,
-		NeedsTranscode: needsTranscode,
-		HWAccel:        s.startOpts.OutputHWAccel,
-		DecodeHWAccel:  s.startOpts.DecodeHWAccel,
-		OutputCodec:    outCodec,
-		Bitrate:        s.startOpts.EncoderBitrateKbps,
-		OutputHeight:   s.startOpts.OutputHeight,
+		NeedsTranscode:      needsTranscode,
+		HWAccel:             s.startOpts.OutputHWAccel,
+		DecodeHWAccel:       s.startOpts.DecodeHWAccel,
+		OutputCodec:         outCodec,
+		Bitrate:             s.startOpts.EncoderBitrateKbps,
+		OutputHeight:        s.startOpts.OutputHeight,
+		MaxBitDepth:         maxBitDepth,
+		VideoDecoderElement: s.startOpts.VideoDecoderElement,
+		VideoEncoderElement: s.startOpts.VideoEncoderElement,
 		AudioChannels:  2,
 		AudioLanguage:  s.startOpts.AudioLanguage,
 		OutputDir:      s.OutputDir,

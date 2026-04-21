@@ -60,20 +60,27 @@ func (s *PipelineSpec) HasElement(name string) bool {
 }
 
 type SessionOpts struct {
-	SourceURL    string
-	IsLive       bool
-	IsFileSource bool
+	SourceURL     string
+	IsLive        bool
+	IsFileSource  bool
+	UserAgent     string
+	HTTPTimeout   int
+	RTSPLatency   int
+	RTSPTransport string
 
 	VideoCodec    string
 	AudioCodec    string
 	ContainerHint string
 
-	NeedsTranscode bool
-	HWAccel        string
-	DecodeHWAccel  string
-	OutputCodec    string
-	Bitrate        int
-	OutputHeight   int
+	NeedsTranscode      bool
+	HWAccel             string
+	DecodeHWAccel       string
+	OutputCodec         string
+	Bitrate             int
+	OutputHeight        int
+	MaxBitDepth         int
+	VideoDecoderElement string
+	VideoEncoderElement string
 
 	AudioChannels int
 	AudioLanguage string

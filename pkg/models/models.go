@@ -166,21 +166,13 @@ type SourceProfile struct {
 	Deinterlace       bool   `json:"deinterlace"`
 	DeinterlaceMethod string `json:"deinterlace_method,omitempty"`
 
-	AudioDelayMs   int    `json:"audio_delay_ms"`
 	AudioLanguage  string `json:"audio_language,omitempty"`
-
-	VideoQueueMs   int `json:"video_queue_ms"`
-	AudioQueueMs   int `json:"audio_queue_ms"`
 
 	RTSPLatency    int    `json:"rtsp_latency"`
 	RTSPProtocols  string `json:"rtsp_protocols,omitempty"`
-	RTSPBufferMode int    `json:"rtsp_buffer_mode"`
 
 	HTTPTimeoutSec int    `json:"http_timeout_sec"`
-	HTTPRetries    int    `json:"http_retries"`
 	HTTPUserAgent  string `json:"http_user_agent,omitempty"`
-
-	TSSetTimestamps bool `json:"ts_set_timestamps"`
 
 	EncoderBitrateKbps int `json:"encoder_bitrate_kbps"`
 

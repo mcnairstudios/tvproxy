@@ -194,9 +194,7 @@ func TestResolveSessionStrategy_LiveWithSourceProfile(t *testing.T) {
 		StreamVCodec: "mpeg2video",
 		StreamACodec: "mp2",
 		SourceProfile: &models.SourceProfile{
-			Deinterlace:    true,
-			AudioDelayMs:   200,
-			VideoQueueMs:   15000,
+			Deinterlace: true,
 		},
 	}
 	out := StrategyOutput{

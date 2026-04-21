@@ -525,50 +525,352 @@ Also add a comment in `StartOpts` struct noting which fields are for the string 
 
 ---
 
-## Next Steps (Require GStreamer Plugin Changes)
+## Phase 9: Update Protobuf Schema
 
-These require new properties on the C plugins before tvproxy can wire them through. Not blockers for initial playback — the plugins handle reasonable defaults — but needed for full parity with the string pipeline builder.
+**Goal**: Sync `proto/tvproxy.proto` with the expanded probe.pb from gstreamer-plugin v1.9.
 
-### 10-Bit Decode Control
+The plugin repo adds four new fields to the Probe message: `video_bit_depth`, `video_framerate_num`, `video_framerate_den`, `video_bitrate_kbps`. Existing field numbers 1-11 are unchanged — new fields use 12-15. Forward-compatible.
 
-**Problem**: A380 GPU reports 10-bit decode support but fails at runtime due to 256MB BAR limit (Above 4G Decoding not enabled in BIOS). The string pipeline builder handles this in Go via `resolveDecodeHW()` which forces SW decode when source is 10-bit and `Decode10BitSupported()=false`.
+### Changes
 
-The native path can't do this reliably because source bit depth isn't always known at pipeline build time (probe cache may miss). tvproxydecode selects the decoder at negotiation time when it DOES know the bit depth.
+1. **`proto/tvproxy.proto`**: Add fields 12-15 to Probe message:
+   ```protobuf
+   int32 video_bit_depth = 12;          // 8, 10, or 12
+   int32 video_framerate_num = 13;      // framerate numerator (e.g., 25)
+   int32 video_framerate_den = 14;      // framerate denominator (e.g., 1)
+   int32 video_bitrate_kbps = 15;       // estimated bitrate (0 if unknown)
+   ```
 
-**Solution**: Add `max-bit-depth` property to tvproxydecode in the plugin repo. When set to 8, the plugin forces SW decode for anything above 8-bit. tvproxy sets it based on `Decode10BitSupported()`.
+2. **`pkg/proto/tvproxy.pb.go`**: Regenerate with `protoc --go_out=. proto/tvproxy.proto`
 
-**Plugin change**: tvproxydecode gains `max-bit-depth` (int, default 0 = no limit)
-**tvproxy change**: `SessionOpts.MaxBitDepth`, pipeline builder sets property on tvproxydecode
+3. **`pkg/session/watcher.go`**: No changes needed — watcher reads whatever fields protobuf provides. New fields are available via `probe.VideoBitDepth`, `probe.VideoFramerateNum`, etc.
 
-### Explicit Encoder/Decoder Element Overrides
+4. **`pkg/handler/vod.go:MSEDebug()`**: Include new fields in debug response when probe is available.
 
-**Problem**: Settings UI allows per-codec element selection (`encoder_h264`, `decoder_h265`, etc.). The string pipeline builder (pipeline.go:151-153, 228-229) bypasses tvproxydecode/tvproxyencode when explicit elements are set. The native pipeline builder currently ignores these overrides — it always uses tvproxydecode/tvproxyencode.
+### Validation
+- `go build ./...` succeeds
+- Existing probe.pb tests still pass
+- MSEDebug shows bit depth and framerate when available
 
-**Solution**: Add `element-override` property to both tvproxydecode and tvproxyencode. When set, the plugin uses the specified element instead of its internal selection logic.
+---
 
-**Plugin changes**:
-- tvproxydecode gains `element-override` (string, default "" = auto-select)
-- tvproxyencode gains `element-override` (string, default "" = auto-select)
+## Phase 10: Wire Decode/Encode Properties
 
-**tvproxy change**: Map `VideoDecoderElement`/`VideoEncoderElement` from StartOpts through to element properties.
+**Goal**: Pass 10-bit decode constraint and explicit element overrides through to pipeline plugins.
 
-Alternative (no plugin change): Skip tvproxydecode/tvproxyencode entirely when explicit elements are set, using the raw element + parser directly in the pipeline builder. This matches the string builder's approach but adds complexity to pipeline_builder.go.
+**Depends on**: gstreamer-plugin v1.9 (Phases 9-10: tvproxydecode `max-bit-depth` + `element-override`, tvproxyencode `element-override`)
 
-### Source Profile Simplification
+### 10a. SessionOpts new fields
 
-Most source profile settings are now handled by GStreamer plugins internally. A cleanup pass should:
+Add to `pkg/gstreamer/spec.go:SessionOpts`:
+```go
+MaxBitDepth          int    // 0=no limit, 8=force SW decode for 10-bit (A380 BAR)
+VideoDecoderElement  string // explicit decoder element from Settings (e.g., "vah264dec")
+VideoEncoderElement  string // explicit encoder element from Settings (e.g., "x264enc")
+```
 
-1. Audit which source profile fields tvproxysrc/tvproxydemux actually expose as properties
-2. Wire through any that are supported but not yet mapped (e.g., `rtsp-transport` on tvproxysrc)
-3. Remove or deprecate settings that plugins handle automatically
-4. Consider exposing RTSPLatency — GStreamer default (2000ms) is too high for SAT>IP live
+### 10b. runPipeline mapping
 
-Settings to evaluate:
-- `HTTPTimeoutSec`, `HTTPRetries`, `HTTPUserAgent` → tvproxysrc may expose these
-- `RTSPLatency`, `RTSPProtocols`, `RTSPBufferMode` → tvproxysrc has `rtsp-transport` but not latency
-- `Deinterlace`, `DeinterlaceMethod` → no plugin support, would need separate element in native builder
-- `OutputHeight` → no plugin support, would need videoscale element in native builder
-- `AudioDelayMs` → tvproxydemux may handle this
+In `pkg/session/manager.go:runPipeline()`, map from StartOpts to SessionOpts:
+```go
+MaxBitDepth:         maxBitDepthFromCapability(),
+VideoDecoderElement: s.startOpts.VideoDecoderElement,
+VideoEncoderElement: s.startOpts.VideoEncoderElement,
+```
+
+Where `maxBitDepthFromCapability()` returns 8 if `!gstreamer.Decode10BitSupported()`, else 0.
+
+### 10c. Pipeline builder
+
+In `pkg/session/pipeline_builder.go:addTranscodeChain()`:
+
+**tvproxydecode properties:**
+```go
+decProps := gstreamer.Props{"hw-accel": decHW}
+if opts.MaxBitDepth > 0 {
+    decProps["max-bit-depth"] = opts.MaxBitDepth
+}
+if opts.VideoDecoderElement != "" {
+    decProps["element-override"] = opts.VideoDecoderElement
+}
+spec.AddElement("dec", "tvproxydecode", decProps)
+```
+
+**tvproxyencode properties:**
+```go
+encProps := gstreamer.Props{
+    "hw-accel": opts.HWAccel,
+    "codec":    opts.OutputCodec,
+}
+if opts.Bitrate > 0 {
+    encProps["bitrate"] = opts.Bitrate
+}
+if opts.VideoEncoderElement != "" {
+    encProps["element-override"] = opts.VideoEncoderElement
+}
+spec.AddElement("enc", "tvproxyencode", encProps)
+```
+
+### Validation
+- Settings `decoder_h264=vah264dec` → tvproxydecode gets `element-override=vah264dec`
+- `Decode10BitSupported()=false` → tvproxydecode gets `max-bit-depth=8`
+- No explicit element set → properties not set, plugin uses defaults
+- All existing pipeline builder tests still pass
+- Add tests for new property mapping
+
+---
+
+## Phase 11: Wire Source Profile to tvproxysrc
+
+**Goal**: Pass source profile settings through to tvproxysrc properties.
+
+**Depends on**: gstreamer-plugin v1.9 (Phase 11: tvproxysrc `user-agent`, `timeout`, `rtsp-latency`)
+
+### 11a. SessionOpts new fields
+
+Add to `pkg/gstreamer/spec.go:SessionOpts`:
+```go
+UserAgent     string // HTTP User-Agent override
+HTTPTimeout   int    // HTTP timeout in seconds (0=default)
+RTSPLatency   int    // RTSP jitterbuffer latency in ms (0=no jitterbuffer)
+RTSPTransport string // "tcp" or "udp"
+```
+
+### 11b. runPipeline mapping
+
+In `pkg/session/manager.go:runPipeline()`, map from StartOpts:
+```go
+UserAgent:     s.startOpts.HTTPUserAgent,
+HTTPTimeout:   s.startOpts.HTTPTimeoutSec,
+RTSPLatency:   s.startOpts.RTSPLatency,
+RTSPTransport: s.startOpts.RTSPProtocols,
+```
+
+### 11c. Pipeline builder
+
+In `pkg/session/pipeline_builder.go:addSource()`, set properties on tvproxysrc:
+```go
+func addSource(spec *gstreamer.PipelineSpec, opts gstreamer.SessionOpts) {
+    props := gstreamer.Props{
+        "location": opts.SourceURL,
+        "is-live":  opts.IsLive,
+    }
+    if opts.UserAgent != "" {
+        props["user-agent"] = opts.UserAgent
+    }
+    if opts.HTTPTimeout > 0 {
+        props["timeout"] = opts.HTTPTimeout
+    }
+    if opts.RTSPLatency > 0 {
+        props["rtsp-latency"] = opts.RTSPLatency
+    }
+    if opts.RTSPTransport != "" {
+        props["rtsp-transport"] = opts.RTSPTransport
+    }
+    spec.AddElement("src", "tvproxysrc", props)
+}
+```
+
+### 11d. Update StartOpts comments
+
+Remove the "tvproxysrc handles internally" comments from HTTPUserAgent, HTTPTimeoutSec, RTSPLatency, RTSPProtocols — these are now wired through.
+
+Keep "tvproxysrc handles internally" on HTTPRetries (tvproxysrc has built-in 3-step retry, no property).
+Keep "tvproxysrc handles internally" on RTSPBufferMode (no matching tvproxysrc property).
+
+### Validation
+- SAT>IP source with RTSPLatency=200 → tvproxysrc gets `rtsp-latency=200`
+- IPTV source with custom User-Agent → tvproxysrc gets `user-agent=<value>`
+- Source profile with HTTPTimeoutSec=10 → tvproxysrc gets `timeout=10`
+- No source profile → properties not set, tvproxysrc uses defaults
+- All existing tests still pass
+
+---
+
+## Phase 12: Source Profile Cleanup
+
+**Goal**: Remove obsolete source profile fields from the model and UI.
+
+### 12a. Remove obsolete fields from SourceProfile model
+
+Fields that are confirmed obsolete (executor uses unbounded queues, no plugin property):
+- `VideoQueueMs` — remove from model, store, handler, UI
+- `AudioQueueMs` — remove from model, store, handler, UI
+
+Fields where plugin handles internally and no property exists:
+- `TSSetTimestamps` — tvproxydemux handles timestamps. Remove from model, store, handler, UI.
+- `AudioDelayMs` — tvproxydemux PTS fixup handles A/V sync. Remove from model, store, handler, UI.
+- `RTSPBufferMode` — no matching tvproxysrc property. Remove from model, store, handler, UI.
+- `HTTPRetries` — tvproxysrc has built-in 3-step retry, no property. Remove from model, store, handler, UI.
+
+### 12b. Keep these fields (wired or deferred)
+
+- `AudioLanguage` — wired through to tvproxydemux ✅
+- `EncoderBitrateKbps` — wired through to tvproxyencode ✅
+- `RTSPProtocols` — wired through to tvproxysrc `rtsp-transport` (Phase 11) ✅
+- `RTSPLatency` — wired through to tvproxysrc `rtsp-latency` (Phase 11) ✅
+- `HTTPTimeoutSec` — wired through to tvproxysrc `timeout` (Phase 11) ✅
+- `HTTPUserAgent` — wired through to tvproxysrc `user-agent` (Phase 11) ✅
+- `Deinterlace` + `DeinterlaceMethod` — deferred, needed when native builder adds deinterlace element
+
+### 12c. Update seed defaults
+
+Update the 5 built-in source profiles to remove references to deleted fields. Keep only fields that are wired or deferred.
+
+### 12d. Frontend
+
+Remove the deleted fields from the source profile form in `web/dist/app.js`.
+
+### Validation
+- `go build ./...` succeeds
+- All tests pass
+- Source profile CRUD works with reduced field set
+- Frontend form shows only remaining fields
+- Existing source profiles in /config/ load without error (JSON ignores unknown fields)
+
+---
+
+## Phase 13: Fix WireGuard Proxy Routing in runPipeline
+
+**Goal**: Ensure WireGuard-flagged streams are routed through the WG localhost proxy in the native pipeline path.
+
+### The Problem
+
+The WireGuard proxy is a persistent localhost HTTP reverse proxy (`127.0.0.1:{port}/?url={original_url}`). It's created once and maintained — useful for both pipeline routing and manual testing/curling. It's deliberately decoupled from the main project.
+
+`runPipeline()` currently uses `m.wgProxyMgr.GetAny()` to find an existing proxy. But `GetAny()` returns nil if no proxy has been created yet. The only code that calls `GetOrCreate()` is the HLS manager's `WGProxyFunc` in `main.go:279`. If the first WG stream goes through the VOD/MSE path (not HLS), the proxy doesn't exist and the stream URL goes direct — bypassing WireGuard.
+
+### Fix
+
+Replace `GetAny()` with `GetOrCreate()` in `runPipeline()`. The manager already has `wgClient` and `config`:
+
+```go
+if s.UseWireGuard && m.wgClient != nil && m.wgProxyMgr != nil {
+    proxy, err := m.wgProxyMgr.GetOrCreate("default", m.wgClient, m.config, m.log)
+    if err == nil {
+        pipelineURL = proxy.ProxyURL(s.StreamURL)
+        m.log.Info().Str("session_id", s.ID).Str("proxy_url", pipelineURL).Msg("routing through WG proxy")
+    } else {
+        m.log.Error().Err(err).Str("session_id", s.ID).Msg("failed to create WG proxy")
+    }
+}
+```
+
+`GetOrCreate` is idempotent — returns the existing proxy if already running, creates one if not. The proxy stays running for the lifetime of the process, available for other paths and manual testing.
+
+### Also check
+
+- `UseWireGuard` flows from M3U account → stream model → resolvedStream → StartOpts → Session. Verify each step.
+- The proxy only applies to HTTP URLs (`strings.HasPrefix(pipelineURL, "http")`). RTSP SAT>IP streams don't go through WG. Verify this guard is correct.
+- RTSP streams: the current code checks `strings.HasPrefix(pipelineURL, "http")` which excludes RTSP. If WG should also cover RTSP sources, the check needs updating. Confirm with current M3U account behaviour — WG is typically IPTV (HTTP) only.
+
+### Validation
+- M3U account with UseWireGuard=true → session logs "routing through WG proxy"
+- Proxy URL format: `http://127.0.0.1:{port}/?url={encoded_original_url}`
+- tvproxysrc receives the proxy URL, not the original stream URL
+- Non-WG streams are unaffected (no proxy rewrite)
+- WG proxy persists after session ends (available for curl testing)
+- Add test: `TestRunPipeline_WireGuardProxyRouting` — verify URL rewrite when UseWireGuard=true
+
+---
+
+## Phase 14: Frontend Updates
+
+**Goal**: Fix recording playback delivery mode and update source profile form to match backend changes.
+
+### 13a. Recording playback missing `delivery` (BUG)
+
+`web/dist/app.js:3793`: The recording playback path builds `recSession` without `delivery`:
+```js
+var recSession = { id: recResp.session_id, consumer_id: recResp.consumer_id, duration: recResp.duration, container: recResp.container };
+```
+
+The backend returns `delivery` (Phase 8), but the frontend doesn't read it. Without `delivery: "mse"`, `openVideoModal` falls back to stream mode — which doesn't work for Browser profile fMP4 output.
+
+**Fix**: Add `delivery: recResp.delivery` to the recSession object.
+
+### 13b. Source profile form — remove obsolete fields
+
+After Phase 12 removes fields from the backend model, the frontend form (`app.js:5939-5972`) must remove:
+
+**Remove from form fields:**
+- `video_queue_ms` ("Video Queue (ms)")
+- `audio_queue_ms` ("Audio Queue (ms)")
+- `ts_set_timestamps` ("Set Timestamps (tsparse)")
+- `audio_delay_ms` ("Audio Delay (ms)")
+- `rtsp_buffer_mode` ("RTSP Buffer Mode")
+- `http_retries` ("HTTP Retries")
+
+**Remove from table columns** (`app.js:5935`):
+- `audio_delay_ms` column
+
+**Keep in form:**
+- `name`, `deinterlace`, `deinterlace_method` — still needed
+- `audio_language` — wired to tvproxydemux
+- `rtsp_latency`, `rtsp_protocols` — wired to tvproxysrc (Phase 11)
+- `http_timeout_sec`, `http_user_agent` — wired to tvproxysrc (Phase 11)
+- `encoder_bitrate_kbps` — wired to tvproxyencode
+
+### 13c. Update source profile table columns
+
+Replace removed columns with more useful ones:
+- Keep `name`
+- Keep `deinterlace`
+- Add `rtsp_latency` (shows ms value, useful for SAT>IP)
+- Keep `rtsp_protocols`
+- Keep `http_timeout_sec`
+
+### Validation
+- Play completed recording from Recordings page → uses MSE, video plays
+- Source profile form shows only relevant fields
+- Source profile create/update works with reduced fields
+- `node web/dist/smoke_test.js` passes
+
+---
+
+## Phase 15: Playback Path Audit — Pre-existing Bugs
+
+**Goal**: Fix issues found during end-to-end playback path review. All are pre-existing (not introduced by Phases 1-14) but block full functionality.
+
+### 15a. VOD Stream handler uses http.ServeFile for growing files
+
+`handler/vod.go:293-314 Stream()` uses `http.ServeFile(w, r, filePath)`. For **live streams** delivered via the session manager's stream pipeline (BuildStreamPipeline → filesink), the file is growing. `http.ServeFile` serves whatever exists and closes — it doesn't tail.
+
+`VODService.TailSession()` exists (line 565) but is never called by any handler.
+
+**Fix**: Replace `http.ServeFile` with `TailSession` for live sessions:
+```go
+if sess.Duration == 0 {
+    reader, err := h.vodService.TailSession(r.Context(), channelID)
+    // stream reader to response
+} else {
+    http.ServeFile(w, r, filePath)
+}
+```
+
+### 15b. Proxy path missing WireGuard source routing
+
+`ProxyService` doesn't check `stream.UseWireGuard`. When a WG-flagged M3U stream (e.g., regionally restricted IPTV) is played via DLNA/Plex proxy, the upstream HTTP fetch goes direct — bypassing WireGuard. The stream needs WG for the source connection, not the client.
+
+**Fix**: In `proxy.go:openUpstream()`, check `stream.UseWireGuard` and use the WG HTTP client for the upstream fetch.
+
+### 15c. Proxy GStreamer subprocess missing User-Agent
+
+`proxy.go:startGStreamerProxy()` builds `PipelineOpts` without setting `UserAgent`. The `souphttpsrc` element uses the default GStreamer UA. Some IPTV providers block non-browser user agents.
+
+**Fix**: Set `opts.UserAgent = s.config.UserAgent` in `startGStreamerProxy`.
+
+### 15d. Jellyfin/HLS paths missing WireGuard source routing
+
+`jellyfin/playback.go:videoStream()` and `hls/session.go:StartTranscode()` build GStreamer/ffmpeg subprocess pipelines with the raw stream URL. When the M3U source has WireGuard enabled (regional restriction), the subprocess connects directly — bypassing WireGuard.
+
+**Fix**: When stream.UseWireGuard=true, rewrite the stream URL through the WG localhost proxy before passing to the subprocess pipeline (same approach as the native MSE path in runPipeline).
+
+### Validation
+- Live stream via VOD Stream handler → data flows continuously (not truncated)
+- WG-flagged IPTV stream via DLNA → logs show WG routing
+- Proxy GStreamer path logs correct User-Agent
+- All existing tests pass
 
 ---
 

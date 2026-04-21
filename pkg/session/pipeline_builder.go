@@ -69,10 +69,23 @@ func BuildStreamTranscodePipeline(opts gstreamer.SessionOpts) gstreamer.Pipeline
 }
 
 func addSource(spec *gstreamer.PipelineSpec, opts gstreamer.SessionOpts) {
-	spec.AddElement("src", "tvproxysrc", gstreamer.Props{
+	props := gstreamer.Props{
 		"location": opts.SourceURL,
 		"is-live":  opts.IsLive,
-	})
+	}
+	if opts.UserAgent != "" {
+		props["user-agent"] = opts.UserAgent
+	}
+	if opts.HTTPTimeout > 0 {
+		props["timeout"] = opts.HTTPTimeout
+	}
+	if opts.RTSPLatency > 0 {
+		props["rtsp-latency"] = opts.RTSPLatency
+	}
+	if opts.RTSPTransport != "" {
+		props["rtsp-transport"] = opts.RTSPTransport
+	}
+	spec.AddElement("src", "tvproxysrc", props)
 }
 
 func addRawRecording(spec *gstreamer.PipelineSpec, opts gstreamer.SessionOpts) {
@@ -113,9 +126,14 @@ func addTranscodeChain(spec *gstreamer.PipelineSpec, opts gstreamer.SessionOpts)
 		decHW = opts.HWAccel
 	}
 
-	spec.AddElement("dec", "tvproxydecode", gstreamer.Props{
-		"hw-accel": decHW,
-	})
+	decProps := gstreamer.Props{"hw-accel": decHW}
+	if opts.MaxBitDepth > 0 {
+		decProps["max-bit-depth"] = opts.MaxBitDepth
+	}
+	if opts.VideoDecoderElement != "" {
+		decProps["element-override"] = opts.VideoDecoderElement
+	}
+	spec.AddElement("dec", "tvproxydecode", decProps)
 
 	encProps := gstreamer.Props{
 		"hw-accel": opts.HWAccel,
@@ -123,6 +141,9 @@ func addTranscodeChain(spec *gstreamer.PipelineSpec, opts gstreamer.SessionOpts)
 	}
 	if opts.Bitrate > 0 {
 		encProps["bitrate"] = opts.Bitrate
+	}
+	if opts.VideoEncoderElement != "" {
+		encProps["element-override"] = opts.VideoEncoderElement
 	}
 	spec.AddElement("enc", "tvproxyencode", encProps)
 

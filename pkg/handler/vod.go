@@ -299,18 +299,37 @@ func (h *VODHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath := sess.FilePath
-	for i := 0; i < 50; i++ {
-		info, err := os.Stat(filePath)
-		if err == nil && info.Size() > 0 {
-			break
+	if sess.Duration > 0 {
+		filePath := sess.FilePath
+		for i := 0; i < 50; i++ {
+			info, err := os.Stat(filePath)
+			if err == nil && info.Size() > 0 {
+				break
+			}
+			if h.vodService.IsDone(channelID) {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
 		}
-		if h.vodService.IsDone(channelID) {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
+		http.ServeFile(w, r, filePath)
+		return
 	}
-	http.ServeFile(w, r, filePath)
+
+	reader, err := h.vodService.TailSession(r.Context(), channelID)
+	if err != nil {
+		respondError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	defer reader.Close()
+
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Connection", "close")
+	w.WriteHeader(http.StatusOK)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	io.Copy(w, reader)
 }
 
 func (h *VODHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {

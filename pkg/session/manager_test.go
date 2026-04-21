@@ -268,6 +268,14 @@ func TestResolveNeedsTranscode(t *testing.T) {
 	}
 }
 
+func TestWGProxyManager_GetOrCreateIdempotent(t *testing.T) {
+	mgr := NewWGProxyManager()
+
+	assert.Nil(t, mgr.GetAny(), "empty manager returns nil")
+
+	assert.Nil(t, mgr.Get("default"), "get on empty returns nil")
+}
+
 func TestFriendlyGstError(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"Could not multiplex stream.", "Stream encoding error — audio/video sync issue"},

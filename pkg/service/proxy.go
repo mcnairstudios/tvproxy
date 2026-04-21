@@ -57,6 +57,7 @@ type ProxyService struct {
 	probeCache        store.ProbeCache
 	config            *config.Config
 	httpClient        *http.Client
+	WGProxyFunc       func(string) string
 	log               zerolog.Logger
 
 	mu          sync.RWMutex
@@ -452,8 +453,14 @@ func (s *ProxyService) logTranscoderStderr(channelID string, stderr io.ReadClose
 }
 
 func (s *ProxyService) startGStreamerProxy(ctx context.Context, channelID string, stream *models.Stream, profile *models.StreamProfile) (io.ReadCloser, error) {
+	streamURL := stream.URL
+	if stream.UseWireGuard && s.WGProxyFunc != nil && strings.HasPrefix(streamURL, "http") {
+		streamURL = s.WGProxyFunc(streamURL)
+		s.log.Info().Str("channel_id", channelID).Str("proxy_url", streamURL).Msg("routing gstreamer subprocess through WG proxy")
+	}
+
 	inputType := "http"
-	if strings.HasPrefix(stream.URL, "rtsp://") {
+	if strings.HasPrefix(streamURL, "rtsp://") {
 		inputType = "rtsp"
 	}
 
@@ -494,17 +501,18 @@ func (s *ProxyService) startGStreamerProxy(ctx context.Context, channelID string
 		DecodeHWAccel:       decodeHW,
 		VideoDecoderElement: decoderElement,
 		Decode10Bit:         gstreamer.Decode10BitSupported(),
+		UserAgent:           s.config.UserAgent,
 	}
 	if srcAudio == "" {
 		opts.AudioCodec = "aac_latm"
 	}
 
-	pipeline := gstreamer.BuildFromProbe(probe, stream.URL, opts)
+	pipeline := gstreamer.BuildFromProbe(probe, streamURL, opts)
 
 	s.log.Info().
 		Str("channel_id", channelID).
 		Str("stream_id", stream.ID).
-		Str("url", stream.URL).
+		Str("url", streamURL).
 		Str("profile", profile.Name).
 		Msg("starting transcoding (gstreamer)")
 

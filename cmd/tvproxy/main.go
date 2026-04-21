@@ -274,15 +274,17 @@ func main() {
 		wgClientForSessions = wgPool.Client()
 	}
 	hlsManager := hls.NewManager(hls.TempDir(), wgClientForSessions, cfg, log)
-	if wgClientForSessions != nil {
-		hlsManager.WGProxyFunc = func(streamURL string) string {
-			proxy, err := sessionMgr.WGProxy("default", wgClientForSessions, cfg, log)
-			if err != nil {
-				log.Error().Err(err).Msg("failed to create wg proxy for hls")
-				return streamURL
-			}
-			return proxy.ProxyURL(streamURL)
+	wgProxyFunc := func(streamURL string) string {
+		proxy, err := sessionMgr.WGProxy("default", wgClientForSessions, cfg, log)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to create wg proxy")
+			return streamURL
 		}
+		return proxy.ProxyURL(streamURL)
+	}
+	if wgClientForSessions != nil {
+		hlsManager.WGProxyFunc = wgProxyFunc
+		proxyService.WGProxyFunc = wgProxyFunc
 	}
 	go hlsManager.StartCleanupWorker(ctx)
 	sessionMgr.SetOnCleanup(func(channelID string) {
@@ -349,6 +351,9 @@ func main() {
 	registerStaticRoutes(r, staticRoot, distFS, versionedIndexBytes)
 
 	jellyfinServer := jellyfin.NewServer("TVProxy", cfg.BaseURL, authService, activityService, favoriteStore, channelStore, channelGroupStore, streamStore, epgStore, logoService, tmdbClient, hlsManager, log)
+	if wgClientForSessions != nil {
+		jellyfinServer.WGProxyFunc = wgProxyFunc
+	}
 	go func() {
 		jfRouter := chi.NewRouter()
 		jfRouter.Use(func(next http.Handler) http.Handler {

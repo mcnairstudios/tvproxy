@@ -3790,7 +3790,7 @@
             api.del('/vod/' + recResp.session_id + (recResp.consumer_id ? '?consumer_id=' + recResp.consumer_id : '')).catch(function() {});
             startFloatingRadio(null, name, tvgId, false, opts.recordingPath.replace('/play', '/stream'));
           } else if (recResp.session_id) {
-            var recSession = { id: recResp.session_id, consumer_id: recResp.consumer_id, duration: recResp.duration, container: recResp.container };
+            var recSession = { id: recResp.session_id, consumer_id: recResp.consumer_id, duration: recResp.duration, container: recResp.container, delivery: recResp.delivery };
             openVideoModal(name, null, tvgId, recSession, recResp.session_id);
           }
         } catch(e) {}
@@ -5932,8 +5932,8 @@
       columns: [
         { key: 'name', label: 'Name' },
         { key: 'deinterlace', label: 'Deinterlace', render: item => item.deinterlace ? h('span', { className: 'badge badge-info' }, 'Yes') : '' },
-        { key: 'audio_delay_ms', label: 'Audio Delay', render: item => item.audio_delay_ms ? item.audio_delay_ms + 'ms' : '0' },
         { key: 'rtsp_protocols', label: 'RTSP', render: item => item.rtsp_protocols || '' },
+        { key: 'rtsp_latency', label: 'Latency', render: item => item.rtsp_latency ? item.rtsp_latency + 'ms' : '' },
         { key: 'http_timeout_sec', label: 'Timeout', render: item => item.http_timeout_sec ? item.http_timeout_sec + 's' : '' },
       ],
       fields: [
@@ -5946,28 +5946,16 @@
           { value: 'weave', label: 'Weave (merge fields)' },
         ], default: 'auto', showWhen: form => form.deinterlace, help: 'Auto uses hardware deinterlace when available.' },
 
-        { key: 'audio_delay_ms', label: 'Audio Delay (ms)', type: 'number', default: 0, placeholder: '0', help: 'Positive = delay audio. Use to fix lip sync when encoder has startup latency (e.g. AV1 encoder buffers ~15 seconds). Try 0-500ms.' },
         { key: 'audio_language', label: 'Preferred Audio Language', placeholder: 'eng', help: 'ISO 639 language code. Empty = first available non-AD track. Used by tvproxydemux for multi-language DVB streams.' },
-
-        { key: 'video_queue_ms', label: 'Video Queue (ms)', type: 'number', default: 10000, placeholder: '10000', help: 'GStreamer queue max-size-time for video. Larger = more buffering, handles encoder latency.' },
-        { key: 'audio_queue_ms', label: 'Audio Queue (ms)', type: 'number', default: 10000, placeholder: '10000', help: 'GStreamer queue max-size-time for audio. Match video queue for balanced pipeline.' },
 
         { key: 'rtsp_latency', label: 'RTSP Latency (ms)', type: 'number', default: 0, placeholder: '0', help: 'rtspsrc latency property. 0 = minimum latency (recommended). Higher values add buffer for unstable connections.' },
         { key: 'rtsp_protocols', label: 'RTSP Protocol', type: 'select', options: [
           { value: 'tcp', label: 'TCP (recommended)' },
           { value: 'udp', label: 'UDP' },
         ], default: 'tcp', help: 'TCP eliminates packet loss. Always use TCP for SAT>IP over network.' },
-        { key: 'rtsp_buffer_mode', label: 'RTSP Buffer Mode', type: 'select', options: [
-          { value: 0, label: 'None (lowest latency)' },
-          { value: 1, label: 'Slave' },
-          { value: 3, label: 'Auto' },
-        ], default: 0, help: '0 = no buffering (fastest). Auto adds jitter buffer for unreliable connections.' },
 
         { key: 'http_timeout_sec', label: 'HTTP Timeout (sec)', type: 'number', default: 30, placeholder: '30', help: 'Connection timeout. 10s for local HDHR, 30s for remote IPTV.' },
-        { key: 'http_retries', label: 'HTTP Retries', type: 'number', default: 3, placeholder: '3', help: 'Number of connection retries. 1 for HDHR (local), 3 for IPTV (remote).' },
         { key: 'http_user_agent', label: 'User Agent Override', placeholder: '', help: 'Override the global user agent for this source. Empty = use global default.' },
-
-        { key: 'ts_set_timestamps', label: 'Set Timestamps (tsparse)', type: 'checkbox', default: true, help: 'tsparse set-timestamps=true. Fixes missing/broken timestamps in MPEG-TS streams. Always on for live TV.' },
         { key: 'encoder_bitrate_kbps', label: 'Encoder Bitrate Override (kbps)', type: 'number', default: 0, placeholder: '0 (auto by resolution)', help: '0 = auto-scale by resolution (4K=8Mbps, 1080p=4Mbps, 720p=2.5Mbps). Override per-source for bandwidth-limited connections.' },
       ],
     }),

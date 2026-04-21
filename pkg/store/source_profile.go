@@ -62,54 +62,33 @@ func (s *SourceProfileStoreImpl) migrateDefaults() {
 	changed := false
 	for i := range s.profiles {
 		p := &s.profiles[i]
-		if p.VideoQueueMs == 0 {
-			p.VideoQueueMs = 10000
-			changed = true
-		}
-		if p.AudioQueueMs == 0 {
-			p.AudioQueueMs = 10000
-			changed = true
-		}
 		if p.Name == "SAT>IP" && p.RTSPProtocols == "" {
 			p.RTSPProtocols = "tcp"
-			p.TSSetTimestamps = true
 			changed = true
 		}
 		if p.Name == "IPTV" {
 			if p.HTTPTimeoutSec == 0 { p.HTTPTimeoutSec = 30; changed = true }
-			if p.HTTPRetries == 0 { p.HTTPRetries = 3; changed = true }
-			if !p.TSSetTimestamps { p.TSSetTimestamps = true; changed = true }
 		}
 		if p.Name == "HDHomeRun" {
 			if p.HTTPTimeoutSec == 0 { p.HTTPTimeoutSec = 10; changed = true }
-			if p.HTTPRetries == 0 { p.HTTPRetries = 1; changed = true }
-			if !p.TSSetTimestamps { p.TSSetTimestamps = true; changed = true }
 		}
 		if p.Name == "TVProxy-streams" {
 			if p.HTTPTimeoutSec == 0 { p.HTTPTimeoutSec = 10; changed = true }
-			if p.HTTPRetries == 0 { p.HTTPRetries = 2; changed = true }
 		}
 	}
 	if changed {
 		s.saveUnlocked()
-		s.log.Info().Msg("migrated source profiles with new GStreamer defaults")
+		s.log.Info().Msg("migrated source profile defaults")
 	}
 
 	s.ensureProfile("HDHomeRun", models.SourceProfile{
-		Deinterlace: false,
-		VideoQueueMs: 10000, AudioQueueMs: 10000,
-		HTTPTimeoutSec: 10, HTTPRetries: 1,
-		TSSetTimestamps: true,
+		HTTPTimeoutSec: 10,
 	})
 	s.ensureProfile("VOD", models.SourceProfile{
-		Deinterlace: false,
-		VideoQueueMs: 10000, AudioQueueMs: 10000,
-		HTTPTimeoutSec: 30, HTTPRetries: 3,
+		HTTPTimeoutSec: 30,
 	})
 	s.ensureProfile("TVProxy-streams", models.SourceProfile{
-		Deinterlace: false,
-		VideoQueueMs: 10000, AudioQueueMs: 10000,
-		HTTPTimeoutSec: 10, HTTPRetries: 2,
+		HTTPTimeoutSec: 10,
 	})
 }
 
@@ -219,36 +198,24 @@ func (s *SourceProfileStoreImpl) SeedDefaults() {
 	s.profiles = []models.SourceProfile{
 		{
 			ID: uuid.New().String(), Name: "IPTV",
-			Deinterlace: false,
-			VideoQueueMs: 10000, AudioQueueMs: 10000,
-			HTTPTimeoutSec: 30, HTTPRetries: 3,
-			TSSetTimestamps: true,
+			HTTPTimeoutSec: 30,
 		},
 		{
 			ID: uuid.New().String(), Name: "SAT>IP",
 			Deinterlace: true, DeinterlaceMethod: "auto",
-			VideoQueueMs: 10000, AudioQueueMs: 10000,
-			RTSPLatency: 0, RTSPProtocols: "tcp", RTSPBufferMode: 0,
-			TSSetTimestamps: true,
+			RTSPProtocols: "tcp",
 		},
 		{
 			ID: uuid.New().String(), Name: "HDHomeRun",
-			Deinterlace: false,
-			VideoQueueMs: 10000, AudioQueueMs: 10000,
-			HTTPTimeoutSec: 10, HTTPRetries: 1,
-			TSSetTimestamps: true,
+			HTTPTimeoutSec: 10,
 		},
 		{
 			ID: uuid.New().String(), Name: "VOD",
-			Deinterlace: false,
-			VideoQueueMs: 10000, AudioQueueMs: 10000,
-			HTTPTimeoutSec: 30, HTTPRetries: 3,
+			HTTPTimeoutSec: 30,
 		},
 		{
 			ID: uuid.New().String(), Name: "TVProxy-streams",
-			Deinterlace: false,
-			VideoQueueMs: 10000, AudioQueueMs: 10000,
-			HTTPTimeoutSec: 10, HTTPRetries: 2,
+			HTTPTimeoutSec: 10,
 		},
 	}
 	s.saveUnlocked()
