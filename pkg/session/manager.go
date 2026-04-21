@@ -704,6 +704,13 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		go m.cachePassiveMetadata(ctx, s)
 	}
 
+	if isMSE {
+		<-ctx.Done()
+		m.log.Info().Str("session_id", s.ID).Msg("MSE session ended (context cancelled)")
+		pipeline.SetState(gst.StateNull)
+		return
+	}
+
 	if !isLive {
 		result := m.executor.RunBusLoop(ctx, pipeline, false)
 		pipeline.SetState(gst.StateNull)
