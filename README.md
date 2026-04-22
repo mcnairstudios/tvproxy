@@ -1,49 +1,64 @@
 # TVProxy
 
-A media streaming hub that connects your content sources to your devices. Watch on Jellyfin clients, Plex, DLNA players (including VR headsets like Meta Quest), smart TVs, or any browser — TVProxy handles the transcoding, format negotiation, and delivery automatically.
+A media hub that connects your stream sources to your playback devices. TVProxy ingests from IPTV providers, tuners, and media servers, then delivers to any client — Jellyfin, Plex, DLNA players, VR headsets, smart TVs, or browsers — in whatever format they need.
 
-Written in Go. Single binary. No external dependencies.
+Written in Go. Single binary. No external dependencies beyond ffmpeg (for HLS segmentation).
 
-## What It Does
+## How It Works
 
-TVProxy sits between your media sources and your playback devices. It ingests streams from multiple sources, manages channels and EPG data, and serves content to clients in whatever format they need — transcoding with hardware acceleration when required, passing through untouched when possible.
+TVProxy is a media router, not a media center. It bridges inputs and outputs with format-aware processing in between:
 
-### Client Integrations
+```
+Sources (inputs)                    Hub                           Clients (outputs)
+─────────────────    ──────────────────────────────    ─────────────────────────
+M3U playlists        Probe → Strategy → Pipeline      Jellyfin (API emulation)
+Xtream Codes API     ┌─────────────────────────┐      Plex/Emby (HDHR emulation)
+SAT>IP tuners        │ Copy     (zero CPU)      │      DLNA (Quest, smart TVs)
+HDHomeRun devices    │ Remux    (repackage)     │      Browser (MSE/fMP4)
+tvproxy-streams      │ Transcode (HW-accel)     │      Any HTTP client
+VOD files            └─────────────────────────┘
+```
 
-- **Jellyfin** — Full Jellyfin API server on port 8096. Connect any Jellyfin client directly — phones, tablets, TVs, Meta Quest, Fire Stick, Apple TV.
-- **DLNA** — MediaServer for network players. Works with VR headsets (Quest via Skybox/ALVR), smart TVs (LG, Samsung, Panasonic), and any UPnP/DLNA player.
-- **HDHomeRun** — Emulates HDHR devices with SSDP discovery for native Plex/Emby/Jellyfin DVR integration. Multiple virtual tuners, each on its own port.
-- **Plex/Emby** — Via HDHomeRun emulation. Shows up as a native DVR source with full guide data.
-- **Browser** — Built-in HLS player with live TV, VOD, recording, and EPG guide.
+**Client stream profiles** define what each output needs — codec, container, resolution ceiling, audio format. The strategy layer compares source probe data against the client profile and does exactly what's required. Profiles ship with sensible defaults per device but are fully user-configurable. Someone with a phone supporting AV1 can choose that over H.265, for instance.
 
-### Source Integrations
+One pipeline per channel, shared across all consumers (Kafka-style commit log model). A viewer, a recording, and a Jellyfin client watching the same channel all tail the same stream at their own offsets.
+
+## Output Integrations
+
+- **Jellyfin** — Full API server on port 8096. Any Jellyfin client works natively — phones, tablets, TVs, Quest, Fire Stick, Apple TV.
+- **Plex / Emby** — HDHomeRun emulation with SSDP discovery. Shows up as a native DVR source with full guide data.
+- **DLNA** — UPnP MediaServer for network players. VR headsets (Quest via Skybox), smart TVs (LG, Samsung, Panasonic).
+- **Browser** — Built-in vanilla JS player with live TV, VOD, recording, and EPG guide. MSE playback via fMP4 segments.
+
+## Source Integrations
 
 - **M3U / Xtream Codes** — Import playlists or connect to Xtream APIs. Automatic periodic refresh.
 - **SAT>IP** — DVB-T/T2, DVB-S/S2, DVB-C tuner integration via SAT>IP protocol.
-- **TVProxy-streams** — Companion server for serving local media libraries with inline probe data.
-- **WireGuard VPN** — Built-in tunnel with per-source routing. Transparent to ffmpeg via localhost proxy.
+- **HDHomeRun** — Discover and ingest from HDHR tuners on the network.
+- **tvproxy-streams** — Companion server for local media libraries with inline probe data.
+- **WireGuard** — Built-in VPN with per-source routing. Transparent to the pipeline via localhost proxy.
 
-### Transcoding & Profiles
+## Transcoding & Profiles
 
-- **Source Stream Profiles** — Define expected codecs, transport and ffmpeg input settings per source.
-- **Client Stream Profiles** — Define what each client needs. The system compares source vs client and automatically decides copy, remux, or transcode.
-- **Hardware Acceleration** — Intel QSV, VA-API (Arc A380 etc), NVIDIA NVENC, Apple VideoToolbox. H.264, H.265/HEVC, AV1 output.
-- **Live Dual-Output** — Single ffmpeg writes both HLS (for playback) and MP4 (for recording) simultaneously.
-- **VOD Seeking** — Seekable HLS with hardware transcoding for on-demand content.
+- **Source Stream Profiles** — Define transport and input settings per source type.
+- **Client Stream Profiles** — Define output requirements per client. Strategy resolves copy vs transcode automatically.
+- **Hardware Acceleration** — Intel QSV, VA-API, NVIDIA NVENC, Apple VideoToolbox. H.264, H.265/HEVC, AV1 encode/decode.
+- **Media Pipeline** — libavformat integrated as an in-process library (via go-astiav) for probing, demuxing, decoding, encoding, and muxing. Previous iterations used ffmpeg subprocesses (orphaned process issues) and GStreamer (required custom plugins, couldn't detect a whole class of media types). ffmpeg subprocess retained for HLS segmentation only.
 
-### Management
+## Management
 
-- **Channels** — Multi-stream failover, groups, per-channel profile assignment.
+- **Channels** — Multi-stream failover, groups, per-channel profile overrides.
 - **EPG** — XMLTV import, auto-match to channels, programme guide grid.
-- **Recording** — One-click recording during live playback. Scheduled recordings via EPG.
-- **TMDB** — Automatic poster art, metadata, ratings, and episode info.
+- **Recording** — One-click during live playback. Scheduled recordings via EPG guide. Survives restarts.
+- **TMDB** — Automatic poster art, metadata, ratings, and episode info for VOD.
 - **Activity** — Real-time viewer tracking and session monitoring.
-- **Multi-User** — JWT auth, invite tokens, role-based access.
+- **Multi-User** — JWT auth, invite tokens, role-based access, per-user channel filtering.
 
 ## Quick Start
 
 ```bash
-go build ./cmd/tvproxy/
+# Requires libavformat/libavcodec/libavutil/libavfilter/libswscale/libswresample dev libs
+CGO_ENABLED=1 go build -o tvproxy ./cmd/tvproxy/
 TVPROXY_BASE_URL=http://192.168.1.100 ./tvproxy
 ```
 
@@ -70,11 +85,9 @@ docker run ... --gpus all gavinmcnair/tvproxy:latest
 
 ## Configuration
 
-Key environment variables:
-
 | Variable | Default | Description |
 |---|---|---|
-| `TVPROXY_BASE_URL` | _(required)_ | Base URL (e.g. `http://192.168.1.100`) |
+| `TVPROXY_BASE_URL` | _(required)_ | LAN base URL (e.g. `http://192.168.1.100`) |
 | `TVPROXY_PORT` | `8080` | Listen port |
 | `TVPROXY_RECORD_DIR` | `/record` | Recording output directory |
 | `TVPROXY_JWT_SECRET` | `change-me-in-production` | JWT signing secret |
@@ -82,7 +95,7 @@ Key environment variables:
 | `TVPROXY_USER_AGENT` | `TVProxy` | Upstream request User-Agent |
 | `TVPROXY_LOG_LEVEL` | `info` | Log level |
 
-Full API documentation at `/api/docs` (Swagger UI).
+All settings configurable via the web UI. Full API documentation at `/api/docs`.
 
 ## Architecture
 
@@ -90,18 +103,18 @@ Full API documentation at `/api/docs` (Swagger UI).
 cmd/tvproxy/         — Entry point, DI wiring, routes
 pkg/
   config/            — Environment-based configuration
-  ffmpeg/            — FFmpeg argument composition, probe, hardware encoder mapping
   handler/           — HTTP handlers
-  hls/               — HLS session management, playlist generation
-  session/           — Kafka-style session manager (one ffmpeg per channel, consumer tracking)
+  hls/               — HLS session management
+  jellyfin/          — Jellyfin API server emulation
+  lib/av/            — libavformat wrappers (probe, demux, decode, encode, mux, filter, scale)
+  session/           — Kafka-style session manager (one pipeline per channel, consumer tracking)
   service/           — Business logic (strategy, proxy, VOD, M3U, EPG, recording)
   store/             — JSON-backed in-memory stores
-  models/            — Data models (streams, channels, profiles, sources)
+  models/            — Data models
   worker/            — Background workers (refresh, SSDP, HDHR, scheduler)
-  xtream/            — Xtream Codes API client and metadata cache
-  tmdb/              — TMDB client, metadata store, image proxy
-  jellyfin/          — Jellyfin API server emulation
   wireguard/         — WireGuard tunnel management
+  tmdb/              — TMDB metadata client and image proxy
+  xtream/            — Xtream Codes API client
   logocache/         — Image caching proxy
 web/dist/            — Vanilla JS SPA (embedded via Go embed.FS)
 ```
