@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 
-	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
 	"github.com/gavinmcnair/tvproxy/pkg/media"
 )
 
@@ -64,7 +62,7 @@ func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName st
 
 	probe, _ := s.cachedOrFreshProbe(ctx, filePath)
 	if probe != nil && probe.Video != nil {
-		fileCodec := gstreamer.NormalizeCodec(probe.Video.Codec)
+		fileCodec := media.NormalizeCodec(probe.Video.Codec)
 		fileContainer := media.NormalizeContainer(probe.FormatName)
 		videoMatch := sp.VideoCodec == "copy" || sp.VideoCodec == fileCodec
 		containerMatch := sp.Container == "" || sp.Container == fileContainer
@@ -77,55 +75,30 @@ func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName st
 		}
 	}
 
-	var command string
-	var args []string
-
-	if gstreamer.Available() {
-		outFormat := gstreamer.OutputMP4
-		if sp.Container == "mpegts" {
-			outFormat = gstreamer.OutputMPEGTS
-		}
-		outVideo := sp.VideoCodec
-		if outVideo == "" {
-			outVideo = "copy"
-		}
-		pipeline := gstreamer.BuildFromProbe(probe, filePath, gstreamer.PipelineOpts{
-			InputType:        "file",
-			IsLive:           false,
-			OutputVideoCodec: outVideo,
-			OutputAudioCodec: "aac",
-			OutputFormat:     outFormat,
-			HWAccel:          gstreamer.HWAccel(sp.HWAccel),
-		})
-		command = pipeline.Cmd
-		args = pipeline.Args
-	} else {
-		args = media.ShellSplit(sp.Args)
-		for i, arg := range args {
-			if arg == "{input}" {
-				args[i] = filePath
-			}
-		}
-		args = append([]string{"-y"}, args...)
-		command = sp.Command
-		if command == "" {
-			command = "ffmpeg"
-		}
+	format := "mp4"
+	if sp.Container == "mpegts" {
+		format = "mpegts"
+	}
+	videoCodec := sp.VideoCodec
+	if videoCodec == "" {
+		videoCodec = "copy"
 	}
 
-	cmd := exec.CommandContext(ctx, command, args...)
-	stdout, err := cmd.StdoutPipe()
+	reader, err := StartAVPipeline(ctx, AVPipelineOpts{
+		URL:        filePath,
+		Format:     format,
+		VideoCodec: videoCodec,
+		AudioCodec: "aac",
+		HWAccel:    sp.HWAccel,
+		IsLive:     false,
+		Log:        s.log,
+	})
 	if err != nil {
-		return nil, "", fmt.Errorf("creating stdout pipe: %w", err)
-	}
-	cmd.Stderr = nil
-
-	if err := cmd.Start(); err != nil {
 		return nil, "", fmt.Errorf("starting transcode: %w", err)
 	}
 
 	contentType := containerContentType(sp.Container)
-	return &cmdReadCloser{ReadCloser: stdout, cmd: cmd}, contentType, nil
+	return reader, contentType, nil
 }
 
 func (s *VODService) cachedOrFreshProbe(ctx context.Context, filePath string) (*media.ProbeResult, error) {
@@ -151,12 +124,3 @@ func containerContentType(container string) string {
 	}
 }
 
-type cmdReadCloser struct {
-	io.ReadCloser
-	cmd *exec.Cmd
-}
-
-func (c *cmdReadCloser) Close() error {
-	c.ReadCloser.Close()
-	return c.cmd.Wait()
-}

@@ -6,14 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os/exec"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/gavinmcnair/tvproxy/pkg/gstreamer"
-
 	"github.com/gavinmcnair/tvproxy/pkg/hls"
+	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
 
 func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request) {
@@ -196,69 +194,34 @@ func (s *Server) videoStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.Header().Set("Connection", "keep-alive")
 
-	inputType := "http"
-	isLive := true
-	if strings.HasPrefix(streamURL, "/") || strings.HasPrefix(streamURL, "file://") {
-		inputType = "file"
-		isLive = false
-	} else if strings.HasPrefix(streamURL, "rtsp://") {
-		inputType = "rtsp"
+	isLive := !strings.HasPrefix(streamURL, "/") && !strings.HasPrefix(streamURL, "file://")
+
+	var seekMs int64
+	seekTicks := r.URL.Query().Get("StartTimeTicks")
+	if seekTicks == "" {
+		seekTicks = r.URL.Query().Get("startTimeTicks")
+	}
+	if seekTicks != "" {
+		var t int64
+		fmt.Sscanf(seekTicks, "%d", &t)
+		if t > 0 {
+			seekMs = t / 10000
+		}
 	}
 
-	var command string
-	var args []string
+	s.log.Info().Str("stream", streamID).Str("url", streamURL).Bool("live", isLive).Msg("starting jellyfin video stream (avpipeline)")
 
-	if gstreamer.Available() {
-		pipeline := gstreamer.BuildPipeline(gstreamer.PipelineOpts{
-			InputURL:         streamURL,
-			InputType:        inputType,
-			IsLive:           isLive,
-			VideoCodec:       "h264",
-			AudioCodec:       "aac_latm",
-			OutputVideoCodec: "copy",
-			OutputAudioCodec: "aac",
-			OutputFormat:     gstreamer.OutputMP4,
-		})
-		command = pipeline.Cmd
-		args = pipeline.Args
-		s.log.Info().Str("stream", streamID).Msg("using gstreamer for jellyfin playback")
-	} else {
-		args = []string{
-			"-analyzeduration", "2000000",
-			"-probesize", "2000000",
-		}
-
-		seekTicks := r.URL.Query().Get("StartTimeTicks")
-		if seekTicks == "" {
-			seekTicks = r.URL.Query().Get("startTimeTicks")
-		}
-		if seekTicks != "" {
-			var t int64
-			fmt.Sscanf(seekTicks, "%d", &t)
-			if t > 0 {
-				secs := float64(t) / 10000000.0
-				args = append(args, "-ss", fmt.Sprintf("%.1f", secs))
-			}
-		}
-
-		args = append(args,
-			"-i", streamURL,
-			"-c:v", "copy",
-			"-c:a", "aac",
-			"-b:a", "192k",
-			"-ac", "2",
-			"-movflags", "frag_keyframe+empty_moov+default_base_moof",
-			"-f", "mp4",
-			"pipe:1",
-		)
-		command = "ffmpeg"
-		s.log.Info().Str("stream", streamID).Str("url", streamURL).Msg("starting jellyfin video stream (ffmpeg fallback)")
-	}
-
-	cmd := exec.CommandContext(ctx, command, args...)
-	cmd.Stdout = w
-
-	if err := cmd.Run(); err != nil {
+	if err := service.RunAVPipeline(ctx, service.AVPipelineOpts{
+		URL:          streamURL,
+		Writer:       w,
+		Format:       "mp4",
+		VideoCodec:   "copy",
+		AudioCodec:   "aac",
+		IsLive:       isLive,
+		SeekOffsetMs: seekMs,
+		TimeoutSec:   10,
+		Log:          s.log.With().Str("stream", streamID).Logger(),
+	}); err != nil {
 		s.log.Debug().Err(err).Str("stream", streamID).Msg("jellyfin video stream ended")
 	}
 }

@@ -1,5 +1,7 @@
 package media
 
+import "strings"
+
 type VideoInfo struct {
 	Codec          string  `json:"codec"`
 	Profile        string  `json:"profile,omitempty"`
@@ -48,6 +50,47 @@ type ProbeResult struct {
 	FormatName  string       `json:"format_name,omitempty"`
 	Video       *VideoInfo   `json:"video,omitempty"`
 	AudioTracks []AudioTrack `json:"audio_tracks,omitempty"`
+}
+
+func NormalizeCodec(codec string) string {
+	c := strings.ToLower(strings.TrimSpace(codec))
+	switch {
+	case c == "hevc" || strings.Contains(c, "h265") || strings.Contains(c, "h.265") || strings.Contains(c, "hevc"):
+		return "h265"
+	case c == "avc" || c == "mpeg-4 avc" || strings.Contains(c, "h264") || strings.Contains(c, "h.264"):
+		return "h264"
+	case c == "mpeg2" || c == "mpeg2video" || strings.Contains(c, "mpeg-2"):
+		return "mpeg2video"
+	case c == "mpeg4" || strings.Contains(c, "mpeg-4 visual"):
+		return "mpeg4"
+	case c == "aac_latm" || c == "mp4a-latm":
+		return "aac_latm"
+	case c == "aac" || c == "aac audio":
+		return "aac"
+	case c == "mp2" || strings.Contains(c, "mpeg audio"):
+		return "mp2"
+	case c == "ac3" || c == "ac-3" || c == "a_ac3":
+		return "ac3"
+	case c == "eac3" || c == "e-ac-3" || c == "a_eac3":
+		return "eac3"
+	case c == "dts" || c == "dca" || strings.Contains(c, "dts"):
+		return "dts"
+	case c == "truehd" || c == "mlp" || strings.Contains(c, "truehd"):
+		return "truehd"
+	case c == "opus" || c == "libopus":
+		return "opus"
+	case c == "flac":
+		return "flac"
+	case c == "vorbis" || c == "libvorbis":
+		return "vorbis"
+	case c == "av1 video" || c == "av1":
+		return "av1"
+	case c == "vp8":
+		return "vp8"
+	case c == "vp9":
+		return "vp9"
+	}
+	return c
 }
 
 func NormalizeContainer(formatName string) string {

@@ -3,22 +3,53 @@ package tvproxy;
 
 option go_package = "github.com/gavinmcnair/tvproxy/pkg/proto";
 
+// Probe is written by Go from avprobe results. probepb.EnrichFile fills fields 2, 9-11
+// after encoder init. Frontend reads it for stream info display.
+//
+// Fields 1-15: original flat schema for backwards compatibility.
+// Fields 16+: added by libavformat integration.
+
 message Probe {
     string video_codec = 1;
-    string video_codec_string = 2;
+    string video_codec_string = 2;       // enriched by probepb.EnrichFile (avc1.PPCCLL / hev1.P.C.TL)
     int32 video_width = 3;
     int32 video_height = 4;
     bool video_interlaced = 5;
     string audio_source_codec = 6;
     int32 audio_source_channels = 7;
     int32 audio_source_sample_rate = 8;
-    string audio_output_codec = 9;
-    int32 audio_output_channels = 10;
-    int32 audio_output_sample_rate = 11;
+    string audio_output_codec = 9;       // enriched by probepb.EnrichFile
+    int32 audio_output_channels = 10;    // enriched by probepb.EnrichFile
+    int32 audio_output_sample_rate = 11; // enriched by probepb.EnrichFile
     int32 video_bit_depth = 12;
     int32 video_framerate_num = 13;
     int32 video_framerate_den = 14;
     int32 video_bitrate_kbps = 15;
+
+    // --- New fields (16+) ---
+    string container = 16;
+    int64 duration_ms = 17;
+    bool is_live = 18;
+    int32 selected_audio_index = 19;
+    repeated AudioTrack audio_tracks = 20;
+    repeated SubtitleTrack subtitle_tracks = 21;
+    int32 audio_source_bitrate_kbps = 22;
+}
+
+message AudioTrack {
+    int32 index = 1;
+    string codec = 2;
+    int32 channels = 3;
+    int32 sample_rate = 4;
+    string language = 5;
+    bool is_ad = 6;
+    int32 bitrate_kbps = 7;
+}
+
+message SubtitleTrack {
+    int32 index = 1;
+    string codec = 2;
+    string language = 3;
 }
 
 message Signal {
