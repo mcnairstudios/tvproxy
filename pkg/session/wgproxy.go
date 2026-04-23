@@ -90,7 +90,7 @@ func NewWGProxy(wgClient *http.Client, cfg *config.Config, log zerolog.Logger) (
 }
 
 func (p *WGProxy) ProxyURL(streamURL string) string {
-	return fmt.Sprintf("http://127.0.0.1:%d/?url=%s", p.port, url.QueryEscape(streamURL))
+	return fmt.Sprintf("http://127.0.0.1:%d/?url=%s", p.port, streamURL)
 }
 
 func (p *WGProxy) Port() int {

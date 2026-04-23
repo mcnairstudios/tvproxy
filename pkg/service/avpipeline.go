@@ -14,7 +14,6 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/lib/av/demux"
 	"github.com/gavinmcnair/tvproxy/pkg/lib/av/encode"
 	"github.com/gavinmcnair/tvproxy/pkg/lib/av/mux"
-	"github.com/gavinmcnair/tvproxy/pkg/lib/av/probe"
 	"github.com/gavinmcnair/tvproxy/pkg/lib/av/resample"
 )
 
@@ -50,11 +49,6 @@ func StartAVPipeline(ctx context.Context, opts AVPipelineOpts) (io.ReadCloser, e
 }
 
 func RunAVPipeline(ctx context.Context, opts AVPipelineOpts) error {
-	info, err := probe.Probe(opts.URL, max(opts.TimeoutSec, 5))
-	if err != nil {
-		return fmt.Errorf("avpipeline: probe: %w", err)
-	}
-
 	demuxOpts := demux.DemuxOpts{
 		TimeoutSec: opts.TimeoutSec,
 		AudioTrack: -1,
@@ -79,6 +73,11 @@ func RunAVPipeline(ctx context.Context, opts AVPipelineOpts) error {
 	}
 	defer demuxer.Close()
 
+	info := demuxer.StreamInfo()
+	if info == nil {
+		return fmt.Errorf("avpipeline: no stream info from demuxer")
+	}
+
 	if opts.SeekOffsetMs > 0 {
 		demuxer.SeekTo(opts.SeekOffsetMs)
 	}
@@ -99,6 +98,7 @@ func RunAVPipeline(ctx context.Context, opts AVPipelineOpts) error {
 	var audioDec *decode.Decoder
 	var audioResample *resample.Resampler
 	var audioEnc *encode.Encoder
+	var audioFifo *encode.AudioFIFO
 
 	videoStreamIdx := -1
 	audioStreamIdx := -1
@@ -118,15 +118,20 @@ func RunAVPipeline(ctx context.Context, opts AVPipelineOpts) error {
 			videoStreamIdx = vs.Index()
 			videoTB = vs.TimeBase()
 		} else {
-			videoCodecID, err := conv.CodecIDFromString(info.Video.Codec)
-			if err != nil {
-				return fmt.Errorf("avpipeline: video codec: %w", err)
-			}
 			decHW := opts.DecodeHWAccel
 			if decHW == "" {
 				decHW = opts.HWAccel
 			}
-			videoDec, err = decode.NewVideoDecoder(videoCodecID, info.Video.Extradata, decode.DecodeOpts{HWAccel: decHW})
+			vcp := demuxer.VideoCodecParameters()
+			if vcp != nil {
+				videoDec, err = decode.NewVideoDecoderFromParams(vcp, decode.DecodeOpts{HWAccel: decHW})
+			} else {
+				videoCodecID, cerr := conv.CodecIDFromString(info.Video.Codec)
+				if cerr != nil {
+					return fmt.Errorf("avpipeline: video codec: %w", cerr)
+				}
+				videoDec, err = decode.NewVideoDecoder(videoCodecID, info.Video.Extradata, decode.DecodeOpts{HWAccel: decHW})
+			}
 			if err != nil {
 				return fmt.Errorf("avpipeline: video decoder: %w", err)
 			}
@@ -188,28 +193,33 @@ func RunAVPipeline(ctx context.Context, opts AVPipelineOpts) error {
 			if err != nil {
 				return fmt.Errorf("avpipeline: audio codec: %w", err)
 			}
-			audioDec, err = decode.NewAudioDecoder(audioCodecID, nil)
+			acp := demuxer.AudioCodecParameters()
+			if acp != nil {
+				audioDec, err = decode.NewAudioDecoderFromParams(acp)
+			} else {
+				audioDec, err = decode.NewAudioDecoder(audioCodecID, nil)
+			}
 			if err != nil {
 				return fmt.Errorf("avpipeline: audio decoder: %w", err)
 			}
 			defer audioDec.Close()
 
-			if at.Channels > 2 || at.SampleRate != 48000 {
-				audioResample, err = resample.NewResampler(
-					at.Channels, at.SampleRate, astiav.SampleFormatFltp,
-					2, 48000, astiav.SampleFormatFltp,
-				)
-				if err != nil {
-					return fmt.Errorf("avpipeline: resampler: %w", err)
-				}
-				defer audioResample.Close()
+			audioResample, err = resample.NewResampler(
+				at.Channels, at.SampleRate, astiav.SampleFormatFltp,
+				2, 48000, astiav.SampleFormatFltp,
+			)
+			if err != nil {
+				return fmt.Errorf("avpipeline: resampler: %w", err)
 			}
+			defer audioResample.Close()
 
 			audioEnc, err = encode.NewAACEncoder(2, 48000)
 			if err != nil {
 				return fmt.Errorf("avpipeline: AAC encoder: %w", err)
 			}
 			defer audioEnc.Close()
+			audioFifo = encode.NewAudioFIFO(audioEnc, 1024, 2, astiav.SampleFormatFltp, astiav.ChannelLayoutStereo, 48000)
+			defer audioFifo.Close()
 
 			aacCP := astiav.AllocCodecParameters()
 			aacCP.SetCodecID(astiav.CodecIDAac)
@@ -270,16 +280,24 @@ func RunAVPipeline(ctx context.Context, opts AVPipelineOpts) error {
 				frames, err := videoDec.Decode(avPkt)
 				avPkt.Free()
 				if err != nil {
+					for _, f := range frames {
+						f.Free()
+					}
 					return fmt.Errorf("avpipeline: video decode: %w", err)
 				}
-				for _, frame := range frames {
+				for i, frame := range frames {
 					encPkts, err := videoEnc.Encode(frame)
+					frame.Free()
 					if err != nil {
+						for _, f := range frames[i+1:] {
+							f.Free()
+						}
 						return fmt.Errorf("avpipeline: video encode: %w", err)
 					}
 					for _, ep := range encPkts {
 						ep.SetStreamIndex(videoStreamIdx)
 						muxer.WritePacket(ep)
+						ep.Free()
 					}
 				}
 			}
@@ -314,13 +332,15 @@ func RunAVPipeline(ctx context.Context, opts AVPipelineOpts) error {
 					outFrame := frame
 					if audioResample != nil {
 						outFrame, err = audioResample.Convert(frame)
+						frame.Free()
 						if err != nil {
 							audioLatched = true
 							opts.Log.Error().Err(err).Msg("audio resample error latched")
 							break
 						}
 					}
-					encPkts, err := audioEnc.Encode(outFrame)
+					encPkts, err := audioFifo.Write(outFrame)
+					outFrame.Free()
 					if err != nil {
 						audioLatched = true
 						opts.Log.Error().Err(err).Msg("audio encode error latched")
@@ -329,6 +349,7 @@ func RunAVPipeline(ctx context.Context, opts AVPipelineOpts) error {
 					for _, ep := range encPkts {
 						ep.SetStreamIndex(audioStreamIdx)
 						muxer.WritePacket(ep)
+						ep.Free()
 					}
 				}
 			}

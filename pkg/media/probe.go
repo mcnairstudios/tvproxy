@@ -93,6 +93,18 @@ func NormalizeCodec(codec string) string {
 	return c
 }
 
+func IsH265(codec string) bool {
+	c := NormalizeCodec(codec)
+	return c == "h265" || c == "hvc1" || c == "hev1"
+}
+
+func BaseCodec(codec string) string {
+	if IsH265(codec) {
+		return "h265"
+	}
+	return NormalizeCodec(codec)
+}
+
 func NormalizeContainer(formatName string) string {
 	switch formatName {
 	case "mpegts":

@@ -3189,14 +3189,39 @@
             inputs[field.key] = cb;
             formEl.appendChild(h('div', { className: 'form-check', style: 'display:flex;align-items:center;gap:6px' }, cb, h('label', { for: 'field-' + field.key, style: 'cursor:pointer;margin:0' }, field.label)));
           } else if (field.type === 'select') {
+            var fieldOpts = typeof field.options === 'function' ? field.options(isEdit ? item : {}) : field.options;
             const sel = h('select', { id: 'field-' + field.key },
-              ...field.options.map(o => {
+              ...fieldOpts.map(o => {
                 const opt = h('option', { value: String(o.value) }, o.label);
                 if (isEdit && String(item[field.key]) === String(o.value)) opt.selected = true;
                 return opt;
               })
             );
             inputs[field.key] = sel;
+            if (typeof field.options === 'function') {
+              var depKeys = ['delivery', 'container'];
+              depKeys.forEach(function(dk) {
+                if (inputs[dk] && dk !== field.key) {
+                  inputs[dk].addEventListener('change', function() {
+                    var formState = {};
+                    Object.keys(inputs).forEach(function(k) {
+                      var inp = inputs[k];
+                      formState[k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+                    });
+                    var curVal = sel.value;
+                    var newOpts = field.options(formState);
+                    sel.innerHTML = '';
+                    var hasCurrentVal = false;
+                    newOpts.forEach(function(o) {
+                      var opt = h('option', { value: String(o.value) }, o.label);
+                      if (String(o.value) === curVal) hasCurrentVal = true;
+                      sel.appendChild(opt);
+                    });
+                    if (hasCurrentVal) sel.value = curVal;
+                  });
+                }
+              });
+            }
             formEl.appendChild(h('div', { className: 'form-group' }, h('label', { for: 'field-' + field.key }, field.label), sel));
           } else if (field.type === 'textarea') {
             const ta = h('textarea', { id: 'field-' + field.key, placeholder: field.placeholder || '', rows: '4' });
@@ -6013,8 +6038,8 @@
       delete: item => !item.is_system && !item.is_client,
       columns: [
         { key: 'name', label: 'Name' },
-        { key: 'video_codec', label: 'Video', render: item => ({'default':'Match Source',h264:'H.264',h265:'H.265',av1:'AV1'})[item.video_codec] || item.video_codec || 'Match Source' },
-        { key: 'audio_codec', label: 'Audio', render: item => ({'default':'Match Source',aac:'AAC',opus:'Opus'})[item.audio_codec] || item.audio_codec || 'Match Source' },
+        { key: 'video_codec', label: 'Video', render: item => ({'default':'Match Source',h264:'H.264',h265:'H.265',hvc1:'H.265 (hvc1)',hev1:'H.265 (hev1)',av1:'AV1',vp8:'VP8',vp9:'VP9'})[item.video_codec] || item.video_codec || 'Match Source' },
+        { key: 'audio_codec', label: 'Audio', render: item => ({copy:'Copy',aac:'AAC',ac3:'AC3',eac3:'EAC3',mp2:'MP2',mp3:'MP3',opus:'Opus',vorbis:'Vorbis',flac:'FLAC'})[item.audio_codec] || item.audio_codec || 'AAC' },
         { key: 'container', label: 'Container', render: item => ({mpegts:'MPEG-TS',matroska:'Matroska',mp4:'MP4',webm:'WebM'})[item.container] || item.container },
         { key: 'delivery', label: 'Delivery', render: item => ({stream:'Stream',mse:'MSE'})[item.delivery] || item.delivery || 'Stream' },
         { key: 'is_default', label: 'Type', render: item => {
@@ -6030,31 +6055,72 @@
       ],
       fields: [
         { key: 'name', label: 'Profile Name', placeholder: 'My Stream Profile' },
-        { key: 'video_codec', label: 'Video Codec', type: 'select', options: [
-          { value: 'default', label: 'Match Source (auto copy/transcode)' },
-          { value: 'h264', label: 'H.264 / AVC' },
-          { value: 'h265', label: 'H.265 / HEVC' },
-          { value: 'av1', label: 'AV1' },
-        ], default: 'default', help: 'Match Source: copies if source matches, transcodes if not. Explicit codec always transcodes to that codec.' },
-        { key: 'container', label: 'Container', type: 'select', options: [
-          { value: 'mpegts', label: 'MPEG-TS (HDHR/Plex)' },
-          { value: 'matroska', label: 'Matroska (VLC)' },
-          { value: 'mp4', label: 'MP4' },
-          { value: 'webm', label: 'WebM' },
-        ] },
         { key: 'delivery', label: 'Delivery', type: 'select', options: [
           { value: 'stream', label: 'Stream (direct)' },
           { value: 'mse', label: 'MSE (browser/web)' },
         ], default: 'stream', help: 'MSE for browser playback. Stream for native clients (Plex, VLC, HDHR).' },
+        { key: 'container', label: 'Container', type: 'select', options: function(form) {
+          if (form.delivery === 'mse') return [
+            { value: 'mp4', label: 'fMP4 (recommended)' },
+            { value: 'webm', label: 'WebM' },
+          ];
+          return [
+            { value: 'mpegts', label: 'MPEG-TS (HDHR/Plex)' },
+            { value: 'mp4', label: 'MP4' },
+            { value: 'matroska', label: 'Matroska (VLC)' },
+            { value: 'webm', label: 'WebM' },
+          ];
+        }, default: 'mp4' },
+        { key: 'video_codec', label: 'Video Codec', type: 'select', options: function(form) {
+          if (form.delivery === 'mse' && form.container === 'webm') return [
+            { value: 'default', label: 'Match Source' },
+            { value: 'vp9', label: 'VP9' },
+            { value: 'vp8', label: 'VP8' },
+            { value: 'av1', label: 'AV1' },
+          ];
+          if (form.delivery === 'mse') return [
+            { value: 'default', label: 'Match Source' },
+            { value: 'h264', label: 'H.264 / AVC' },
+            { value: 'hvc1', label: 'H.265 / HEVC (hvc1)' },
+            { value: 'hev1', label: 'H.265 / HEVC (hev1)' },
+            { value: 'av1', label: 'AV1' },
+          ];
+          return [
+            { value: 'default', label: 'Match Source (copy)' },
+            { value: 'h264', label: 'H.264 / AVC' },
+            { value: 'h265', label: 'H.265 / HEVC' },
+            { value: 'av1', label: 'AV1' },
+          ];
+        }, default: 'default', help: 'Match Source copies if source matches output, transcodes if not.' },
+        { key: 'audio_codec', label: 'Audio Codec', type: 'select', options: function(form) {
+          if (form.delivery === 'mse' && form.container === 'webm') return [
+            { value: 'opus', label: 'Opus' },
+            { value: 'vorbis', label: 'Vorbis' },
+          ];
+          if (form.delivery === 'mse') return [
+            { value: 'aac', label: 'AAC (recommended)' },
+            { value: 'mp3', label: 'MP3' },
+            { value: 'opus', label: 'Opus' },
+            { value: 'flac', label: 'FLAC (lossless)' },
+          ];
+          return [
+            { value: 'copy', label: 'Copy (passthrough)' },
+            { value: 'aac', label: 'AAC' },
+            { value: 'ac3', label: 'Dolby Digital (AC3)' },
+            { value: 'eac3', label: 'Dolby Digital Plus (EAC3)' },
+            { value: 'mp2', label: 'MP2' },
+            { value: 'mp3', label: 'MP3' },
+            { value: 'opus', label: 'Opus' },
+            { value: 'flac', label: 'FLAC (lossless)' },
+          ];
+        }, default: 'aac', help: 'MSE: browser-compatible codecs only. Stream: copy preserves source audio (DTS, TrueHD, etc).' },
         { key: 'output_height', label: 'Max Resolution', type: 'select', options: [
-          { value: '0', label: 'Original (up to 4K)' },
-          { value: '1080', label: '1080p (downscale 4K)' },
-        ], default: '0', numeric: true, help: 'Downscale 4K to 1080p. Sub-1080p content is always upscaled to 1080p.' },
-        { key: 'audio_codec', label: 'Audio Codec', type: 'select', options: [
-          { value: 'default', label: 'Match Source (auto copy/transcode)' },
-          { value: 'aac', label: 'AAC' },
-          { value: 'opus', label: 'Opus' },
-        ], default: 'default', help: 'Match Source: copies if compatible with output container, transcodes if not. Opus required for WebM.' },
+          { value: '0', label: 'Original' },
+          { value: '2160', label: '4K (2160p)' },
+          { value: '1080', label: '1080p' },
+          { value: '720', label: '720p' },
+          { value: '480', label: '480p' },
+        ], default: '0', numeric: true, help: 'Downscales when source exceeds this. Never upscales.' },
       ],
     }),
 

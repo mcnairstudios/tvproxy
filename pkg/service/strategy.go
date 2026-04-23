@@ -161,12 +161,12 @@ func resolveVideoActionWithHeight(sourceCodec, clientCodec string, outputHeight 
 			if sourceCodec != "" {
 				return normalizeVideoCodecName(sourceCodec)
 			}
-			return "h265"
+			return "hvc1"
 		}
 		return "copy"
 	}
-	src := normalizeVideoCodecName(sourceCodec)
-	dst := normalizeVideoCodecName(clientCodec)
+	src := baseVideoCodec(sourceCodec)
+	dst := baseVideoCodec(clientCodec)
 	if src == dst && outputHeight == 0 {
 		return "copy"
 	}
@@ -177,10 +177,23 @@ func normalizeVideoCodecName(c string) string {
 	switch strings.ToLower(c) {
 	case "hevc", "h265", "h.265":
 		return "h265"
+	case "hvc1":
+		return "hvc1"
+	case "hev1":
+		return "hev1"
 	case "avc", "h264", "h.264":
 		return "h264"
 	}
 	return strings.ToLower(c)
+}
+
+func baseVideoCodec(c string) string {
+	n := normalizeVideoCodecName(c)
+	switch n {
+	case "hvc1", "hev1", "h265":
+		return "h265"
+	}
+	return n
 }
 
 func resolveAudioAction(sourceCodec, clientCodec, outputContainer string) string {

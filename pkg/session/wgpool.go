@@ -150,6 +150,21 @@ func (p *WGPool) Status() []PoolStatus {
 	return result
 }
 
+func (p *WGPool) ProxyURL(streamURL string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if len(p.proxies) == 0 {
+		return streamURL
+	}
+	best := p.proxies[0]
+	for _, e := range p.proxies[1:] {
+		if e.failCount < best.failCount {
+			best = e
+		}
+	}
+	return best.proxy.ProxyURL(streamURL)
+}
+
 func (p *WGPool) Count() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

@@ -125,6 +125,68 @@ func TestSoftwareFallbackTable(t *testing.T) {
 	}
 }
 
+func TestResolveAudioEncoderName(t *testing.T) {
+	tests := []struct {
+		codec string
+		want  string
+	}{
+		{"aac", "aac"},
+		{"ac3", "ac3"},
+		{"eac3", "eac3"},
+		{"mp2", "mp2"},
+		{"flac", "flac"},
+		{"opus", "libopus"},
+		{"mp3", "libmp3lame"},
+		{"vorbis", "libvorbis"},
+		{"unknown", "unknown"},
+	}
+	for _, tt := range tests {
+		got := ResolveAudioEncoderName(tt.codec)
+		if got != tt.want {
+			t.Errorf("ResolveAudioEncoderName(%q) = %q, want %q", tt.codec, got, tt.want)
+		}
+	}
+}
+
+func TestNewAudioEncoder_AAC(t *testing.T) {
+	enc, err := NewAudioEncoder(AudioEncodeOpts{Codec: "aac", Channels: 2, SampleRate: 48000})
+	if err != nil {
+		t.Fatalf("NewAudioEncoder(aac): %v", err)
+	}
+	defer enc.Close()
+	if enc.FrameSize() != 1024 {
+		t.Errorf("AAC frame size = %d, want 1024", enc.FrameSize())
+	}
+	if len(enc.Extradata()) == 0 {
+		t.Error("AAC encoder produced no extradata")
+	}
+}
+
+func TestNewAudioEncoder_OpusResolvesName(t *testing.T) {
+	enc, err := NewAudioEncoder(AudioEncodeOpts{Codec: "opus", Channels: 2, SampleRate: 48000})
+	if err != nil {
+		t.Skipf("opus encoder not available: %v", err)
+	}
+	defer enc.Close()
+	if enc.FrameSize() <= 0 {
+		t.Errorf("Opus frame size = %d, expected > 0", enc.FrameSize())
+	}
+}
+
+func TestNewAudioEncoder_EmptyCodec(t *testing.T) {
+	_, err := NewAudioEncoder(AudioEncodeOpts{Channels: 2, SampleRate: 48000})
+	if err == nil {
+		t.Fatal("expected error for empty codec")
+	}
+}
+
+func TestNewAudioEncoder_UnknownCodec(t *testing.T) {
+	_, err := NewAudioEncoder(AudioEncodeOpts{Codec: "nonexistent_codec", Channels: 2, SampleRate: 48000})
+	if err == nil {
+		t.Fatal("expected error for unknown codec")
+	}
+}
+
 func TestResolveEncoderName_AllTableEntries(t *testing.T) {
 	for codec, hwMap := range encoderTable {
 		for hw, expectedName := range hwMap {

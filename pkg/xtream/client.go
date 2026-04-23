@@ -288,17 +288,13 @@ func (c *Client) GetVODStreamURL(streamID int, extension string) string {
 }
 
 func (c *Client) GetSeriesStreamURL(streamID int, extension string) string {
-	if extension == "" {
-		extension = "mp4"
-	}
-	return fmt.Sprintf("%s/series/%s/%s/%d.%s", c.baseURL, c.username, c.password, streamID, extension)
+	// return fmt.Sprintf("%s/series/%s/%s/%d.%s", c.baseURL, c.username, c.password, streamID, extension)
+	return fmt.Sprintf("%s/series/%s/%s/%d", c.baseURL, c.username, c.password, streamID)
 }
 
 func (c *Client) GetStreamURL(streamID int, extension string) string {
-	if extension == "" {
-		extension = "ts"
-	}
-	return fmt.Sprintf("%s/%s/%s/%d.%s", c.baseURL, c.username, c.password, streamID, extension)
+	// return fmt.Sprintf("%s/%s/%s/%d.%s", c.baseURL, c.username, c.password, streamID, extension)
+	return fmt.Sprintf("%s/%s/%s/%d", c.baseURL, c.username, c.password, streamID)
 }
 
 func (c *Client) get(ctx context.Context, url string, result any) error {

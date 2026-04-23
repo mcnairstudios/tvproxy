@@ -293,6 +293,7 @@ func main() {
 	if wgClientForSessions != nil {
 		hlsManager.WGProxyFunc = wgProxyFunc
 		proxyService.WGProxyFunc = wgProxyFunc
+		sessionMgr.SetWGProxyFunc(wgPool.ProxyURL)
 	}
 	go hlsManager.StartCleanupWorker(ctx)
 	sessionMgr.SetOnCleanup(func(channelID string) {
@@ -314,7 +315,7 @@ func main() {
 		func() string { v, _ := settingsService.Get(ctx, "tmdb_api_key"); return v },
 		log,
 	)
-	gstreamerHandler := handler.NewGStreamerHandler()
+	gstreamerHandler := handler.NewCapabilitiesHandler()
 	tmdbHandler := handler.NewTMDBHandler(tmdbClient, streamStore)
 	wgMultiHandler := handler.NewMultiWireGuardHandler(wgMultiService, wgProfileStore, log)
 	wgMultiHandler.SetPool(wgPool)

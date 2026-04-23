@@ -732,6 +732,9 @@ func (h *VODHandler) MSEDebug(w http.ResponseWriter, r *http.Request) {
 		resp["audio_segments"] = w.AudioSegmentCount()
 		resp["probe_ready"] = w.Probe() != nil
 		if probe := w.Probe(); probe != nil {
+			if probe.AudioOutputCodec != "" {
+				resp["audio_codec"] = "mp4a.40.2"
+			}
 			probeData := map[string]any{
 				"video_codec":        probe.VideoCodec,
 				"video_codec_string": probe.VideoCodecString,

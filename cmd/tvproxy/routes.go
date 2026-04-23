@@ -42,7 +42,7 @@ type routeHandlers struct {
 	wireguard      *handler.WireGuardHandler
 	wireguardMulti *handler.MultiWireGuardHandler
 	tmdb           *handler.TMDBHandler
-	gstreamer      *handler.GStreamerHandler
+	gstreamer      *handler.CapabilitiesHandler
 	logoCache      *logocache.Cache
 	log            zerolog.Logger
 }

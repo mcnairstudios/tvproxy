@@ -30,6 +30,9 @@ type DemuxOpts struct {
 	UserAgent        string
 	RTSPLatency      int
 	AudioPassthrough bool
+	ProbeSize        int
+	AnalyzeDuration  int
+	CachedStreamInfo *probe.StreamInfo
 }
 
 const followRetryInterval = 100 * time.Millisecond
@@ -61,11 +64,18 @@ type Demuxer struct {
 	streamInfo *probe.StreamInfo
 	opts       DemuxOpts
 
+	seekCh          chan seekRequest
+	onSeek          func()
 	audioBasePTS    int64
 	audioFrameCount int64
 	audioSampleRate int
 	audioFrameSize  int
 	audioPTSInited  bool
+}
+
+type seekRequest struct {
+	posMs  int64
+	result chan error
 }
 
 type TeeSource interface {
@@ -114,8 +124,29 @@ func NewDemuxer(url string, opts DemuxOpts) (*Demuxer, error) {
 	if opts.RTSPLatency > 0 {
 		d.Set("stimeout", fmt.Sprintf("%d", opts.RTSPLatency*1000), 0)
 	}
-	d.Set("probesize", "10000000", 0)
-	d.Set("analyzeduration", "10000000", 0)
+	isLive := strings.HasPrefix(url, "rtsp://")
+	probeSize := opts.ProbeSize
+	analyzeDur := opts.AnalyzeDuration
+	if probeSize <= 0 {
+		if isLive {
+			probeSize = 1000000
+		} else {
+			probeSize = 5000000
+		}
+	}
+	if analyzeDur <= 0 {
+		if isLive {
+			analyzeDur = 0
+		} else {
+			analyzeDur = 5000000
+		}
+	}
+	d.Set("probesize", fmt.Sprintf("%d", probeSize), 0)
+	d.Set("analyzeduration", fmt.Sprintf("%d", analyzeDur), 0)
+	if isLive {
+		d.Set("fflags", "nobuffer+igndts+flush_packets", 0)
+		d.Set("flags", "low_delay", 0)
+	}
 
 	var inputFmt *astiav.InputFormat
 	if opts.FormatHint != "" {
@@ -131,17 +162,17 @@ func NewDemuxer(url string, opts DemuxOpts) (*Demuxer, error) {
 }
 
 func finishDemuxerSetup(fc *astiav.FormatContext, url string, opts DemuxOpts) (*Demuxer, error) {
-	fsiDict := astiav.NewDictionary()
-	defer fsiDict.Free()
-	fsiDict.Set("probesize", "10000000", 0)
-	fsiDict.Set("analyzeduration", "10000000", 0)
-	if err := fc.FindStreamInfo(fsiDict); err != nil {
-		fc.CloseInput()
-		fc.Free()
-		return nil, fmt.Errorf("demux: find stream info: %w", err)
+	var si *probe.StreamInfo
+	if opts.CachedStreamInfo != nil {
+		si = opts.CachedStreamInfo
+	} else {
+		if err := fc.FindStreamInfo(nil); err != nil {
+			fc.CloseInput()
+			fc.Free()
+			return nil, fmt.Errorf("demux: find stream info: %w", err)
+		}
+		si = probe.ExtractStreamInfo(fc)
 	}
-
-	si := probe.ExtractStreamInfo(fc)
 
 	dm := &Demuxer{
 		fc:         fc,
@@ -153,6 +184,7 @@ func finishDemuxerSetup(fc *astiav.FormatContext, url string, opts DemuxOpts) (*
 		basePTS:    -1,
 		url:        url,
 		opts:       opts,
+		seekCh:     make(chan seekRequest, 1),
 	}
 
 	type audioCandidate struct {
@@ -257,6 +289,19 @@ func (d *Demuxer) ReadPacket() (*Packet, error) {
 
 func (d *Demuxer) readPacketOnce() (*Packet, error) {
 	for {
+		select {
+		case req := <-d.seekCh:
+			req.result <- d.SeekTo(req.posMs)
+			d.basePTS = -1
+			d.audioPTSInited = false
+			d.audioFrameCount = 0
+			if d.onSeek != nil {
+				d.onSeek()
+			}
+			continue
+		default:
+		}
+
 		if err := d.fc.ReadFrame(d.pkt); err != nil {
 			if errors.Is(err, astiav.ErrEof) {
 				if d.opts.Follow {
@@ -367,6 +412,22 @@ func (d *Demuxer) Reconnect() error {
 	if d.opts.TimeoutSec > 0 {
 		dict.Set("timeout", fmt.Sprintf("%d", d.opts.TimeoutSec*1_000_000), 0)
 	}
+	if d.opts.UserAgent != "" {
+		dict.Set("user_agent", d.opts.UserAgent, 0)
+	}
+	if d.opts.RTSPLatency > 0 {
+		dict.Set("stimeout", fmt.Sprintf("%d", d.opts.RTSPLatency*1000), 0)
+	}
+	probeSize := d.opts.ProbeSize
+	if probeSize <= 0 {
+		probeSize = 1000000
+	}
+	analyzeDur := d.opts.AnalyzeDuration
+	if analyzeDur <= 0 {
+		analyzeDur = 1000000
+	}
+	dict.Set("probesize", fmt.Sprintf("%d", probeSize), 0)
+	dict.Set("analyzeduration", fmt.Sprintf("%d", analyzeDur), 0)
 
 	var inputFmt *astiav.InputFormat
 	if d.opts.FormatHint != "" {
@@ -447,6 +508,20 @@ func (d *Demuxer) SetAudioTrack(idx int) error {
 	return nil
 }
 
+func (d *Demuxer) SetOnSeek(fn func()) {
+	d.onSeek = fn
+}
+
+func (d *Demuxer) RequestSeek(posMs int64) error {
+	req := seekRequest{posMs: posMs, result: make(chan error, 1)}
+	select {
+	case d.seekCh <- req:
+		return <-req.result
+	default:
+		return fmt.Errorf("demux: seek channel full")
+	}
+}
+
 func (d *Demuxer) SeekTo(posMs int64) error {
 	streamIdx := d.videoIdx
 	if streamIdx < 0 {
@@ -478,15 +553,42 @@ func (d *Demuxer) Close() {
 	d.closed = true
 	if d.pkt != nil {
 		d.pkt.Free()
+		d.pkt = nil
 	}
 	if d.fc != nil {
 		d.fc.CloseInput()
 		d.fc.Free()
+		d.fc = nil
 	}
 }
 
 func (d *Demuxer) StreamInfo() *probe.StreamInfo {
 	return d.streamInfo
+}
+
+func (d *Demuxer) VideoCodecParameters() *astiav.CodecParameters {
+	if d.videoIdx < 0 {
+		return nil
+	}
+	s := d.streamByIndex(d.videoIdx)
+	if s == nil {
+		return nil
+	}
+	return s.CodecParameters()
+}
+
+func (d *Demuxer) AudioCodecParameters() *astiav.CodecParameters {
+	d.mu.Lock()
+	idx := d.audioIdx
+	d.mu.Unlock()
+	if idx < 0 {
+		return nil
+	}
+	s := d.streamByIndex(idx)
+	if s == nil {
+		return nil
+	}
+	return s.CodecParameters()
 }
 
 func (d *Demuxer) streamByIndex(idx int) *astiav.Stream {

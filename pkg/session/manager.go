@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/gavinmcnair/tvproxy/pkg/lib/av/demuxloop"
 	"github.com/gavinmcnair/tvproxy/pkg/lib/av/probe"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
@@ -64,10 +65,15 @@ type Manager struct {
 	httpClient    *http.Client
 	wgClient      *http.Client
 	wgProxyMgr    *WGProxyManager
+	wgProxyFunc   func(string) string
 	probeCache    store.ProbeCache
 	onCleanup     func(channelID string)
 	log           zerolog.Logger
 	mu            sync.RWMutex
+}
+
+func (m *Manager) SetWGProxyFunc(fn func(string) string) {
+	m.wgProxyFunc = fn
 }
 
 func (m *Manager) clientForSession(s *Session) *http.Client {
@@ -579,11 +585,9 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 	isLive := s.Duration == 0
 
 	pipelineURL := s.StreamURL
-	if s.UseWireGuard && strings.HasPrefix(pipelineURL, "http") && m.wgProxyMgr != nil {
-		if proxy := m.wgProxyMgr.GetAny(); proxy != nil {
-			pipelineURL = proxy.ProxyURL(s.StreamURL)
-			m.log.Info().Str("session_id", s.ID).Str("proxy_url", pipelineURL).Msg("routing through WG proxy")
-		}
+	if s.UseWireGuard && strings.HasPrefix(pipelineURL, "http") && m.wgProxyFunc != nil {
+		pipelineURL = m.wgProxyFunc(s.StreamURL)
+		m.log.Info().Str("session_id", s.ID).Str("proxy_url", pipelineURL).Msg("routing through WG proxy")
 	}
 
 	isFileSource := !strings.HasPrefix(pipelineURL, "http") && !strings.HasPrefix(pipelineURL, "rtsp")
@@ -637,6 +641,8 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		outCodec = srcCodec
 	}
 
+	encCodec := media.BaseCodec(outCodec)
+
 	maxBitDepth := 0
 
 	m.log.Info().
@@ -655,7 +661,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Msg("building pipeline")
 
 	if isMSE {
-		m.runGoMSE(ctx, s, ds, info, audioIdx, isLive, needsTranscode, outCodec, srcCodec, maxBitDepth)
+		m.runGoMSE(ctx, s, ds, info, audioIdx, isLive, needsTranscode, encCodec, srcCodec, maxBitDepth)
 		return
 	}
 
@@ -669,7 +675,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		return
 	}
 
-	m.runGoFullTranscode(ctx, s, ds, info, audioIdx, isLive, outCodec, maxBitDepth)
+	m.runGoFullTranscode(ctx, s, ds, info, audioIdx, isLive, encCodec, maxBitDepth)
 }
 
 func (m *Manager) runGoStreamCopy(ctx context.Context, s *Session, ds *DemuxSession, info *probe.StreamInfo, audioIdx int, isLive bool) {
@@ -679,11 +685,12 @@ func (m *Manager) runGoStreamCopy(ctx context.Context, s *Session, ds *DemuxSess
 	}
 
 	gp, err := NewStreamCopyPipeline(StreamCopyOpts{
-		Info:       info,
-		AudioIndex: audioIdx,
-		FilePath:   s.FilePath,
-		Format:     format,
-		Log:        m.log.With().Str("session_id", s.ID).Logger(),
+		Info:             info,
+		AudioIndex:       audioIdx,
+		FilePath:         s.FilePath,
+		Format:           format,
+		OutputAudioCodec: s.startOpts.OutputAudioCodec,
+		Log:              m.log.With().Str("session_id", s.ID).Logger(),
 	})
 	if err != nil {
 		m.log.Error().Err(err).Str("session_id", s.ID).Msg("Go stream copy pipeline creation failed")
@@ -722,32 +729,62 @@ func (m *Manager) runGoStreamCopy(ctx context.Context, s *Session, ds *DemuxSess
 }
 
 func (m *Manager) runGoMSE(ctx context.Context, s *Session, ds *DemuxSession, info *probe.StreamInfo, audioIdx int, isLive, needsTranscode bool, outCodec, srcCodec string, maxBitDepth int) {
-	gp, err := NewMSETranscodePipeline(MSETranscodeOpts{
-		Info:          info,
-		AudioIndex:    audioIdx,
-		OutputDir:     s.OutputDir,
-		IsLive:        isLive,
-		HWAccel:       s.startOpts.OutputHWAccel,
-		DecodeHWAccel: s.startOpts.DecodeHWAccel,
-		OutputCodec:   outCodec,
-		Bitrate:       s.startOpts.EncoderBitrateKbps,
-		OutputHeight:  s.startOpts.OutputHeight,
-		Deinterlace:   s.startOpts.Deinterlace,
-		MaxBitDepth:   maxBitDepth,
-		Log:           m.log.With().Str("session_id", s.ID).Logger(),
-	})
-	if err != nil {
-		m.log.Error().Err(err).Str("session_id", s.ID).Msg("Go MSE pipeline creation failed")
-		s.setError(fmt.Errorf("MSE pipeline failed: %w", err))
-		return
+	forceDecode := needsTranscode || s.startOpts.EncoderBitrateKbps > 0 ||
+		(s.startOpts.OutputHeight > 0 && info.Video != nil && s.startOpts.OutputHeight < info.Video.Height)
+
+	var sink demuxloop.PacketSink
+	var stopFn func()
+
+	if !forceDecode {
+		gp, err := NewMSECopyPipeline(MSECopyOpts{
+			Info:             info,
+			AudioIndex:       audioIdx,
+			OutputDir:        s.OutputDir,
+			IsLive:           isLive,
+			OutputAudioCodec: s.startOpts.OutputAudioCodec,
+			VideoCodecParams: ds.Demuxer().VideoCodecParameters(), AudioCodecParams: ds.Demuxer().AudioCodecParameters(),
+			Log:              m.log.With().Str("session_id", s.ID).Logger(),
+		})
+		if err != nil {
+			m.log.Error().Err(err).Str("session_id", s.ID).Msg("Go MSE copy pipeline failed")
+			s.setError(fmt.Errorf("MSE copy pipeline failed: %w", err))
+			return
+		}
+		sink = gp
+		stopFn = func() { gp.Stop() }
+		m.log.Info().Str("session_id", s.ID).Str("codec", srcCodec).Msg("MSE copy mode — no decode/encode")
+	} else {
+		gp, err := NewMSETranscodePipeline(MSETranscodeOpts{
+			Info:             info,
+			AudioIndex:       audioIdx,
+			OutputDir:        s.OutputDir,
+			IsLive:           isLive,
+			HWAccel:          s.startOpts.OutputHWAccel,
+			DecodeHWAccel:    s.startOpts.DecodeHWAccel,
+			OutputCodec:      outCodec,
+			OutputAudioCodec: s.startOpts.OutputAudioCodec,
+			Bitrate:          s.startOpts.EncoderBitrateKbps,
+			OutputHeight:     s.startOpts.OutputHeight,
+			Deinterlace:      s.startOpts.Deinterlace,
+			MaxBitDepth:      maxBitDepth,
+			VideoCodecParams: ds.Demuxer().VideoCodecParameters(), AudioCodecParams: ds.Demuxer().AudioCodecParameters(),
+			Log:              m.log.With().Str("session_id", s.ID).Logger(),
+		})
+		if err != nil {
+			m.log.Error().Err(err).Str("session_id", s.ID).Msg("Go MSE transcode pipeline failed")
+			s.setError(fmt.Errorf("MSE pipeline failed: %w", err))
+			return
+		}
+		sink = gp
+		stopFn = func() { gp.Stop() }
 	}
-	s.SetStopPipeline(func() { gp.Stop() })
+	s.SetStopPipeline(stopFn)
 
 	w, wErr := NewWatcher(s.OutputDir, m.log)
 	if wErr != nil {
 		m.log.Error().Err(wErr).Str("session_id", s.ID).Msg("failed to create watcher")
 		s.setError(fmt.Errorf("watcher creation failed: %w", wErr))
-		gp.Stop()
+		stopFn()
 		return
 	}
 	s.SessionWatcher = w
@@ -759,12 +796,10 @@ func (m *Manager) runGoMSE(ctx context.Context, s *Session, ds *DemuxSession, in
 		}
 	}
 
-	s.SetSeekFunc(func(position float64) {
-		seekMs := int64(position * 1000)
-		if seekErr := ds.SeekTo(seekMs); seekErr != nil {
-			m.log.Warn().Err(seekErr).Str("session_id", s.ID).Msg("runtime seek failed")
-		}
-	})
+	// No seekFunc — seek is handled by RestartWithSeek which stops the pipeline,
+	// clears segments, and restarts with a new DemuxSession at the seek offset.
+	// This is the correct approach for MSE because the muxer needs fresh init
+	// segments and the watcher needs a generation bump after any discontinuity.
 
 	go m.pollFileProgress(ctx, s)
 
@@ -772,11 +807,11 @@ func (m *Manager) runGoMSE(ctx context.Context, s *Session, ds *DemuxSession, in
 		go m.cachePassiveMetadata(ctx, s)
 	}
 
-	m.log.Info().Str("session_id", s.ID).Bool("transcode", needsTranscode).Msg("Go MSE pipeline started")
+	m.log.Info().Str("session_id", s.ID).Bool("transcode", forceDecode).Msg("Go MSE pipeline started")
 
-	demuxErr := ds.RunWithSink(ctx, gp)
+	demuxErr := ds.RunWithSink(ctx, sink)
 
-	gp.Stop()
+	stopFn()
 
 	if ctx.Err() != nil {
 		m.log.Info().Str("session_id", s.ID).Msg("MSE session ended (context cancelled)")
@@ -804,20 +839,22 @@ func (m *Manager) runGoFullTranscode(ctx context.Context, s *Session, ds *DemuxS
 	}
 
 	gp, err := NewFullTranscodePipeline(FullTranscodeOpts{
-		Info:          info,
-		AudioIndex:    audioIdx,
-		FilePath:      s.FilePath,
-		OutputDir:     s.OutputDir,
-		Format:        format,
-		IsLive:        isLive,
-		HWAccel:       s.startOpts.OutputHWAccel,
-		DecodeHWAccel: s.startOpts.DecodeHWAccel,
-		OutputCodec:   outCodec,
-		Bitrate:       s.startOpts.EncoderBitrateKbps,
-		OutputHeight:  s.startOpts.OutputHeight,
-		Deinterlace:   s.startOpts.Deinterlace,
-		MaxBitDepth:   maxBitDepth,
-		Log:           m.log.With().Str("session_id", s.ID).Logger(),
+		Info:             info,
+		AudioIndex:       audioIdx,
+		FilePath:         s.FilePath,
+		OutputDir:        s.OutputDir,
+		Format:           format,
+		IsLive:           isLive,
+		HWAccel:          s.startOpts.OutputHWAccel,
+		DecodeHWAccel:    s.startOpts.DecodeHWAccel,
+		OutputCodec:      outCodec,
+		OutputAudioCodec: s.startOpts.OutputAudioCodec,
+		Bitrate:          s.startOpts.EncoderBitrateKbps,
+		OutputHeight:     s.startOpts.OutputHeight,
+		Deinterlace:      s.startOpts.Deinterlace,
+		MaxBitDepth:      maxBitDepth,
+		VideoCodecParams: ds.Demuxer().VideoCodecParameters(), AudioCodecParams: ds.Demuxer().AudioCodecParameters(),
+		Log:              m.log.With().Str("session_id", s.ID).Logger(),
 	})
 	if err != nil {
 		m.log.Error().Err(err).Str("session_id", s.ID).Msg("Go full transcode pipeline creation failed")
@@ -862,12 +899,13 @@ func (m *Manager) runGoAudioTranscode(ctx context.Context, s *Session, ds *Demux
 	}
 
 	gp, err := NewAudioTranscodePipeline(AudioTranscodeOpts{
-		Info:       info,
-		AudioIndex: audioIdx,
-		FilePath:   s.FilePath,
-		OutputDir:  s.OutputDir,
-		Format:     format,
-		Log:        m.log.With().Str("session_id", s.ID).Logger(),
+		Info:             info,
+		AudioIndex:       audioIdx,
+		FilePath:         s.FilePath,
+		OutputDir:        s.OutputDir,
+		Format:           format,
+		OutputAudioCodec: s.startOpts.OutputAudioCodec,
+		Log:              m.log.With().Str("session_id", s.ID).Logger(),
 	})
 	if err != nil {
 		m.log.Error().Err(err).Str("session_id", s.ID).Msg("Go audio transcode pipeline creation failed")
@@ -947,7 +985,7 @@ func resolveNeedsTranscode(outCodec, srcCodec string) bool {
 	if srcCodec == "" {
 		return true
 	}
-	return outCodec != srcCodec
+	return media.BaseCodec(outCodec) != media.BaseCodec(srcCodec)
 }
 
 func (m *Manager) pollFileProgress(ctx context.Context, s *Session) {

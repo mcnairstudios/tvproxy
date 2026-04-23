@@ -39,9 +39,9 @@ func NewStreamProfileHandler(repo store.ProfileStore) *StreamProfileHandler {
 var (
 	validStreamModes = map[string]bool{"direct": true, "proxy": true, "ffmpeg": true}
 	validHWAccels    = map[string]bool{"default": true, "none": true, "qsv": true, "nvenc": true, "vaapi": true, "videotoolbox": true}
-	validVideoCodecs = map[string]bool{"default": true, "copy": true, "h264": true, "h265": true, "av1": true}
+	validVideoCodecs = map[string]bool{"default": true, "copy": true, "h264": true, "h265": true, "hvc1": true, "hev1": true, "av1": true, "vp8": true, "vp9": true}
 	validContainers  = map[string]bool{"mpegts": true, "matroska": true, "mp4": true, "webm": true}
-	validAudioCodecs = map[string]bool{"default": true, "copy": true, "aac": true, "opus": true}
+	validAudioCodecs = map[string]bool{"default": true, "copy": true, "aac": true, "ac3": true, "eac3": true, "mp2": true, "mp3": true, "opus": true, "vorbis": true, "flac": true}
 	validFPSModes    = map[string]bool{"auto": true, "cfr": true}
 )
 

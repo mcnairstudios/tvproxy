@@ -3,6 +3,7 @@
 package resample
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/asticode/go-astiav"
@@ -39,10 +40,6 @@ func channelLayoutForCount(channels int) (astiav.ChannelLayout, error) {
 func NewResampler(srcChannels, srcRate int, srcFmt astiav.SampleFormat,
 	dstChannels, dstRate int, dstFmt astiav.SampleFormat) (*Resampler, error) {
 
-	_, err := channelLayoutForCount(srcChannels)
-	if err != nil {
-		return nil, fmt.Errorf("avresample: source: %w", err)
-	}
 	dstLayout, err := channelLayoutForCount(dstChannels)
 	if err != nil {
 		return nil, fmt.Errorf("avresample: destination: %w", err)
@@ -71,9 +68,23 @@ func (r *Resampler) Convert(src *astiav.Frame) (*astiav.Frame, error) {
 	dst.SetSampleFormat(r.dstFmt)
 
 	if err := r.swrCtx.ConvertFrame(src, dst); err != nil {
-		dst.Free()
-		return nil, fmt.Errorf("avresample: convert frame: %w", err)
+		if errors.Is(err, astiav.ErrInputChanged) {
+			r.swrCtx.Free()
+			r.swrCtx = astiav.AllocSoftwareResampleContext()
+			if r.swrCtx == nil {
+				dst.Free()
+				return nil, fmt.Errorf("avresample: failed to reallocate after input change")
+			}
+			if retryErr := r.swrCtx.ConvertFrame(src, dst); retryErr != nil {
+				dst.Free()
+				return nil, fmt.Errorf("avresample: convert frame after input change: %w", retryErr)
+			}
+		} else {
+			dst.Free()
+			return nil, fmt.Errorf("avresample: convert frame: %w", err)
+		}
 	}
+	dst.SetPts(src.Pts())
 	return dst, nil
 }
 

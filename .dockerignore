@@ -12,4 +12,4 @@ recordings/
 static/
 tvproxy
 wgtest
-gstreamer-plugins/*/builddir
+

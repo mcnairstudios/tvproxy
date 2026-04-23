@@ -16,12 +16,10 @@ func ToAVPacket(p *demux.Packet, timeBase astiav.Rational) (*astiav.Packet, erro
 	}
 
 	if len(p.Data) > 0 {
-		if err := pkt.AllocPayload(len(p.Data)); err != nil {
+		if err := pkt.FromData(p.Data); err != nil {
 			pkt.Free()
-			return nil, fmt.Errorf("conv: alloc payload: %w", err)
+			return nil, fmt.Errorf("conv: set packet data: %w", err)
 		}
-		copy(pkt.Data(), p.Data)
-		pkt.SetSize(len(p.Data))
 	}
 
 	tbNum := int64(timeBase.Num())
@@ -59,6 +57,7 @@ var codecIDMap = map[string]astiav.CodecID{
 	"flac":       astiav.CodecIDFlac,
 	"vorbis":     astiav.CodecIDVorbis,
 	"opus":       astiav.CodecIDOpus,
+	"truehd":     astiav.CodecIDTruehd,
 	"pcm_s16le":  astiav.CodecIDPcmS16Le,
 	"subrip":     astiav.CodecIDSubrip,
 	"ass":        astiav.CodecIDAss,

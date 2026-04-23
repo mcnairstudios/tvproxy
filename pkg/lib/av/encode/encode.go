@@ -8,9 +8,10 @@ import (
 )
 
 type Encoder struct {
-	codecCtx *astiav.CodecContext
-	hwCtx    *astiav.HardwareDeviceContext
-	closed   bool
+	codecCtx   *astiav.CodecContext
+	hwCtx      *astiav.HardwareDeviceContext
+	closed     bool
+	hasEncoded bool
 }
 
 type EncodeOpts struct {
@@ -183,41 +184,82 @@ func NewVideoEncoder(opts EncodeOpts) (*Encoder, error) {
 	return enc, nil
 }
 
-func NewAACEncoder(channels, sampleRate int) (*Encoder, error) {
-	codec := astiav.FindEncoderByName("aac")
+var audioEncoderMap = map[string]string{
+	"aac":    "aac",
+	"ac3":    "ac3",
+	"eac3":   "eac3",
+	"mp2":    "mp2",
+	"flac":   "flac",
+	"opus":   "libopus",
+	"mp3":    "libmp3lame",
+	"vorbis": "libvorbis",
+}
+
+func ResolveAudioEncoderName(codec string) string {
+	if name, ok := audioEncoderMap[codec]; ok {
+		return name
+	}
+	return codec
+}
+
+type AudioEncodeOpts struct {
+	Codec      string // codec name: "aac", "opus", "mp3", etc. (resolved to encoder name internally)
+	Channels   int
+	SampleRate int
+}
+
+func NewAudioEncoder(opts AudioEncodeOpts) (*Encoder, error) {
+	if opts.Codec == "" {
+		return nil, fmt.Errorf("encode: audio codec not specified")
+	}
+	codecName := ResolveAudioEncoderName(opts.Codec)
+
+	codec := astiav.FindEncoderByName(codecName)
 	if codec == nil {
-		return nil, fmt.Errorf("encode: AAC encoder not found")
+		return nil, fmt.Errorf("encode: audio encoder %q not found", codecName)
 	}
 
 	cc := astiav.AllocCodecContext(codec)
 	if cc == nil {
-		return nil, fmt.Errorf("encode: failed to allocate codec context for AAC")
+		return nil, fmt.Errorf("encode: failed to allocate codec context for %q", codecName)
 	}
 
-	cc.SetSampleRate(sampleRate)
+	cc.SetSampleRate(opts.SampleRate)
 	cc.SetSampleFormat(astiav.SampleFormatFltp)
 
-	switch channels {
+	switch opts.Channels {
 	case 1:
 		cc.SetChannelLayout(astiav.ChannelLayoutMono)
 	case 2:
 		cc.SetChannelLayout(astiav.ChannelLayoutStereo)
 	case 6:
 		cc.SetChannelLayout(astiav.ChannelLayout5Point1)
+	case 8:
+		cc.SetChannelLayout(astiav.ChannelLayout7Point1)
 	default:
 		cc.SetChannelLayout(astiav.ChannelLayoutStereo)
 	}
 
 	cc.SetFlags(astiav.NewCodecContextFlags(astiav.CodecContextFlagGlobalHeader))
-
-	cc.SetTimeBase(astiav.NewRational(1, sampleRate))
+	cc.SetTimeBase(astiav.NewRational(1, opts.SampleRate))
 
 	if err := cc.Open(codec, nil); err != nil {
 		cc.Free()
-		return nil, fmt.Errorf("encode: open AAC encoder: %w", err)
+		return nil, fmt.Errorf("encode: open audio encoder %q: %w", codecName, err)
 	}
 
 	return &Encoder{codecCtx: cc}, nil
+}
+
+func (e *Encoder) FrameSize() int {
+	if e.codecCtx == nil {
+		return 0
+	}
+	return e.codecCtx.FrameSize()
+}
+
+func NewAACEncoder(channels, sampleRate int) (*Encoder, error) {
+	return NewAudioEncoder(AudioEncodeOpts{Codec: "aac", Channels: channels, SampleRate: sampleRate})
 }
 
 func (e *Encoder) Encode(frame *astiav.Frame) ([]*astiav.Packet, error) {
@@ -245,6 +287,7 @@ func (e *Encoder) Encode(frame *astiav.Frame) ([]*astiav.Packet, error) {
 			return packets, fmt.Errorf("encode: receive packet: %w", err)
 		}
 		packets = append(packets, pkt)
+		e.hasEncoded = true
 	}
 
 	return packets, nil
@@ -286,6 +329,16 @@ func (e *Encoder) Close() {
 
 func (e *Encoder) freeResources() {
 	if e.codecCtx != nil {
+		if e.hasEncoded {
+			e.codecCtx.SendFrame(nil) //nolint:errcheck
+			pkt := astiav.AllocPacket()
+			if pkt != nil {
+				for e.codecCtx.ReceivePacket(pkt) == nil {
+					pkt.Unref()
+				}
+				pkt.Free()
+			}
+		}
 		e.codecCtx.Free()
 		e.codecCtx = nil
 	}

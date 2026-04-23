@@ -63,6 +63,9 @@ type trackMuxer struct {
 	seq             int    // next segment sequence number (1-based)
 	accumDurationUs int64  // accumulated fragment duration in microseconds
 	fragThresholdUs int64  // flush threshold in microseconds
+	pktCount        int    // packets written since last flush
+	lastDTS         int64  // last written DTS for monotonic enforcement
+	dtsInited       bool
 }
 
 // movflags for CMAF fragmented MP4 output.
@@ -91,9 +94,13 @@ func NewFragmentedMuxer(opts MuxOpts) (*FragmentedMuxer, error) {
 
 	// Video muxer
 	if opts.VideoCodecID != astiav.CodecIDNone {
+		var videoThresholdUs int64
+		if opts.SegmentDurationMs > 0 {
+			videoThresholdUs = int64(opts.SegmentDurationMs) * 1000
+		}
 		tm, err := newTrackMuxer(opts.OutputDir, "video", opts.VideoCodecID,
 			opts.VideoExtradata, opts.VideoTimeBase, opts.VideoWidth, opts.VideoHeight,
-			0, 0, 0) // no duration threshold for video — flush on keyframes
+			0, 0, videoThresholdUs)
 		if err != nil {
 			return nil, fmt.Errorf("avmux: video track: %w", err)
 		}
@@ -173,6 +180,19 @@ func newTrackMuxer(outputDir, prefix string, codecID astiav.CodecID,
 		if sampleRate > 0 {
 			cp.SetSampleRate(sampleRate)
 		}
+		switch channels {
+		case 1:
+			cp.SetChannelLayout(astiav.ChannelLayoutMono)
+		case 2:
+			cp.SetChannelLayout(astiav.ChannelLayoutStereo)
+		case 6:
+			cp.SetChannelLayout(astiav.ChannelLayout5Point1)
+		case 8:
+			cp.SetChannelLayout(astiav.ChannelLayout7Point1)
+		}
+		if codecID == astiav.CodecIDAac {
+			cp.SetFrameSize(1024)
+		}
 	}
 	s.SetTimeBase(timeBase)
 
@@ -225,18 +245,23 @@ func (m *FragmentedMuxer) WriteVideoPacket(pkt *astiav.Packet) error {
 
 	isKeyframe := pkt.Flags().Has(astiav.PacketFlagKey)
 
-	// Flush previous fragment on keyframe boundary
-	if isKeyframe && m.video.accumDurationUs > 0 {
+	// Flush on keyframe boundary, or on max duration if configured
+	shouldFlush := m.video.pktCount > 0 && (isKeyframe ||
+		(m.video.fragThresholdUs > 0 && m.video.accumDurationUs >= m.video.fragThresholdUs))
+	if shouldFlush {
 		if err := m.video.flushFragment(); err != nil {
 			return err
 		}
 	}
 
 	pkt.SetStreamIndex(m.video.stream.Index())
-	if err := m.video.fc.WriteInterleavedFrame(pkt); err != nil {
+	m.video.ensureMonotonicDTS(pkt)
+	dur := pktDurationUs(pkt, m.video.stream)
+	if err := m.video.fc.WriteFrame(pkt); err != nil {
 		return fmt.Errorf("avmux: write video frame: %w", err)
 	}
-	m.video.accumDurationUs += pktDurationUs(pkt, m.video.stream)
+	m.video.pktCount++
+	m.video.accumDurationUs += dur
 	return nil
 }
 
@@ -253,10 +278,13 @@ func (m *FragmentedMuxer) WriteAudioPacket(pkt *astiav.Packet) error {
 	}
 
 	pkt.SetStreamIndex(m.audio.stream.Index())
-	if err := m.audio.fc.WriteInterleavedFrame(pkt); err != nil {
+	m.audio.ensureMonotonicDTS(pkt)
+	dur := pktDurationUs(pkt, m.audio.stream)
+	if err := m.audio.fc.WriteFrame(pkt); err != nil {
 		return fmt.Errorf("avmux: write audio frame: %w", err)
 	}
-	m.audio.accumDurationUs += pktDurationUs(pkt, m.audio.stream)
+	m.audio.pktCount++
+	m.audio.accumDurationUs += dur
 
 	if m.audio.fragThresholdUs > 0 && m.audio.accumDurationUs >= m.audio.fragThresholdUs {
 		if err := m.audio.flushFragment(); err != nil {
@@ -284,7 +312,7 @@ func (m *FragmentedMuxer) Close() error {
 
 	var firstErr error
 	if m.video != nil {
-		if m.video.accumDurationUs > 0 {
+		if m.video.pktCount > 0 {
 			if err := m.video.flushFragment(); err != nil && firstErr == nil {
 				firstErr = err
 			}
@@ -292,7 +320,7 @@ func (m *FragmentedMuxer) Close() error {
 		m.video.close()
 	}
 	if m.audio != nil {
-		if m.audio.accumDurationUs > 0 {
+		if m.audio.pktCount > 0 {
 			if err := m.audio.flushFragment(); err != nil && firstErr == nil {
 				firstErr = err
 			}
@@ -304,7 +332,7 @@ func (m *FragmentedMuxer) Close() error {
 
 // flushFragment flushes the current fragment to a media segment file.
 func (t *trackMuxer) flushFragment() error {
-	if err := t.fc.Flush(); err != nil {
+	if err := t.fc.WriteFrame(nil); err != nil {
 		return fmt.Errorf("avmux: flush %s fragment: %w", t.prefix, err)
 	}
 	t.ioCtx.Flush()
@@ -319,6 +347,7 @@ func (t *trackMuxer) flushFragment() error {
 	}
 	t.buf.Reset()
 	t.seq++
+	t.pktCount = 0
 	t.accumDurationUs = 0
 	return nil
 }
@@ -334,6 +363,23 @@ func (t *trackMuxer) close() {
 		t.ioCtx.Free()
 		t.ioCtx = nil
 	}
+}
+
+// ensureMonotonicDTS adjusts the packet DTS to be strictly greater than the last
+// written DTS. B-frame reordering can produce duplicate DTS values which ffmpeg rejects.
+func (t *trackMuxer) ensureMonotonicDTS(pkt *astiav.Packet) {
+	dts := pkt.Dts()
+	pts := pkt.Pts()
+	if t.dtsInited && dts <= t.lastDTS {
+		dts = t.lastDTS + 1
+		if pts < dts {
+			pts = dts
+		}
+		pkt.SetDts(dts)
+		pkt.SetPts(pts)
+	}
+	t.lastDTS = dts
+	t.dtsInited = true
 }
 
 // pktDurationUs returns the packet duration in microseconds.

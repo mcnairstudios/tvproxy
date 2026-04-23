@@ -62,33 +62,31 @@ func extractCodecString(initSegment []byte) string {
 
 // parseAVC1CodecString extracts the codec string from an avc1 sample entry.
 // Format: avc1.PPCCLL where PP=profile, CC=constraints, LL=level (all hex).
+// visualSampleEntrySize is the fixed-size header of a VisualSampleEntry
+// (6 reserved + 2 data_ref_index + 2 pre_defined + 2 reserved + 12 pre_defined
+// + 2 width + 2 height + 4 horiz_res + 4 vert_res + 4 reserved + 2 frame_count
+// + 32 compressorname + 2 depth + 2 pre_defined = 78 bytes).
+const visualSampleEntrySize = 78
+
 func parseAVC1CodecString(avc1 []byte) string {
-	// avc1 box: 78 bytes of VisualSampleEntry header, then avcC box.
-	// The avcC box contains AVCDecoderConfigurationRecord.
-	avcC := findBox(avc1, "avcC")
+	if len(avc1) < visualSampleEntrySize+8 {
+		return ""
+	}
+	avcC := findBox(avc1[visualSampleEntrySize:], "avcC")
 	if avcC == nil || len(avcC) < 4 {
 		return ""
 	}
-	// avcC data: configurationVersion(1), profile(1), compatibility(1), level(1)
-	profile := avcC[0]
-	compat := avcC[1]
-	level := avcC[2]
-	if profile == 1 { // configurationVersion is 1, actual profile is next byte
-		if len(avcC) < 5 {
-			return ""
-		}
-		profile = avcC[1]
-		compat = avcC[2]
-		level = avcC[3]
-	}
+	profile := avcC[1]
+	compat := avcC[2]
+	level := avcC[3]
 	return fmt.Sprintf("avc1.%02X%02X%02X", profile, compat, level)
 }
 
-// parseHEVCCodecString extracts the codec string from a hev1/hvc1 sample entry.
-// Format: hev1.P.C.TL where P=profile, C=constraints hex, TL=tier+level.
 func parseHEVCCodecString(entry []byte, tag string) string {
-	// hev1 box: 78 bytes VisualSampleEntry header, then hvcC box.
-	hvcC := findBox(entry, "hvcC")
+	if len(entry) < visualSampleEntrySize+8 {
+		return ""
+	}
+	hvcC := findBox(entry[visualSampleEntrySize:], "hvcC")
 	if hvcC == nil || len(hvcC) < 13 {
 		return ""
 	}
@@ -155,8 +153,12 @@ func findBox(data []byte, boxType string) []byte {
 
 		headerSize := 8
 		if size == 1 && offset+16 <= len(data) {
-			// Extended size (64-bit)
-			size = int(binary.BigEndian.Uint64(data[offset+8 : offset+16]))
+			extSize := binary.BigEndian.Uint64(data[offset+8 : offset+16])
+			if extSize > uint64(len(data)-offset) {
+				size = len(data) - offset
+			} else {
+				size = int(extSize)
+			}
 			headerSize = 16
 		}
 		if size < headerSize {

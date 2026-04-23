@@ -139,6 +139,81 @@ func TestFragmentedMuxer_WriteAfterClose(t *testing.T) {
 // Codec string extraction
 // ---------------------------------------------------------------------------
 
+func TestExtractCodecString_H264(t *testing.T) {
+	dir := t.TempDir()
+	extradata := []byte{
+		0x01, 0x42, 0xC0, 0x1E, 0xFF, 0xE1,
+		0x00, 0x04, 0x67, 0x42, 0xC0, 0x1E,
+		0x01,
+		0x00, 0x02, 0x68, 0xCE,
+	}
+	m, err := NewFragmentedMuxer(MuxOpts{
+		OutputDir:      dir,
+		VideoCodecID:   astiav.CodecIDH264,
+		VideoExtradata: extradata,
+		VideoWidth:     640,
+		VideoHeight:    480,
+		VideoTimeBase:  astiav.NewRational(1, 90000),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	cs := m.VideoCodecString()
+	if cs == "" {
+		t.Error("H.264 codec string is empty")
+		initPath := filepath.Join(dir, "init_video.mp4")
+		data, _ := os.ReadFile(initPath)
+		t.Logf("init segment: %d bytes", len(data))
+		if len(data) > 0 {
+			t.Logf("first 32 bytes: %x", data[:min(32, len(data))])
+		}
+	} else {
+		t.Logf("H.264 codec string: %s", cs)
+		if cs != "avc1.42C01E" {
+			t.Errorf("expected avc1.42C01E, got %s", cs)
+		}
+	}
+}
+
+func TestExtractCodecString_HEVC(t *testing.T) {
+	dir := t.TempDir()
+	// Minimal hvcC: version=1, profile=Main(1), tier=0, level=120
+	extradata := []byte{
+		0x01, 0x01, 0x60, 0x00, 0x00, 0x00,
+		0x90, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x78, 0xF0, 0x00, 0xFC, 0xFD, 0xFA,
+		0xFA, 0x00, 0x00, 0x0F, 0x00,
+	}
+	m, err := NewFragmentedMuxer(MuxOpts{
+		OutputDir:      dir,
+		VideoCodecID:   astiav.CodecIDHevc,
+		VideoExtradata: extradata,
+		VideoWidth:     1920,
+		VideoHeight:    1080,
+		VideoTimeBase:  astiav.NewRational(1, 90000),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	cs := m.VideoCodecString()
+	if cs == "" {
+		t.Error("HEVC codec string is empty")
+	} else {
+		t.Logf("HEVC codec string: %s", cs)
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func TestFindBox(t *testing.T) {
 	// Construct a minimal box: size(4) + type(4) + content
 	box := []byte{

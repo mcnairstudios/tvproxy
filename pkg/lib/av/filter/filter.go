@@ -101,6 +101,9 @@ func (d *Deinterlacer) Process(frame *astiav.Frame) (*astiav.Frame, error) {
 	out := astiav.AllocFrame()
 	if err := d.bufferSink.GetFrame(out, astiav.NewBuffersinkFlags()); err != nil {
 		out.Free()
+		if errors.Is(err, astiav.ErrEagain) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("filter: getting frame from buffersink: %w", err)
 	}
 	return out, nil

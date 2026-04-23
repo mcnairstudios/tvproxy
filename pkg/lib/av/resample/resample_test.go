@@ -23,12 +23,15 @@ func TestNewResampler(t *testing.T) {
 }
 
 func TestNewResamplerUnsupportedChannels(t *testing.T) {
-	_, err := NewResampler(3, 44100, astiav.SampleFormatFltp,
+	// Source channel count is not validated — auto-negotiated from input frame
+	r, err := NewResampler(3, 44100, astiav.SampleFormatFltp,
 		2, 48000, astiav.SampleFormatS16)
-	if err == nil {
-		t.Fatal("expected error for unsupported source channel count")
+	if err != nil {
+		t.Fatalf("3ch source should be accepted (auto-negotiated): %v", err)
 	}
+	r.Close()
 
+	// Destination channel count IS validated — must map to a known layout
 	_, err = NewResampler(2, 44100, astiav.SampleFormatFltp,
 		3, 48000, astiav.SampleFormatS16)
 	if err == nil {

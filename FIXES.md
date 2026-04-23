@@ -3,11 +3,10 @@
 ## How to Test
 
 ```bash
-# Build
-CGO_ENABLED=1 go build -tags enable_gstreamer -o ./tvproxy ./cmd/tvproxy/
+# Build (requires libavformat/libavcodec/libavutil/libavfilter/libswscale/libswresample dev libs)
+CGO_ENABLED=1 go build -o ./tvproxy ./cmd/tvproxy/
 
-# Run (with plugins)
-GST_PLUGIN_PATH=/Users/gavinmcnair/claude/gstreamer-plugin/builddir:/Users/gavinmcnair/claude/gst-plugins-rs/target/release:/Users/gavinmcnair/claude/tvproxymux/build:/Users/gavinmcnair/claude/tvproxysrc/build \
+# Run
 TVPROXY_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" \
 TVPROXY_RECORD_DIR=/tmp/recordings \
 TVPROXY_VOD_OUTPUT_DIR=/tmp/recordings \

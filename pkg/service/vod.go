@@ -266,6 +266,37 @@ func (s *VODService) composeSessionArgs(ctx context.Context, profileName, stream
 	}
 
 	container := sp.Container
+
+	if delivery == "mse" {
+		switch container {
+		case "webm":
+			switch audioCodec {
+			case "opus", "vorbis":
+			default:
+				audioCodec = "opus"
+			}
+			switch videoCodec {
+			case "vp8", "vp9", "av1":
+			case "default", "copy", "":
+			default:
+				videoCodec = "vp9"
+			}
+		default:
+			container = "mp4"
+			switch audioCodec {
+			case "aac", "mp3", "opus", "flac":
+			default:
+				audioCodec = "aac"
+			}
+			switch videoCodec {
+			case "h264", "hvc1", "hev1", "av1":
+			case "default", "copy", "":
+			default:
+				videoCodec = "hvc1"
+			}
+		}
+	}
+
 	if (videoCodec == "av1" || videoCodec == "AV1") && (container == "mpegts" || container == "ts") {
 		container = "mp4"
 	}
@@ -329,12 +360,17 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		},
 	)
 
-	if sa.Delivery == "mse" && strategy.VideoCodec == "copy" {
-		codec := probeVCodec
-		if codec == "" {
-			codec = "h265"
+	if sa.Delivery == "mse" && strategy.VideoCodec == "copy" && probeVCodec != "" {
+		strategy.VideoCodec = normalizeVideoCodecName(probeVCodec)
+	}
+
+	outputAudioCodec := strategy.AudioCodec
+	if sa.Delivery == "mse" {
+		switch outputAudioCodec {
+		case "aac", "mp3", "opus", "vorbis", "flac":
+		default:
+			outputAudioCodec = "aac"
 		}
-		strategy.VideoCodec = normalizeVideoCodecName(codec)
 	}
 
 	startOpts := session.StartOpts{
@@ -346,7 +382,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		ProfileName:      profileName,
 		SourceVideoCodec: probeVCodec,
 		OutputVideoCodec: strategy.VideoCodec,
-		OutputAudioCodec: strategy.AudioCodec,
+		OutputAudioCodec: outputAudioCodec,
 		OutputContainer:  strategy.Container,
 		OutputHWAccel:    strategy.HWAccel,
 		UseWireGuard:     useWG,
@@ -426,12 +462,17 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		},
 	)
 
-	if sa.Delivery == "mse" && strategy.VideoCodec == "copy" {
-		codec := stream.VODVCodec
-		if codec == "" {
-			codec = "h265"
+	if sa.Delivery == "mse" && strategy.VideoCodec == "copy" && stream.VODVCodec != "" {
+		strategy.VideoCodec = normalizeVideoCodecName(stream.VODVCodec)
+	}
+
+	streamOutputAudio := strategy.AudioCodec
+	if sa.Delivery == "mse" {
+		switch streamOutputAudio {
+		case "aac", "mp3", "opus", "vorbis", "flac":
+		default:
+			streamOutputAudio = "aac"
 		}
-		strategy.VideoCodec = normalizeVideoCodecName(codec)
 	}
 
 	startOpts2 := session.StartOpts{
@@ -443,7 +484,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		ProfileName:      profileName,
 		SourceVideoCodec: stream.VODVCodec,
 		OutputVideoCodec: strategy.VideoCodec,
-		OutputAudioCodec: strategy.AudioCodec,
+		OutputAudioCodec: streamOutputAudio,
 		OutputContainer:  strategy.Container,
 		OutputHWAccel:    strategy.HWAccel,
 		UseWireGuard:     stream.UseWireGuard,
