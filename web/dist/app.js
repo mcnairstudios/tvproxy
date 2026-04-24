@@ -7633,7 +7633,7 @@
 
         (async () => {
           try {
-            const caps = await api.get('/api/gstreamer/capabilities');
+            const caps = await api.get('/api/capabilities');
             if (!caps || !caps.video_encoders) throw new Error('No capability data');
             capabilitiesContent.innerHTML = '';
 
@@ -7857,7 +7857,7 @@
 
           } catch (e) {
             capabilitiesContent.innerHTML = '';
-            capabilitiesContent.appendChild(h('p', { style: 'color: var(--text-muted); font-size: 13px' }, 'Could not load platform capabilities. The GStreamer capability endpoint may not be available.'));
+            capabilitiesContent.appendChild(h('p', { style: 'color: var(--text-muted); font-size: 13px' }, 'Could not load platform capabilities.'));
           }
         })();
 

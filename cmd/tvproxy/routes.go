@@ -314,6 +314,7 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 			r.Get("/pool", h.wireguardMulti.PoolStatus)
 		})
 
+		r.Get("/api/capabilities", h.gstreamer.Capabilities)
 		r.Get("/api/gstreamer/capabilities", h.gstreamer.Capabilities)
 	})
 
