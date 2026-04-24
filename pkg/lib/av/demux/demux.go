@@ -187,58 +187,10 @@ func finishDemuxerSetup(fc *astiav.FormatContext, url string, opts DemuxOpts) (*
 		seekCh:     make(chan seekRequest, 1),
 	}
 
-	type audioCandidate struct {
-		index int
-		lang  string
-	}
-	var audioCandidates []audioCandidate
-
-	for _, s := range dm.streams {
-		cp := s.CodecParameters()
-		if cp.CodecID() == astiav.CodecIDNone {
-			continue
-		}
-		switch cp.MediaType() {
-		case astiav.MediaTypeVideo:
-			if dm.videoIdx < 0 {
-				dm.videoIdx = s.Index()
-			}
-		case astiav.MediaTypeAudio:
-			lang := metadataValue(s.Metadata(), "language")
-			audioCandidates = append(audioCandidates, audioCandidate{index: s.Index(), lang: lang})
-		case astiav.MediaTypeSubtitle:
-			if dm.subIdx < 0 {
-				dm.subIdx = s.Index()
-			}
-		}
-	}
-
-	switch {
-	case opts.AudioLanguage != "" && len(audioCandidates) > 0:
-		dm.audioIdx = audioCandidates[0].index
-		for _, c := range audioCandidates {
-			if c.lang == opts.AudioLanguage {
-				dm.audioIdx = c.index
-				break
-			}
-		}
-	case opts.AudioTrack >= 0:
-		valid := false
-		for _, c := range audioCandidates {
-			if c.index == opts.AudioTrack {
-				valid = true
-				break
-			}
-		}
-		if valid {
-			dm.audioIdx = opts.AudioTrack
-		} else if len(audioCandidates) > 0 {
-			dm.audioIdx = audioCandidates[0].index
-		}
-	default:
-		if len(audioCandidates) > 0 {
-			dm.audioIdx = audioCandidates[0].index
-		}
+	if len(dm.streams) > 0 {
+		dm.setIndicesFromStreams(opts)
+	} else if si != nil {
+		dm.setIndicesFromCachedInfo(si, opts)
 	}
 
 	if dm.audioIdx >= 0 {
@@ -261,6 +213,83 @@ func finishDemuxerSetup(fc *astiav.FormatContext, url string, opts DemuxOpts) (*
 	dm.pkt = p
 
 	return dm, nil
+}
+
+type audioCandidate struct {
+	index int
+	lang  string
+}
+
+func (d *Demuxer) setIndicesFromStreams(opts DemuxOpts) {
+	var audioCandidates []audioCandidate
+
+	for _, s := range d.streams {
+		cp := s.CodecParameters()
+		if cp.CodecID() == astiav.CodecIDNone {
+			continue
+		}
+		switch cp.MediaType() {
+		case astiav.MediaTypeVideo:
+			if d.videoIdx < 0 {
+				d.videoIdx = s.Index()
+			}
+		case astiav.MediaTypeAudio:
+			lang := metadataValue(s.Metadata(), "language")
+			audioCandidates = append(audioCandidates, audioCandidate{index: s.Index(), lang: lang})
+		case astiav.MediaTypeSubtitle:
+			if d.subIdx < 0 {
+				d.subIdx = s.Index()
+			}
+		}
+	}
+
+	d.selectAudio(audioCandidates, opts)
+}
+
+func (d *Demuxer) setIndicesFromCachedInfo(si *probe.StreamInfo, opts DemuxOpts) {
+	if si.Video != nil {
+		d.videoIdx = si.Video.Index
+	}
+	if len(si.SubTracks) > 0 {
+		d.subIdx = si.SubTracks[0].Index
+	}
+
+	var audioCandidates []audioCandidate
+	for _, at := range si.AudioTracks {
+		audioCandidates = append(audioCandidates, audioCandidate{index: at.Index, lang: at.Language})
+	}
+
+	d.selectAudio(audioCandidates, opts)
+}
+
+func (d *Demuxer) selectAudio(candidates []audioCandidate, opts DemuxOpts) {
+	switch {
+	case opts.AudioLanguage != "" && len(candidates) > 0:
+		d.audioIdx = candidates[0].index
+		for _, c := range candidates {
+			if c.lang == opts.AudioLanguage {
+				d.audioIdx = c.index
+				break
+			}
+		}
+	case opts.AudioTrack >= 0:
+		valid := false
+		for _, c := range candidates {
+			if c.index == opts.AudioTrack {
+				valid = true
+				break
+			}
+		}
+		if valid {
+			d.audioIdx = opts.AudioTrack
+		} else if len(candidates) > 0 {
+			d.audioIdx = candidates[0].index
+		}
+	default:
+		if len(candidates) > 0 {
+			d.audioIdx = candidates[0].index
+		}
+	}
 }
 
 var retryDelays = []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}

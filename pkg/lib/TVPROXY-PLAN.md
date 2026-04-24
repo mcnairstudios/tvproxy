@@ -195,6 +195,14 @@ UPDATE: No longer crashing on seek (SIGSEGV fixed). But seek is broken functiona
 
 Seek must: (1) stop demux loop, (2) flush+reset muxer (new init segments, seq 1), (3) reset watcher (generation bump → frontend gets 410 → restarts), (4) rebase PTS/DTS to 0, (5) restart demux loop.
 
+UPDATE: Seek now restarts the pipeline. Init segments are written (confirmed on disk at correct timestamp). But the watcher returns 503 for init segments after seek — it doesn't pick up the new files. Either fsnotify misses the writes (files written before watcher recreated) or the watcher's atomic pointers are reset and never re-populated from the existing files on disk.
+
+The watcher needs to either: (a) scan the segments directory for existing files on creation/reset, or (b) the init segments must be written AFTER the watcher is recreated (not before).
+
+UPDATE 2: Seek now works mechanically — pipeline restarts, init segments written, segments flow. But no picture after seek. All segments return 200, no Chrome errors. Audio fetches much faster than video.
+
+The likely cause: PTS after seek starts at the seek position (e.g., 3125s) instead of being rebased to 0. Chrome MSE SourceBuffer had data at 0-535s, then gets new data at 3125s+. It can't bridge the gap. The demux loop must rebase PTS to 0 after seek — subtract the seek offset from all packet timestamps.
+
 ### REQ-017: Deinterlace Filter — "Resource temporarily unavailable" on SAT>IP
 
 Live SAT>IP RTSP playback fails immediately: `demuxloop: push video: deinterlace: filter: getting frame from buffersink: Resource temporarily unavailable`
