@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/asticode/go-astiav"
 )
@@ -80,59 +81,100 @@ var probeAudioEncoders = []struct {
 	{"mp2", "mp2"},
 }
 
+var hwPlatformMap = map[string]astiav.HardwareDeviceType{
+	"vaapi":        astiav.HardwareDeviceTypeVAAPI,
+	"qsv":          astiav.HardwareDeviceTypeQSV,
+	"cuda":         astiav.HardwareDeviceTypeCUDA,
+	"nvenc":        astiav.HardwareDeviceTypeCUDA,
+	"videotoolbox": astiav.HardwareDeviceTypeVideoToolbox,
+	"vulkan":       astiav.HardwareDeviceTypeVulkan,
+}
+
+var (
+	availablePlatforms     map[string]bool
+	availablePlatformsOnce sync.Once
+)
+
+func probeAvailablePlatforms() map[string]bool {
+	availablePlatformsOnce.Do(func() {
+		availablePlatforms = make(map[string]bool)
+		for name, hwType := range hwPlatformMap {
+			if name == "nvenc" {
+				continue
+			}
+			ctx, err := astiav.CreateHardwareDeviceContext(hwType, "", nil, 0)
+			if err == nil {
+				ctx.Free()
+				availablePlatforms[name] = true
+				if name == "cuda" {
+					availablePlatforms["nvenc"] = true
+				}
+			}
+		}
+	})
+	return availablePlatforms
+}
+
 func (h *CapabilitiesHandler) Capabilities(w http.ResponseWriter, r *http.Request) {
+	available := probeAvailablePlatforms()
 	platformSet := map[string]bool{}
 
 	var videoEncoders []codecEntry
 	for _, e := range probeVideoEncoders {
-		if astiav.FindEncoderByName(e.name) != nil {
-			isHW := e.hwaccel != ""
-			if isHW {
-				platformSet[e.hwaccel] = true
-			}
-			videoEncoders = append(videoEncoders, codecEntry{
-				Name:     e.name,
-				Codec:    e.codec,
-				HWAccel:  e.hwaccel,
-				Platform: e.hwaccel,
-				HW:       isHW,
-				Type:     "video",
-			})
+		if astiav.FindEncoderByName(e.name) == nil {
+			continue
 		}
+		isHW := e.hwaccel != ""
+		if isHW && !available[e.hwaccel] {
+			continue
+		}
+		if isHW {
+			platformSet[e.hwaccel] = true
+		}
+		videoEncoders = append(videoEncoders, codecEntry{
+			Name:     e.name,
+			Codec:    e.codec,
+			HWAccel:  e.hwaccel,
+			Platform: e.hwaccel,
+			HW:       isHW,
+			Type:     "video",
+		})
 	}
 
 	var videoDecoders []codecEntry
 	seen := map[string]bool{}
 	for _, d := range probeVideoDecoders {
-		if astiav.FindDecoderByName(d.name) != nil {
-			videoDecoders = append(videoDecoders, codecEntry{
-				Name:  d.name,
-				Codec: d.codec,
-				Type:  "video",
-			})
-			c := astiav.FindDecoderByName(d.name)
-			if c != nil {
-				for _, hwc := range c.HardwareConfigs() {
-					hwName := strings.ToLower(hwc.HardwareDeviceType().String())
-					if hwName == "" || hwName == "none" {
-						continue
-					}
-					key := d.codec + ":" + hwName
-					if seen[key] {
-						continue
-					}
-					seen[key] = true
-					platformSet[hwName] = true
-					videoDecoders = append(videoDecoders, codecEntry{
-						Name:     d.name,
-						Codec:    d.codec,
-						HWAccel:  hwName,
-						Platform: hwName,
-						HW:       true,
-						Type:     "video",
-					})
-				}
+		c := astiav.FindDecoderByName(d.name)
+		if c == nil {
+			continue
+		}
+		videoDecoders = append(videoDecoders, codecEntry{
+			Name:  d.name,
+			Codec: d.codec,
+			Type:  "video",
+		})
+		for _, hwc := range c.HardwareConfigs() {
+			hwName := strings.ToLower(hwc.HardwareDeviceType().String())
+			if hwName == "" || hwName == "none" {
+				continue
 			}
+			if !available[hwName] {
+				continue
+			}
+			key := d.codec + ":" + hwName
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			platformSet[hwName] = true
+			videoDecoders = append(videoDecoders, codecEntry{
+				Name:     d.name,
+				Codec:    d.codec,
+				HWAccel:  hwName,
+				Platform: hwName,
+				HW:       true,
+				Type:     "video",
+			})
 		}
 	}
 
