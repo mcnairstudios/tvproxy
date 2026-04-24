@@ -17,7 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdav1d-dev \
     libfdk-aac-dev \
     libaom-dev \
+    libva-dev \
+    libdrm-dev \
     && rm -rf /var/lib/apt/lists/*
+
+RUN wget -q https://github.com/FFmpeg/nv-codec-headers/archive/refs/tags/n12.2.72.0.tar.gz \
+    && tar xf n12.2.72.0.tar.gz \
+    && cd nv-codec-headers-n12.2.72.0 \
+    && make install \
+    && cd .. && rm -rf nv-codec-headers-n12.2.72.0 n12.2.72.0.tar.gz
 
 RUN wget -q https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz \
     && tar xf ffmpeg-8.0.1.tar.xz \
@@ -26,7 +34,7 @@ RUN wget -q https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz \
        --enable-gpl --enable-version3 --enable-nonfree \
        --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libopus \
        --enable-libvorbis --enable-libvpx --enable-libdav1d --enable-libfdk-aac \
-       --enable-libaom \
+       --enable-libaom --enable-vaapi --enable-nvenc --enable-nvdec \
     && make -j$(nproc) \
     && make install \
     && ldconfig \
@@ -63,6 +71,9 @@ RUN apt-get update \
         libdav1d7 \
         libfdk-aac2 \
         libaom3 \
+        libva2 \
+        libva-drm2 \
+        libdrm2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Intel VAAPI/QSV: Arc A380 (DG2), Alder Lake+, older Gen8-11
