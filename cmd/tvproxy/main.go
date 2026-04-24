@@ -360,7 +360,7 @@ func main() {
 	staticRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "static")
 	registerStaticRoutes(r, staticRoot, distFS, versionedIndexBytes)
 
-	jellyfinServer := jellyfin.NewServer("TVProxy", cfg.BaseURL, authService, activityService, favoriteStore, channelStore, channelGroupStore, streamStore, epgStore, logoService, tmdbClient, hlsManager, log)
+	jellyfinServer := jellyfin.NewServer("TVProxy", cfg.BaseURL, authService, activityService, favoriteStore, channelStore, channelGroupStore, streamStore, profileStore, epgStore, logoService, tmdbClient, hlsManager, log)
 	if wgClientForSessions != nil {
 		jellyfinServer.WGProxyFunc = wgProxyFunc
 	}

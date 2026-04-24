@@ -1,5 +1,55 @@
 # Fixes & Ideas (Not on Critical Path)
 
+## Jellyfin (NEW — April 2026)
+
+### Playback (CRITICAL)
+- PlaybackInfo TranscodingUrl missing params: VideoBitrate, AudioBitrate, MaxFramerate, BreakOnNonKeyFrames, TranscodingMaxAudioChannels, RequireAvc, EnableAudioVbrEncoding, Tag, codec profile params
+- TranscodingUrl video ID should use dashed format in path
+- MediaSource needs VideoType: "VideoFile", Bitrate, Size, Formats:[], MediaAttachments:[], RequiredHttpHeaders:{}, SupportsProbing, ReadAtNativeFramerate, HasSegments, ETag
+- HLS master/media playlist handlers need to work with AV pipeline (current HLS manager is old GStreamer-based)
+- PlaybackInfo should parse client DeviceProfile from POST body for codec negotiation
+- Client sends full device capabilities — we should use them to determine direct play vs transcode
+
+### TV Series
+- TV series browsing not wired into Jellyfin client (reference flow in /tmp/jfproxy.log)
+- Series → Seasons → Episodes navigation needs implementing
+- Episode detail view needs series context (SeriesName, SeasonId, IndexNumber, ParentIndexNumber)
+
+### HLS Delivery Mode for libavformat
+- Add HLS as a third delivery option alongside Stream and MSE
+- AV pipeline outputs TS segments to disk (like old GStreamer HLS path)
+- Serve via existing pkg/hls handlers (master.m3u8, media.m3u8, segments)
+- Jellyfin client requires HLS — TranscodingProfiles specify Protocol: "hls", Container: "ts"
+- Wire into client stream profiles as delivery: "hls"
+- This unblocks Jellyfin playback and any other client that needs HLS
+
+### Probe Data → Duration + Codec
+- lib/av probe should capture duration from avformat and save it with probe data
+- Propagate duration back into the stream store (VODDuration field)
+- VODVCodec / VODACodec should be populated from probe data
+- Remove TMDB runtime hack once probe duration is available
+- This feeds into accurate RunTimeTicks for Jellyfin and correct MediaStream codec info
+
+### Token Auth
+- Auto-register unknown tokens to first user is temporary hack
+- Need proper multi-user token validation, expiry, revocation
+
+### Response Format
+- All ID handling needs normaliseID (stripDashes) at entry point — currently ad-hoc
+- enrichMovieDetail was stripped too aggressively — add back fields one at a time with testing
+- Season IDs ("cccc0000" prefix) need validation with dashed format from client
+
+### Missing Features
+- Live TV channels not accessible from Jellyfin client
+- No playback progress reporting (Sessions/Playing)
+- No watch history / resume
+- No search
+- WebSocket sends no events
+
+### Docker / Build
+- sdk_models.go reference from Opus agent needs copying from worktree branch
+- HLS code in playback.go references old HLS manager — needs updating for AV pipeline
+
 ## How to Test
 
 ```bash

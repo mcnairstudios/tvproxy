@@ -612,6 +612,17 @@ func (s *Server) enrichMovieItem(st *models.Stream) BaseItemDto {
 	if st.VODDuration > 0 {
 		item.RunTimeTicks = secondsToTicks(st.VODDuration)
 	}
+	if item.RunTimeTicks == 0 && s.tmdbClient != nil {
+		if m := s.tmdbClient.LookupMovie(st.Name); m != nil && m.TMDBID > 0 {
+			if details, err := s.tmdbClient.Details("movie", fmt.Sprintf("%d", m.TMDBID)); err == nil {
+				if dm, ok := details.(map[string]any); ok {
+					if rt, ok := dm["runtime"].(float64); ok && rt > 0 {
+						item.RunTimeTicks = int64(rt) * 60 * 10000000
+					}
+				}
+			}
+		}
+	}
 
 	if st.VODYear > 0 {
 		item.ProductionYear = st.VODYear

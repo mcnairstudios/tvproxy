@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/hls"
+	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/tmdb"
@@ -32,6 +34,7 @@ type Server struct {
 	channels        store.ChannelStore
 	channelGroups   store.ChannelGroupStore
 	streams         store.StreamReader
+	profiles        store.ProfileStore
 	epg             store.EPGStore
 	logoService     *service.LogoService
 	tmdbClient      *tmdb.Client
@@ -41,7 +44,7 @@ type Server struct {
 	tokens          sync.Map
 }
 
-func NewServer(serverName, baseURL string, auth *service.AuthService, activityService *service.ActivityService, favorites store.FavoriteStore, channels store.ChannelStore, channelGroups store.ChannelGroupStore, streams store.StreamReader, epg store.EPGStore, logoService *service.LogoService, tmdbClient *tmdb.Client, hlsManager *hls.Manager, log zerolog.Logger) *Server {
+func NewServer(serverName, baseURL string, auth *service.AuthService, activityService *service.ActivityService, favorites store.FavoriteStore, channels store.ChannelStore, channelGroups store.ChannelGroupStore, streams store.StreamReader, profiles store.ProfileStore, epg store.EPGStore, logoService *service.LogoService, tmdbClient *tmdb.Client, hlsManager *hls.Manager, log zerolog.Logger) *Server {
 	state := loadState()
 	return &Server{
 		serverID:        state.ServerID,
@@ -54,6 +57,7 @@ func NewServer(serverName, baseURL string, auth *service.AuthService, activitySe
 		channels:        channels,
 		channelGroups:   channelGroups,
 		streams:         streams,
+		profiles:        profiles,
 		epg:             epg,
 		logoService:     logoService,
 		tmdbClient:      tmdbClient,
@@ -173,6 +177,7 @@ func (s *Server) registerLibraryRoutes(r chi.Router) {
 	r.Get("/Shows/{seriesId}/Seasons", s.listSeasons)
 	r.Get("/Shows/{seriesId}/Episodes", s.listEpisodes)
 	r.Get("/Items/{itemId}/Similar", s.listSimilarItems)
+	r.Get("/Items/{itemId}/Intros", s.emptyQueryResult)
 	r.Get("/Items/{itemId}/LocalTrailers", s.listSpecialFeatures)
 	r.Get("/Items/{itemId}/SpecialFeatures", s.listSpecialFeatures)
 	r.Get("/Items/{itemId}/ThemeMedia", s.listSpecialFeatures)
@@ -241,6 +246,14 @@ func notFound(w http.ResponseWriter, r *http.Request) {
 
 func noContent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) jellyfinProfile(ctx context.Context) *models.StreamProfile {
+	if s.profiles == nil {
+		return nil
+	}
+	p, _ := s.profiles.GetByName(ctx, "Jellyfin")
+	return p
 }
 
 func (s *Server) clientLog(w http.ResponseWriter, r *http.Request) {

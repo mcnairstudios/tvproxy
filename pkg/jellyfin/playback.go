@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,51 +17,84 @@ import (
 
 func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
-	streamID := addDashes(itemID)
+	streamID := addDashes(stripDashes(itemID))
 
+	bodyBytes, _ := io.ReadAll(r.Body)
+	s.log.Debug().Str("body", string(bodyBytes)).Msg("PlaybackInfo request")
 	var reqBody map[string]any
-	json.NewDecoder(r.Body).Decode(&reqBody)
+	json.Unmarshal(bodyBytes, &reqBody)
 
 	stream, _ := s.streams.GetByID(r.Context(), streamID)
+	if stream == nil {
+		s.respondJSON(w, http.StatusOK, map[string]any{
+			"MediaSources":  []MediaSource{},
+			"PlaySessionId": "",
+		})
+		return
+	}
 
-	videoCodec := "h264"
-	audioCodec := "aac"
+	profile := s.jellyfinProfile(r.Context())
+	container := "mp4"
+	if profile != nil && profile.Container != "" {
+		container = profile.Container
+	}
+
 	var ticks int64
-
-	if stream != nil {
-		if stream.VODVCodec != "" {
-			vc := strings.ToLower(stream.VODVCodec)
-			if vc == "h264" || vc == "avc" {
-				videoCodec = "h264"
-			} else if vc == "hevc" || vc == "h265" {
-				videoCodec = "hevc"
+	if stream.VODDuration > 0 {
+		ticks = secondsToTicks(stream.VODDuration)
+	}
+	if ticks == 0 && s.tmdbClient != nil {
+		if m := s.tmdbClient.LookupMovie(stream.Name); m != nil && m.TMDBID > 0 {
+			if details, err := s.tmdbClient.Details("movie", fmt.Sprintf("%d", m.TMDBID)); err == nil {
+				if dm, ok := details.(map[string]any); ok {
+					if rt, ok := dm["runtime"].(float64); ok && rt > 0 {
+						ticks = int64(rt) * 60 * 10000000
+					}
+				}
 			}
 		}
-		if stream.VODDuration > 0 {
-			ticks = secondsToTicks(stream.VODDuration)
+	}
+
+	videoCodec := "hevc"
+	audioCodec := "aac"
+	if profile != nil {
+		if profile.VideoCodec != "" && profile.VideoCodec != "copy" && profile.VideoCodec != "default" {
+			videoCodec = profile.VideoCodec
+		}
+		if profile.AudioCodec != "" && profile.AudioCodec != "copy" && profile.AudioCodec != "default" {
+			audioCodec = profile.AudioCodec
 		}
 	}
 
-	var mediaStreams []MediaStream
-	if stream != nil {
-		mediaStreams = s.buildMediaStreams(stream)
-	} else {
-		mediaStreams = []MediaStream{
-			{Type: "Video", Codec: videoCodec, Index: 0, IsDefault: true, Width: 1920, Height: 1080},
-			{Type: "Audio", Codec: audioCodec, Index: 1, IsDefault: true, Channels: 2, SampleRate: 0},
+	mediaStreams := s.buildMediaStreams(stream)
+	for i := range mediaStreams {
+		if mediaStreams[i].Type == "Video" {
+			mediaStreams[i].Codec = videoCodec
+		} else if mediaStreams[i].Type == "Audio" && audioCodec != "copy" {
+			mediaStreams[i].Codec = audioCodec
 		}
 	}
 
-	playSessionID := itemID[:min(16, len(itemID))]
+	cleanID := stripDashes(itemID)
+	playSessionID := cleanID[:min(16, len(cleanID))]
+
+	token := s.extractToken(r)
+	deviceID := s.extractAuthField(r, "DeviceId")
+	transcodingURL := fmt.Sprintf("/videos/%s/master.m3u8?DeviceId=%s&MediaSourceId=%s&VideoCodec=%s&AudioCodec=%s&AudioStreamIndex=1&SegmentContainer=ts&PlaySessionId=%s&ApiKey=%s&TranscodeReasons=DirectPlayError",
+		cleanID, url.QueryEscape(deviceID), cleanID, videoCodec, audioCodec, playSessionID, token)
+
 	ms := MediaSource{
-		Protocol: "Http", ID: itemID, Type: "Default", Name: "Default",
-		Container: "mp4", IsRemote: true,
+		Protocol: "Http", ID: cleanID, Type: "Default", Name: stream.Name,
+		Container: container, IsRemote: true,
 		SupportsTranscoding:     true,
 		SupportsDirectStream:    false,
 		SupportsDirectPlay:      false,
+		IsInfiniteStream:        false,
+		RequiresOpening:         false,
+		RequiresClosing:         false,
 		RunTimeTicks:            ticks,
 		DefaultAudioStreamIndex: 1,
-		TranscodingURL:          fmt.Sprintf("/Videos/%s/master.m3u8?MediaSourceId=%s&PlaySessionId=%s", itemID, itemID, playSessionID),
+		TranscodingURL:          transcodingURL,
 		TranscodingSubProtocol:  "hls",
 		TranscodingContainer:    "ts",
 		MediaStreams:             mediaStreams,
@@ -209,14 +243,30 @@ func (s *Server) videoStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.log.Info().Str("stream", streamID).Str("url", streamURL).Bool("live", isLive).Msg("starting jellyfin video stream (avpipeline)")
+	profile := s.jellyfinProfile(ctx)
+	videoCodec := "copy"
+	audioCodec := "aac"
+	format := "mp4"
+	if profile != nil {
+		if profile.VideoCodec != "" {
+			videoCodec = profile.VideoCodec
+		}
+		if profile.AudioCodec != "" {
+			audioCodec = profile.AudioCodec
+		}
+		if profile.Container != "" {
+			format = profile.Container
+		}
+	}
+
+	s.log.Info().Str("stream", streamID).Str("url", streamURL).Str("video", videoCodec).Str("audio", audioCodec).Bool("live", isLive).Msg("starting jellyfin video stream (avpipeline)")
 
 	if err := service.RunAVPipeline(ctx, service.AVPipelineOpts{
 		URL:          streamURL,
 		Writer:       w,
-		Format:       "mp4",
-		VideoCodec:   "copy",
-		AudioCodec:   "aac",
+		Format:       format,
+		VideoCodec:   videoCodec,
+		AudioCodec:   audioCodec,
 		IsLive:       isLive,
 		SeekOffsetMs: seekMs,
 		TimeoutSec:   10,
