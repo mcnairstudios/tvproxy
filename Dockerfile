@@ -4,15 +4,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     gcc \
     libc6-dev \
-    libavformat-dev \
-    libavcodec-dev \
-    libavutil-dev \
-    libavfilter-dev \
-    libavdevice-dev \
-    libswscale-dev \
-    libswresample-dev \
+    make \
+    nasm \
+    xz-utils \
     wget \
     && rm -rf /var/lib/apt/lists/*
+
+RUN wget -q https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz \
+    && tar xf ffmpeg-8.0.1.tar.xz \
+    && cd ffmpeg-8.0.1 \
+    && ./configure --disable-programs --disable-doc --enable-shared --disable-static \
+       --disable-encoders --disable-decoders --disable-muxers --disable-demuxers \
+       --disable-parsers --disable-bsfs --disable-protocols --disable-devices \
+       --disable-filters --disable-hwaccels \
+    && make -j$(nproc) \
+    && make install \
+    && ldconfig \
+    && cd .. && rm -rf ffmpeg-8.0.1 ffmpeg-8.0.1.tar.xz
 
 RUN wget -q https://go.dev/dl/go1.26.1.linux-$(dpkg --print-architecture).tar.gz \
     && tar -C /usr/local -xzf go1.26.1.linux-$(dpkg --print-architecture).tar.gz \
