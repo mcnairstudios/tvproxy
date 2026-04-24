@@ -320,10 +320,13 @@ func (d *Demuxer) readPacketOnce() (*Packet, error) {
 	for {
 		select {
 		case req := <-d.seekCh:
-			req.result <- d.SeekTo(req.posMs)
+			seekErr := d.SeekTo(req.posMs)
+			d.audioPTSInited = false
+			d.audioFrameCount = 0
 			if d.onSeek != nil {
 				d.onSeek()
 			}
+			req.result <- seekErr
 			continue
 		default:
 		}
@@ -569,6 +572,8 @@ func (d *Demuxer) SeekTo(posMs int64) error {
 	if err := d.fc.SeekFrame(streamIdx, ts, flags); err != nil {
 		return fmt.Errorf("demux: seek to %d ms: %w", posMs, err)
 	}
+	d.audioPTSInited = false
+	d.audioFrameCount = 0
 	return nil
 }
 

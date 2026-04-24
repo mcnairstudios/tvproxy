@@ -1,8 +1,15 @@
 package decode
 
+/*
+#cgo pkg-config: libavcodec
+#include <libavcodec/avcodec.h>
+*/
+import "C"
+
 import (
 	"errors"
 	"fmt"
+	"unsafe"
 
 	"github.com/asticode/go-astiav"
 )
@@ -340,6 +347,13 @@ func (d *Decoder) Flush() ([]*astiav.Frame, error) {
 		frames = append(frames, f)
 	}
 	return frames, nil
+}
+
+func (d *Decoder) FlushBuffers() {
+	if d.codecCtx == nil {
+		return
+	}
+	C.avcodec_flush_buffers((*C.AVCodecContext)(unsafe.Pointer(d.codecCtx.UnsafePointer())))
 }
 
 func (d *Decoder) Close() {

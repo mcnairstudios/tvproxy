@@ -67,6 +67,29 @@ func TestDecodeNilPacket(t *testing.T) {
 	}
 }
 
+func TestFlushBuffersNilDecoder(t *testing.T) {
+	d := &Decoder{}
+	d.FlushBuffers()
+}
+
+func TestFlushBuffersAfterDecode(t *testing.T) {
+	dec, err := NewAudioDecoder(astiav.CodecIDAac, nil)
+	if err != nil {
+		t.Skipf("AAC decoder not available: %v", err)
+	}
+	defer dec.Close()
+
+	dec.FlushBuffers()
+
+	frames, err := dec.Decode(nil)
+	if err != nil {
+		t.Fatalf("decode after flush: %v", err)
+	}
+	for _, f := range frames {
+		f.Free()
+	}
+}
+
 func TestHWAccelMap(t *testing.T) {
 	expected := []string{"vaapi", "qsv", "videotoolbox", "cuda", "nvenc"}
 	for _, name := range expected {

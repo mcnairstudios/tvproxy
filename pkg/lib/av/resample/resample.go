@@ -88,8 +88,13 @@ func (r *Resampler) Convert(src *astiav.Frame) (*astiav.Frame, error) {
 	return dst, nil
 }
 
-// Close frees the underlying SoftwareResampleContext. It is safe to call
-// multiple times.
+func (r *Resampler) Reset() {
+	if r.swrCtx != nil {
+		r.swrCtx.Free()
+	}
+	r.swrCtx = astiav.AllocSoftwareResampleContext()
+}
+
 func (r *Resampler) Close() {
 	if r.swrCtx != nil {
 		r.swrCtx.Free()

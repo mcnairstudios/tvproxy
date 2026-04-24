@@ -4068,7 +4068,7 @@
           statusEl.textContent = 'Reconnecting...';
           statusEl.style.color = '#ffaa00';
           mseWorker.postMessage({type: 'stop'});
-          setTimeout(function() { startMSEPlayback(dvrObj, vidEl, statusEl, 0); }, 1000);
+          setTimeout(function() { startMSEPlayback(vidEl, dvrObj, 0); }, 1000);
         } else if (msg.type === 'error') {
           console.error(msg.track + ' worker error:', msg.msg);
         }

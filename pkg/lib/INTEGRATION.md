@@ -100,17 +100,19 @@ Based on ffmpeg's own implementation (analysed from fftools source).
 
 - **Never restart the stream.** `demuxer.RequestSeek(posMs)` seeks in-place on the read goroutine.
 - **PTS is movie time.** Seek to 60s = packets carry PTS at 60s+. No rebasing to 0.
-- **No decoder flush needed.** ffmpeg itself doesn't flush decoders on seek — new packets replace old state.
-- **Muxer needs DTS reset.** `muxer.Reset()` flushes the partial fragment and resets DTS tracking so backward seeks work.
+- **Decoder flush required.** `decoder.FlushBuffers()` calls `avcodec_flush_buffers()` to clear stale decode state. VLC and ffplay both do this on every seek.
+- **Audio PTS reset required.** `audioPTSInited` and `audioFrameCount` are reset in `SeekTo()` so synthetic audio PTS re-anchors to the post-seek position.
+- **Muxer needs DTS reset.** `muxer.Reset()` rebuilds track muxers with fresh DTS tracking.
 - **AudioFIFO needs reset.** `audioFifo.Reset()` discards stale pre-seek samples.
+- **onSeek runs before RequestSeek returns.** The caller can read generation/state immediately after.
 
 ### For copy mode (no decode/encode)
 
-Packets flow from demuxer → muxer with movie-time PTS. After seek, the demuxer returns packets from the nearest preceding keyframe. The muxer writes them into the next segment.
+Packets flow from demuxer → muxer with movie-time PTS. After seek, the demuxer returns packets from the nearest preceding keyframe. Audio decoder is flushed (copy mode still decodes+encodes audio for MSE).
 
 ### For transcode mode
 
-Same as copy, but packets go through decode → resample → encode → mux. The decoder handles the seek discontinuity implicitly (no flush needed).
+Same as copy, but video also goes through decode → [deinterlace] → [scale] → encode → mux. Both video and audio decoders are flushed via `FlushBuffers()` on seek.
 
 ### Accurate seek (optional)
 

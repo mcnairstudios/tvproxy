@@ -791,7 +791,7 @@ func (m *Manager) runGoMSE(ctx context.Context, s *Session, ds *DemuxSession, in
 
 	if s.startOpts.SeekOffset > 0 && !isLive {
 		seekMs := int64(s.startOpts.SeekOffset * 1000)
-		if seekErr := ds.Demuxer().RequestSeek(seekMs); seekErr != nil {
+		if seekErr := ds.Demuxer().SeekTo(seekMs); seekErr != nil {
 			m.log.Warn().Err(seekErr).Str("session_id", s.ID).Msg("initial seek failed")
 		}
 	}

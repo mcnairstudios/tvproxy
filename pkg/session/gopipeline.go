@@ -1222,6 +1222,15 @@ func (p *MSETranscodePipeline) EndOfStream() {
 func (p *MSETranscodePipeline) ResetForSeek() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.videoDec != nil {
+		p.videoDec.FlushBuffers()
+	}
+	if p.audioDec != nil {
+		p.audioDec.FlushBuffers()
+	}
+	if p.audioResample != nil {
+		p.audioResample.Reset()
+	}
 	if p.muxer != nil {
 		p.muxer.Reset()
 	}
@@ -1524,6 +1533,12 @@ func (p *MSECopyPipeline) EndOfStream() {
 func (p *MSECopyPipeline) ResetForSeek() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.audioDec != nil {
+		p.audioDec.FlushBuffers()
+	}
+	if p.audioResample != nil {
+		p.audioResample.Reset()
+	}
 	if p.muxer != nil {
 		p.muxer.Reset()
 	}
