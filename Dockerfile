@@ -1,4 +1,4 @@
-FROM linuxserver/ffmpeg:latest AS builder
+FROM linuxserver/ffmpeg:8.0.1 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
@@ -27,7 +27,7 @@ ARG VERSION=dev
 ARG GOMAXPROCS=0
 RUN GOMAXPROCS=$GOMAXPROCS CGO_ENABLED=1 go build -ldflags="-s -w -X main.buildVersion=$VERSION" -o /tvproxy ./cmd/tvproxy/
 
-FROM linuxserver/ffmpeg:latest
+FROM linuxserver/ffmpeg:8.0.1
 
 ARG TARGETARCH
 
