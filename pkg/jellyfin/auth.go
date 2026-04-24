@@ -74,6 +74,7 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	jfUserID := jellyfinID(userID)
 	tokenBytes := make([]byte, 32)
 	rand.Read(tokenBytes)
 	token := hex.EncodeToString(tokenBytes)
@@ -85,7 +86,7 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 			Name:                  userName,
 			ServerID:              s.serverID,
 			ServerName:            s.serverName,
-			ID:                    userID,
+			ID:                    jfUserID,
 			HasPassword:           true,
 			HasConfiguredPassword: true,
 			LastLoginDate:         &now,
@@ -98,7 +99,7 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 		},
 		SessionInfo: &SessionInfo{
 			ID:                 token[:16],
-			UserID:             userID,
+			UserID:             jfUserID,
 			UserName:           userName,
 			Client:             s.extractAuthField(r, "Client"),
 			LastActivityDate:   now,

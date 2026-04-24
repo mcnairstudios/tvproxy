@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"strconv"
 	"sync"
 	"time"
@@ -60,8 +61,11 @@ func NewServer(serverName, baseURL string, auth *service.AuthService, activitySe
 func generateGUID() string {
 	id := make([]byte, 16)
 	rand.Read(id)
-	h := hex.EncodeToString(id)
-	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
+	return hex.EncodeToString(id)
+}
+
+func jellyfinID(uuid string) string {
+	return strings.ReplaceAll(uuid, "-", "")
 }
 
 func (s *Server) Router() chi.Router {
@@ -322,7 +326,7 @@ func (s *Server) usersPublic(w http.ResponseWriter, r *http.Request) {
 		result = append(result, UserDto{
 			Name:                  u.Username,
 			ServerID:              s.serverID,
-			ID:                    u.ID,
+			ID:                    jellyfinID(u.ID),
 			HasPassword:           true,
 			HasConfiguredPassword: true,
 			Policy:                defaultPolicy(u.IsAdmin),
@@ -370,7 +374,7 @@ func (s *Server) lookupUser(r *http.Request, userID string) UserDto {
 		Name:                  name,
 		ServerID:              s.serverID,
 		ServerName:            s.serverName,
-		ID:                    userID,
+		ID:                    jellyfinID(userID),
 		HasPassword:           true,
 		HasConfiguredPassword: true,
 		LastLoginDate:         &now,
