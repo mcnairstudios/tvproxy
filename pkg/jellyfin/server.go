@@ -2,6 +2,8 @@ package jellyfin
 
 import (
 	"crypto/rand"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -120,6 +122,7 @@ func (s *Server) registerPublicRoutes(r chi.Router) {
 	r.Post("/Users/AuthenticateByName", s.authenticateByName)
 	r.Get("/UserImage", notFound)
 	r.Head("/UserImage", notFound)
+	r.Get("/socket", s.websocketStub)
 }
 
 func (s *Server) registerMediaRoutes(r chi.Router) {
@@ -232,11 +235,55 @@ func noContent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) websocketStub(w http.ResponseWriter, r *http.Request) {
+	s.log.Info().Str("remote", r.RemoteAddr).Str("upgrade", r.Header.Get("Upgrade")).Msg("websocket connection attempt")
+	if r.Header.Get("Upgrade") != "websocket" {
+		http.Error(w, "websocket required", http.StatusBadRequest)
+		return
+	}
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "websocket not supported", http.StatusInternalServerError)
+		return
+	}
+	conn, buf, err := hj.Hijack()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	key := r.Header.Get("Sec-WebSocket-Key")
+	accept := computeWebSocketAccept(key)
+	buf.WriteString("HTTP/1.1 101 Switching Protocols\r\n")
+	buf.WriteString("Upgrade: websocket\r\n")
+	buf.WriteString("Connection: Upgrade\r\n")
+	buf.WriteString("Sec-WebSocket-Accept: " + accept + "\r\n\r\n")
+	buf.Flush()
+
+	b := make([]byte, 1)
+	for {
+		if _, err := conn.Read(b); err != nil {
+			return
+		}
+	}
+}
+
+func computeWebSocketAccept(key string) string {
+	h := sha1.New()
+	h.Write([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
+
 func (s *Server) respondJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8; profile=\"CamelCase\"")
-	w.Header().Set("X-Application", "Jellyfin")
+	data, err := json.Marshal(v)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	w.Write(data)
 }
 
 func (s *Server) emptyQueryResult(w http.ResponseWriter, r *http.Request) {
@@ -282,6 +329,9 @@ func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
 			StartupWizardCompleted: true,
 		},
 		OperatingSystemDisplayName: "Linux",
+		WebSocketPortNumber:        8096,
+		SupportsLibraryMonitor:     true,
+		CanSelfRestart:             true,
 	})
 }
 
@@ -330,10 +380,7 @@ func (s *Server) usersPublic(w http.ResponseWriter, r *http.Request) {
 			HasPassword:           true,
 			HasConfiguredPassword: true,
 			Policy:                defaultPolicy(u.IsAdmin),
-			Configuration: UserConfig{
-				PlayDefaultAudioTrack: true,
-				SubtitleMode:          "Default",
-			},
+			Configuration: defaultUserConfig(),
 		})
 	}
 	if result == nil {
@@ -369,7 +416,7 @@ func (s *Server) lookupUser(r *http.Request, userID string) UserDto {
 			break
 		}
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	return UserDto{
 		Name:                  name,
 		ServerID:              s.serverID,
@@ -379,10 +426,7 @@ func (s *Server) lookupUser(r *http.Request, userID string) UserDto {
 		HasConfiguredPassword: true,
 		LastLoginDate:         &now,
 		LastActivityDate:      &now,
-		Configuration: UserConfig{
-			PlayDefaultAudioTrack: true,
-			SubtitleMode:          "Default",
-		},
+		Configuration: defaultUserConfig(),
 		Policy: defaultPolicy(isAdmin),
 	}
 }

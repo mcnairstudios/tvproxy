@@ -4733,7 +4733,7 @@
             statusEl.style.cursor = 'pointer';
             statusEl.style.pointerEvents = 'auto';
             statusEl.title = st.error;
-            statusEl.onclick = function() { navigator.clipboard.writeText(st.error).then(function() { statusEl.textContent = 'Copied!'; setTimeout(function() { statusEl.textContent = 'Errored'; }, 1500); }); };
+            statusEl.onclick = function() { if (navigator.clipboard) { navigator.clipboard.writeText(st.error).then(function() { statusEl.textContent = 'Copied!'; setTimeout(function() { statusEl.textContent = 'Errored'; }, 1500); }); } };
             clearInterval(pollInterval);
             return;
           }

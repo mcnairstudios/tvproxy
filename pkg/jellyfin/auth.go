@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,6 +21,9 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+			s.log.Warn().Str("path", r.URL.Path).Str("token", token[:8]+"...").Msg("token not found in store")
+		} else {
+			s.log.Warn().Str("path", r.URL.Path).Msg("no token in request")
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -50,17 +54,26 @@ func (s *Server) resolveUsernameByID(r *http.Request, userID string) string {
 }
 
 func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, _ := io.ReadAll(r.Body)
+	s.log.Debug().Str("body", string(bodyBytes)).Msg("auth request body")
 	var req AuthenticateByNameRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
-	_, _, err := s.auth.Login(r.Context(), req.Username, req.Pw)
+	pw := req.Pw
+	if pw == "" {
+		pw = req.Password
+	}
+	s.log.Info().Str("username", req.Username).Bool("has_pw", req.Pw != "").Bool("has_password", req.Password != "").Msg("auth attempt")
+	_, _, err := s.auth.Login(r.Context(), req.Username, pw)
 	if err != nil {
+		s.log.Warn().Str("username", req.Username).Err(err).Msg("auth failed")
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
+	s.log.Info().Str("username", req.Username).Str("token", token).Msg("auth success")
 
 	users, _ := s.auth.ListUsers(r.Context())
 	var userID, userName string
@@ -75,12 +88,12 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jfUserID := jellyfinID(userID)
-	tokenBytes := make([]byte, 32)
+	tokenBytes := make([]byte, 16)
 	rand.Read(tokenBytes)
 	token := hex.EncodeToString(tokenBytes)
 	s.tokens.Store(token, userID)
 
-	now := time.Now()
+	now := time.Now().UTC()
 	s.respondJSON(w, http.StatusOK, AuthenticationResult{
 		User: &UserDto{
 			Name:                  userName,
@@ -91,23 +104,29 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 			HasConfiguredPassword: true,
 			LastLoginDate:         &now,
 			LastActivityDate:      &now,
-			Configuration: UserConfig{
-				PlayDefaultAudioTrack: true,
-				SubtitleMode:          "Default",
-			},
+			Configuration: defaultUserConfig(),
 			Policy: defaultPolicy(isAdmin),
 		},
 		SessionInfo: &SessionInfo{
-			ID:                 token[:16],
-			UserID:             jfUserID,
-			UserName:           userName,
-			Client:             s.extractAuthField(r, "Client"),
-			LastActivityDate:   now,
-			DeviceName:         s.extractAuthField(r, "Device"),
-			DeviceID:           s.extractAuthField(r, "DeviceId"),
-			ApplicationVersion: s.extractAuthField(r, "Version"),
-			IsActive:           true,
-			ServerID:           s.serverID,
+			PlayState: &PlayState{RepeatMode: "RepeatNone", PlaybackOrder: "Default"},
+			AdditionalUsers:       []any{},
+			Capabilities:          &SessionCapabilities{PlayableMediaTypes: []string{}, SupportedCommands: []string{}, SupportsPersistentIdentifier: true},
+			RemoteEndPoint:        r.RemoteAddr,
+			PlayableMediaTypes:    []string{},
+			ID:                    token[:16],
+			UserID:                jfUserID,
+			UserName:              userName,
+			Client:                s.extractAuthField(r, "Client"),
+			LastActivityDate:      now,
+			LastPlaybackCheckIn:   "0001-01-01T00:00:00.0000000Z",
+			DeviceName:            s.extractAuthField(r, "Device"),
+			DeviceID:              s.extractAuthField(r, "DeviceId"),
+			ApplicationVersion:    s.extractAuthField(r, "Version"),
+			IsActive:              true,
+			NowPlayingQueue:       []any{},
+			NowPlayingQueueFullItems: []any{},
+			ServerID:              s.serverID,
+			SupportedCommands:     []string{},
 		},
 		AccessToken: token,
 		ServerID:    s.serverID,
@@ -190,26 +209,57 @@ func (s *Server) firstUserID(ctx context.Context) string {
 	return ""
 }
 
+func defaultUserConfig() UserConfig {
+	return UserConfig{
+		PlayDefaultAudioTrack:     true,
+		SubtitleMode:              "Default",
+		GroupedFolders:            []string{},
+		OrderedViews:              []string{},
+		LatestItemsExcludes:       []string{},
+		MyMediaExcludes:           []string{},
+		HidePlayedInLatest:        true,
+		RememberAudioSelections:   true,
+		RememberSubtitleSelections: true,
+		EnableNextEpisodeAutoPlay: true,
+	}
+}
+
 func defaultPolicy(isAdmin bool) UserPolicy {
 	return UserPolicy{
-		IsAdministrator:                 isAdmin,
-		IsDisabled:                      false,
-		EnableUserPreferenceAccess:      true,
-		EnableRemoteControlOfOtherUsers: isAdmin,
-		EnableSharedDeviceControl:       true,
-		EnableRemoteAccess:              true,
-		EnableLiveTvManagement:          isAdmin,
-		EnableLiveTvAccess:              true,
-		EnableMediaPlayback:             true,
-		EnableAudioPlaybackTranscoding:  true,
-		EnableVideoPlaybackTranscoding:  true,
-		EnablePlaybackRemuxing:          true,
-		EnableContentDownloading:        true,
-		EnableAllChannels:               true,
-		EnableAllFolders:                true,
-		EnableAllDevices:                true,
-		EnablePublicSharing:             true,
-		AuthenticationProviderId:        "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider",
-		PasswordResetProviderId:         "Jellyfin.Server.Implementations.Users.DefaultPasswordResetProvider",
+		IsAdministrator:                  isAdmin,
+		IsHidden:                         isAdmin,
+		IsDisabled:                       false,
+		BlockedTags:                      []string{},
+		AllowedTags:                      []string{},
+		EnableUserPreferenceAccess:       true,
+		AccessSchedules:                  []any{},
+		BlockUnratedItems:                []string{},
+		EnableRemoteControlOfOtherUsers:  isAdmin,
+		EnableSharedDeviceControl:        true,
+		EnableRemoteAccess:               true,
+		EnableLiveTvManagement:           isAdmin,
+		EnableLiveTvAccess:               true,
+		EnableMediaPlayback:              true,
+		EnableAudioPlaybackTranscoding:   true,
+		EnableVideoPlaybackTranscoding:   true,
+		EnablePlaybackRemuxing:           true,
+		EnableContentDeletion:            isAdmin,
+		EnableContentDeletionFromFolders: []string{},
+		EnableContentDownloading:         true,
+		EnableSyncTranscoding:            true,
+		EnableMediaConversion:            true,
+		EnabledDevices:                   []string{},
+		EnableAllDevices:                 true,
+		EnabledChannels:                  []string{},
+		EnableAllChannels:                true,
+		EnabledFolders:                   []string{},
+		EnableAllFolders:                 true,
+		LoginAttemptsBeforeLockout:       -1,
+		EnablePublicSharing:              true,
+		BlockedMediaFolders:              []string{},
+		BlockedChannels:                  []string{},
+		AuthenticationProviderId:         "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider",
+		PasswordResetProviderId:          "Jellyfin.Server.Implementations.Users.DefaultPasswordResetProvider",
+		SyncPlayAccess:                   "CreateAndJoinGroups",
 	}
 }
