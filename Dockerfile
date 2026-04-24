@@ -8,13 +8,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nasm \
     xz-utils \
     wget \
+    libx264-dev \
+    libx265-dev \
+    libmp3lame-dev \
+    libopus-dev \
+    libvorbis-dev \
+    libvpx-dev \
+    libdav1d-dev \
+    libfdk-aac-dev \
+    libaom-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN wget -q https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz \
     && tar xf ffmpeg-8.0.1.tar.xz \
     && cd ffmpeg-8.0.1 \
     && ./configure --disable-programs --disable-doc --enable-shared --disable-static \
-       --enable-gpl --enable-version3 \
+       --enable-gpl --enable-version3 --enable-nonfree \
+       --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libopus \
+       --enable-libvorbis --enable-libvpx --enable-libdav1d --enable-libfdk-aac \
+       --enable-libaom \
     && make -j$(nproc) \
     && make install \
     && ldconfig \
@@ -42,6 +54,15 @@ RUN apt-get update \
         gosu \
         dtv-scan-tables \
         ca-certificates \
+        libx264-164 \
+        libx265-199 \
+        libmp3lame0 \
+        libopus0 \
+        libvorbisenc2 \
+        libvpx9 \
+        libdav1d7 \
+        libfdk-aac2 \
+        libaom3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Intel VAAPI/QSV: Arc A380 (DG2), Alder Lake+, older Gen8-11
