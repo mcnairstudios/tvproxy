@@ -411,6 +411,21 @@ func (p *AudioTranscodePipeline) EndOfStream() {
 	p.Stop()
 }
 
+func (p *AudioTranscodePipeline) ResetForSeek() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.audioDec != nil {
+		p.audioDec.FlushBuffers()
+	}
+	if p.audioResample != nil {
+		p.audioResample.Reset()
+	}
+	if p.audioFifo != nil {
+		p.audioFifo.Reset()
+	}
+	p.audioLatched = false
+}
+
 func (p *AudioTranscodePipeline) latchAudioError(err error) {
 	if !p.audioLatched {
 		p.audioLatched = true
@@ -822,6 +837,24 @@ func (p *FullTranscodePipeline) PushSubtitle(data []byte, pts int64, duration in
 
 func (p *FullTranscodePipeline) EndOfStream() {
 	p.Stop()
+}
+
+func (p *FullTranscodePipeline) ResetForSeek() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.videoDec != nil {
+		p.videoDec.FlushBuffers()
+	}
+	if p.audioDec != nil {
+		p.audioDec.FlushBuffers()
+	}
+	if p.audioResample != nil {
+		p.audioResample.Reset()
+	}
+	if p.audioFifo != nil {
+		p.audioFifo.Reset()
+	}
+	p.audioLatched = false
 }
 
 func (p *FullTranscodePipeline) latchFullAudioError(err error) {

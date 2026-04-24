@@ -699,6 +699,26 @@ func (m *Manager) runGoStreamCopy(ctx context.Context, s *Session, ds *DemuxSess
 	}
 	s.SetStopPipeline(func() { gp.Stop() })
 
+	if s.startOpts.SeekOffset > 0 && !isLive {
+		seekMs := int64(s.startOpts.SeekOffset * 1000)
+		if seekErr := ds.Demuxer().SeekTo(seekMs); seekErr != nil {
+			m.log.Warn().Err(seekErr).Str("session_id", s.ID).Msg("initial seek failed")
+		}
+	}
+
+	ds.Demuxer().SetOnSeek(func() {
+		m.log.Info().Str("session_id", s.ID).Msg("seek: stream copy reset")
+	})
+
+	s.SetSeekFunc(func(position float64) {
+		seekMs := int64(position * 1000)
+		if err := ds.Demuxer().RequestSeek(seekMs); err != nil {
+			m.log.Warn().Err(err).Str("session_id", s.ID).Float64("position", position).Msg("seek request failed")
+		} else {
+			m.log.Info().Str("session_id", s.ID).Float64("position", position).Msg("seek requested")
+		}
+	})
+
 	go m.pollFileProgress(ctx, s)
 
 	if m.probeCache != nil && s.StreamID != "" {
@@ -880,6 +900,32 @@ func (m *Manager) runGoFullTranscode(ctx context.Context, s *Session, ds *DemuxS
 	}
 	s.SetStopPipeline(func() { gp.Stop() })
 
+	if s.startOpts.SeekOffset > 0 && !isLive {
+		seekMs := int64(s.startOpts.SeekOffset * 1000)
+		if seekErr := ds.Demuxer().SeekTo(seekMs); seekErr != nil {
+			m.log.Warn().Err(seekErr).Str("session_id", s.ID).Msg("initial seek failed")
+		}
+	}
+
+	type seekResetter interface {
+		ResetForSeek()
+	}
+	ds.Demuxer().SetOnSeek(func() {
+		if sr, ok := interface{}(gp).(seekResetter); ok {
+			sr.ResetForSeek()
+		}
+		m.log.Info().Str("session_id", s.ID).Msg("seek: full transcode reset")
+	})
+
+	s.SetSeekFunc(func(position float64) {
+		seekMs := int64(position * 1000)
+		if err := ds.Demuxer().RequestSeek(seekMs); err != nil {
+			m.log.Warn().Err(err).Str("session_id", s.ID).Float64("position", position).Msg("seek request failed")
+		} else {
+			m.log.Info().Str("session_id", s.ID).Float64("position", position).Msg("seek requested")
+		}
+	})
+
 	go m.pollFileProgress(ctx, s)
 
 	if m.probeCache != nil && s.StreamID != "" {
@@ -930,6 +976,32 @@ func (m *Manager) runGoAudioTranscode(ctx context.Context, s *Session, ds *Demux
 		return
 	}
 	s.SetStopPipeline(func() { gp.Stop() })
+
+	if s.startOpts.SeekOffset > 0 && !isLive {
+		seekMs := int64(s.startOpts.SeekOffset * 1000)
+		if seekErr := ds.Demuxer().SeekTo(seekMs); seekErr != nil {
+			m.log.Warn().Err(seekErr).Str("session_id", s.ID).Msg("initial seek failed")
+		}
+	}
+
+	type seekResetter interface {
+		ResetForSeek()
+	}
+	ds.Demuxer().SetOnSeek(func() {
+		if sr, ok := interface{}(gp).(seekResetter); ok {
+			sr.ResetForSeek()
+		}
+		m.log.Info().Str("session_id", s.ID).Msg("seek: audio transcode reset")
+	})
+
+	s.SetSeekFunc(func(position float64) {
+		seekMs := int64(position * 1000)
+		if err := ds.Demuxer().RequestSeek(seekMs); err != nil {
+			m.log.Warn().Err(err).Str("session_id", s.ID).Float64("position", position).Msg("seek request failed")
+		} else {
+			m.log.Info().Str("session_id", s.ID).Float64("position", position).Msg("seek requested")
+		}
+	})
 
 	go m.pollFileProgress(ctx, s)
 
