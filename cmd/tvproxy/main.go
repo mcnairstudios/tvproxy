@@ -259,6 +259,7 @@ func main() {
 		}
 	}
 	wgPool.AddDirect("default", "Direct", cfg, log)
+	wgPool.SetActiveIDFunc(wgMultiService.ActiveProfileID)
 	m3uService.SetWGClient(wgPool.Client())
 	log.Info().Int("proxies", wgPool.Count()).Msg("wireguard pool active with failover")
 

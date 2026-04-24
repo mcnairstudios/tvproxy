@@ -11,9 +11,10 @@ import (
 )
 
 type WGPool struct {
-	proxies   []*poolEntry
-	mu        sync.RWMutex
-	log       zerolog.Logger
+	proxies     []*poolEntry
+	activeIDFn  func() string
+	mu          sync.RWMutex
+	log         zerolog.Logger
 }
 
 type poolEntry struct {
@@ -150,11 +151,27 @@ func (p *WGPool) Status() []PoolStatus {
 	return result
 }
 
+func (p *WGPool) SetActiveIDFunc(fn func() string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.activeIDFn = fn
+}
+
 func (p *WGPool) ProxyURL(streamURL string) string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if len(p.proxies) == 0 {
 		return streamURL
+	}
+	if p.activeIDFn != nil {
+		activeID := p.activeIDFn()
+		if activeID != "" {
+			for _, e := range p.proxies {
+				if e.profileID == activeID {
+					return e.proxy.ProxyURL(streamURL)
+				}
+			}
+		}
 	}
 	best := p.proxies[0]
 	for _, e := range p.proxies[1:] {
