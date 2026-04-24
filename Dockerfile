@@ -62,6 +62,9 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
     fi
 
 COPY --from=builder /tvproxy /usr/local/bin/tvproxy
+COPY --from=builder /usr/local/lib/libav*.so* /usr/local/lib/
+COPY --from=builder /usr/local/lib/libsw*.so* /usr/local/lib/
+RUN ldconfig
 COPY pkg/defaults/clients.json /defaults/clients.json
 COPY pkg/defaults/settings.json /defaults/settings.json
 
