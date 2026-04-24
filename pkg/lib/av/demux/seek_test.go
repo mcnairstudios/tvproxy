@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestSeekTo_BeforeReadLoop(t *testing.T) {
+func TestSeekTo_PreservesPTS(t *testing.T) {
 	url := os.Getenv("AVMUX_TEST_STREAM")
 	if url == "" {
 		url = "http://192.168.1.149:8090/stream/37969f9dbb17d735"
@@ -22,13 +22,15 @@ func TestSeekTo_BeforeReadLoop(t *testing.T) {
 	}
 	defer dm.Close()
 
+	// Read a few packets to establish basePTS
+	for i := 0; i < 5; i++ {
+		dm.ReadPacket()
+	}
+
+	// Seek to 60s
 	if err := dm.SeekTo(60000); err != nil {
 		t.Fatalf("SeekTo(60s): %v", err)
 	}
-
-	dm.basePTS = -1
-	dm.audioPTSInited = false
-	dm.audioFrameCount = 0
 
 	pkt, err := dm.ReadPacket()
 	if err != nil {
@@ -37,8 +39,9 @@ func TestSeekTo_BeforeReadLoop(t *testing.T) {
 
 	t.Logf("post-seek PTS: %d ns (%.2fs)", pkt.PTS, float64(pkt.PTS)/1e9)
 
-	if pkt.PTS < 0 || pkt.PTS > 5_000_000_000 {
-		t.Errorf("expected PTS near 0 after basePTS reset, got %d ns", pkt.PTS)
+	// PTS should be near 60s (movie time), not near 0
+	if pkt.PTS < 50_000_000_000 {
+		t.Errorf("expected PTS near 60s, got %.2fs — PTS was rebased to 0", float64(pkt.PTS)/1e9)
 	}
 }
 
@@ -143,7 +146,7 @@ func TestSeekTo_FreshDemuxerSimulatesRestart(t *testing.T) {
 
 	t.Logf("fresh demuxer post-seek PTS: %d ns (%.2fs)", pkt.PTS, float64(pkt.PTS)/1e9)
 
-	if pkt.PTS < 0 || pkt.PTS > 5_000_000_000 {
-		t.Errorf("expected PTS near 0, got %d ns", pkt.PTS)
+	if pkt.PTS < 50_000_000_000 {
+		t.Errorf("expected PTS near 60s (movie time), got %.2fs", float64(pkt.PTS)/1e9)
 	}
 }

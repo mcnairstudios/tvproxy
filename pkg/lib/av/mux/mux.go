@@ -66,6 +66,15 @@ type trackMuxer struct {
 	pktCount        int    // packets written since last flush
 	lastDTS         int64  // last written DTS for monotonic enforcement
 	dtsInited       bool
+
+	// creation params for rebuild on seek
+	codecID    astiav.CodecID
+	extradata  []byte
+	timeBase   astiav.Rational
+	width      int
+	height     int
+	channels   int
+	sampleRate int
 }
 
 // movflags for CMAF fragmented MP4 output.
@@ -139,6 +148,13 @@ func newTrackMuxer(outputDir, prefix string, codecID astiav.CodecID,
 		prefix:          prefix,
 		seq:             1,
 		fragThresholdUs: fragThresholdUs,
+		codecID:         codecID,
+		extradata:       extradata,
+		timeBase:        timeBase,
+		width:           width,
+		height:          height,
+		channels:        channels,
+		sampleRate:      sampleRate,
 	}
 
 	// Allocate output format context
@@ -292,6 +308,58 @@ func (m *FragmentedMuxer) WriteAudioPacket(pkt *astiav.Packet) error {
 		}
 	}
 	return nil
+}
+
+// Reset rebuilds the track muxers for a seek discontinuity. This fully
+// clears ffmpeg's internal DTS state (AVStream.cur_dts) which cannot be
+// reset any other way. Segment numbering continues. Init segments are
+// rewritten (same content — codec doesn't change).
+func (m *FragmentedMuxer) Reset() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return nil
+	}
+	var firstErr error
+	if m.video != nil {
+		seq := m.video.seq
+		if m.video.pktCount > 0 {
+			m.video.flushFragment() //nolint:errcheck
+			seq = m.video.seq
+		}
+		m.video.close()
+		tm, err := newTrackMuxer(m.video.outputDir, m.video.prefix, m.video.codecID,
+			m.video.extradata, m.video.timeBase, m.video.width, m.video.height,
+			0, 0, m.video.fragThresholdUs)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+		} else {
+			tm.seq = seq
+			m.video = tm
+		}
+	}
+	if m.audio != nil {
+		seq := m.audio.seq
+		if m.audio.pktCount > 0 {
+			m.audio.flushFragment() //nolint:errcheck
+			seq = m.audio.seq
+		}
+		m.audio.close()
+		tm, err := newTrackMuxer(m.audio.outputDir, m.audio.prefix, m.audio.codecID,
+			m.audio.extradata, m.audio.timeBase, 0, 0,
+			m.audio.channels, m.audio.sampleRate, m.audio.fragThresholdUs)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+		} else {
+			tm.seq = seq
+			m.audio = tm
+		}
+	}
+	return firstErr
 }
 
 // VideoCodecString returns the codec string extracted from the video init

@@ -181,7 +181,7 @@ func finishDemuxerSetup(fc *astiav.FormatContext, url string, opts DemuxOpts) (*
 		videoIdx:   -1,
 		audioIdx:   -1,
 		subIdx:     -1,
-		basePTS:    -1,
+		basePTS:    0,
 		url:        url,
 		opts:       opts,
 		seekCh:     make(chan seekRequest, 1),
@@ -321,9 +321,6 @@ func (d *Demuxer) readPacketOnce() (*Packet, error) {
 		select {
 		case req := <-d.seekCh:
 			req.result <- d.SeekTo(req.posMs)
-			d.basePTS = -1
-			d.audioPTSInited = false
-			d.audioFrameCount = 0
 			if d.onSeek != nil {
 				d.onSeek()
 			}

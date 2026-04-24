@@ -1219,6 +1219,18 @@ func (p *MSETranscodePipeline) EndOfStream() {
 	p.Stop()
 }
 
+func (p *MSETranscodePipeline) ResetForSeek() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.muxer != nil {
+		p.muxer.Reset()
+	}
+	if p.audioFifo != nil {
+		p.audioFifo.Reset()
+	}
+	p.audioLatched = false
+}
+
 func (p *MSETranscodePipeline) latchMSEAudioError(err error) {
 	if !p.audioLatched {
 		p.audioLatched = true
@@ -1507,6 +1519,18 @@ func (p *MSECopyPipeline) PushSubtitle(data []byte, pts int64, duration int64) e
 
 func (p *MSECopyPipeline) EndOfStream() {
 	p.Stop()
+}
+
+func (p *MSECopyPipeline) ResetForSeek() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.muxer != nil {
+		p.muxer.Reset()
+	}
+	if p.audioFifo != nil {
+		p.audioFifo.Reset()
+	}
+	p.audioLatched = false
 }
 
 func (p *MSECopyPipeline) Stop() {

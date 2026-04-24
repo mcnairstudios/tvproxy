@@ -791,15 +791,32 @@ func (m *Manager) runGoMSE(ctx context.Context, s *Session, ds *DemuxSession, in
 
 	if s.startOpts.SeekOffset > 0 && !isLive {
 		seekMs := int64(s.startOpts.SeekOffset * 1000)
-		if seekErr := ds.SeekTo(seekMs); seekErr != nil {
-			m.log.Warn().Err(seekErr).Str("session_id", s.ID).Msg("demux seek failed")
+		if seekErr := ds.Demuxer().RequestSeek(seekMs); seekErr != nil {
+			m.log.Warn().Err(seekErr).Str("session_id", s.ID).Msg("initial seek failed")
 		}
 	}
 
-	// No seekFunc — seek is handled by RestartWithSeek which stops the pipeline,
-	// clears segments, and restarts with a new DemuxSession at the seek offset.
-	// This is the correct approach for MSE because the muxer needs fresh init
-	// segments and the watcher needs a generation bump after any discontinuity.
+	type seekResetter interface {
+		ResetForSeek()
+	}
+	ds.Demuxer().SetOnSeek(func() {
+		if w != nil {
+			w.Reset()
+		}
+		if sr, ok := sink.(seekResetter); ok {
+			sr.ResetForSeek()
+		}
+		m.log.Info().Str("session_id", s.ID).Msg("seek: watcher+muxer reset")
+	})
+
+	s.SetSeekFunc(func(position float64) {
+		seekMs := int64(position * 1000)
+		if err := ds.Demuxer().RequestSeek(seekMs); err != nil {
+			m.log.Warn().Err(err).Str("session_id", s.ID).Float64("position", position).Msg("seek request failed")
+		} else {
+			m.log.Info().Str("session_id", s.ID).Float64("position", position).Msg("seek requested")
+		}
+	})
 
 	go m.pollFileProgress(ctx, s)
 

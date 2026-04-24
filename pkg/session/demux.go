@@ -22,27 +22,29 @@ type DemuxSession struct {
 }
 
 type DemuxOpts struct {
-	URL           string
-	OutputDir     string
-	AudioLanguage string
-	IsFileSource  bool
-	Follow        bool
-	FormatHint    string
-	TimeoutSec    int
-	UserAgent     string
-	RTSPLatency   int
-	Log           zerolog.Logger
+	URL              string
+	OutputDir        string
+	AudioLanguage    string
+	IsFileSource     bool
+	Follow           bool
+	FormatHint       string
+	TimeoutSec       int
+	UserAgent        string
+	RTSPLatency      int
+	CachedStreamInfo *probe.StreamInfo
+	Log              zerolog.Logger
 }
 
 func NewDemuxSession(opts DemuxOpts) (*DemuxSession, error) {
 	demuxOpts := demux.DemuxOpts{
-		TimeoutSec:    max(opts.TimeoutSec, 5),
-		AudioTrack:    -1,
-		AudioLanguage: opts.AudioLanguage,
-		Follow:        opts.Follow,
-		FormatHint:    opts.FormatHint,
-		UserAgent:     opts.UserAgent,
-		RTSPLatency:   opts.RTSPLatency,
+		TimeoutSec:       max(opts.TimeoutSec, 5),
+		AudioTrack:       -1,
+		AudioLanguage:    opts.AudioLanguage,
+		Follow:           opts.Follow,
+		FormatHint:       opts.FormatHint,
+		UserAgent:        opts.UserAgent,
+		RTSPLatency:      opts.RTSPLatency,
+		CachedStreamInfo: opts.CachedStreamInfo,
 	}
 
 	demuxer, err := demux.NewDemuxer(opts.URL, demuxOpts)

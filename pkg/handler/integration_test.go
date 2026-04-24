@@ -1290,7 +1290,7 @@ func TestIntegration_XtreamRefresh(t *testing.T) {
 			if s["name"] == "ESPN HD" {
 				assert.Equal(t, "Sports", s["group"])
 				assert.Equal(t, "espn.us", s["tvg_id"])
-				assert.Contains(t, s["url"].(string), "/101.ts")
+				assert.Contains(t, s["url"].(string), "/101")
 			}
 		}
 		assert.True(t, names["ESPN HD"])

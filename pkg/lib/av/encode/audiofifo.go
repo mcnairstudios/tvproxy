@@ -94,6 +94,14 @@ func (f *AudioFIFO) Write(frame *astiav.Frame) ([]*astiav.Packet, error) {
 	return allPkts, nil
 }
 
+func (f *AudioFIFO) Reset() {
+	if f.fifo != nil {
+		f.fifo.Free()
+		f.fifo = nil
+	}
+	f.inited = false
+}
+
 func (f *AudioFIFO) Close() {
 	if f.fifo != nil {
 		f.fifo.Free()

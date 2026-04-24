@@ -199,6 +199,44 @@ UPDATE: Seek now restarts the pipeline. Init segments are written (confirmed on 
 
 The watcher needs to either: (a) scan the segments directory for existing files on creation/reset, or (b) the init segments must be written AFTER the watcher is recreated (not before).
 
+UPDATE 3: In-place seek wired via RequestSeek + SetOnSeek. Seek fires, muxer.Reset() + watcher.Reset() called. Init segments produced after seek. Data flows instantly.
+
+But post-seek segments have WRONG PTS. Verified with ffprobe:
+- Pre-seek segments: start_time=0.000000 (correct)
+- Post-seek segments after seeking to 1374s: start_time=3784.280000 (wrong — should be ~1374)
+
+muxer.Reset() does NOT reset its PTS/DTS tracking. The muxer continues accumulating from where it was before the seek. After a backward seek (1374s when movie was at ~3784s), the new packets have PTS at 1374 but the muxer maps them to its internal timeline at 3784+.
+
+Fix: muxer.Reset() must fully reinitialise PTS/DTS state. The first post-seek packet should establish a new baseline. The output PTS should match the input PTS (movie timeline). If the seek is to 1374s, the segments should have start_time=1374.
+
+Also: "Packet duration: -90" warnings on EVERY audio packet (even pre-seek). This is a separate issue — the audio PTS conversion has a rounding error producing slightly negative durations. These warnings may cause audio segment starvation which prevents Chrome from starting playback.
+
+UPDATE 4: Verified with ffprobe — post-seek segments have start_time=0.000000 (not movie time). The demuxer resets basePTS to -1 on seek (line 491 of demux.go), so the first post-seek packet becomes PTS 0. This contradicts TVPROXY-CHANGES.md which says "PTS is movie time. No rebasing."
+
+The frontend creates a fresh MediaSource and sets currentTime = buffered.start(0) which is 0. MediaSource.duration is set to the total movie length. Chrome should play from 0 but the seekbar would show position 0 not the seek position.
+
+For correct seeking: either (a) demuxer should NOT rebase PTS after seek (keep movie time), or (b) the frontend should set currentTime to 0 after seek since data starts at 0, and use timestampOffset on the SourceBuffer to map PTS 0 to the seek position.
+
+Option (a) is simpler — remove the basePTS reset in the demuxer's seek handler. The muxer's new trackMuxer has fresh DTS tracking and will accept the movie-time PTS.
+
+UPDATE 5: PTS is now movie time (basePTS fix confirmed working). Init segments load after seek. Segments flow. But Chrome won't play because video and audio PTS are misaligned:
+- Video start_time: 25.209s
+- Audio start_time: 33.109s (8 seconds ahead)
+- 4 video segments, 18 audio segments
+
+Chrome MSE needs both tracks buffered at the SAME timeline position. With an 8-second gap, they never overlap enough to start playback.
+
+Fix: after seek, the demuxer should align both tracks. Drop audio packets until the first video keyframe arrives, then start both tracks from the same PTS. Or hold audio in a buffer until video catches up.
+
+UPDATE 6: Confirmed massive A/V desync after seek. Probed latest segments:
+- Video PTS: 2522s
+- Audio PTS: 2446s
+- Gap: 76 seconds — audio is behind video
+
+Also: seek position is inaccurate. User requested ~35 minutes, backend received 2701s (45 minutes), playback started at ~4 minutes. The seek position calculation in the frontend may be wrong, or the demuxer seeked to the wrong keyframe.
+
+Both issues need the demuxer to properly align tracks after seek and seek to the correct position.
+
 UPDATE 2: Seek now works mechanically — pipeline restarts, init segments written, segments flow. But no picture after seek. All segments return 200, no Chrome errors. Audio fetches much faster than video.
 
 The likely cause: PTS after seek starts at the seek position (e.g., 3125s) instead of being rebased to 0. Chrome MSE SourceBuffer had data at 0-535s, then gets new data at 3125s+. It can't bridge the gap. The demux loop must rebase PTS to 0 after seek — subtract the seek offset from all packet timestamps.

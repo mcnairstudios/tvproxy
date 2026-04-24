@@ -389,6 +389,85 @@ func TestPktDurationUs_NonZero(t *testing.T) {
 	}
 }
 
+func TestFragmentedMuxer_Reset_SeekContinues(t *testing.T) {
+	dir := t.TempDir()
+
+	extradata := []byte{
+		0x01, 0x42, 0xC0, 0x1E, 0xFF, 0xE1,
+		0x00, 0x04, 0x67, 0x42, 0xC0, 0x1E,
+		0x01,
+		0x00, 0x02, 0x68, 0xCE,
+	}
+
+	m, err := NewFragmentedMuxer(MuxOpts{
+		OutputDir:      dir,
+		VideoCodecID:   astiav.CodecIDH264,
+		VideoExtradata: extradata,
+		VideoWidth:     1920,
+		VideoHeight:    1080,
+		VideoTimeBase:  astiav.NewRational(1, 90000),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	writePkt := func(pts, dts int64, kf bool) {
+		pkt := astiav.AllocPacket()
+		data := make([]byte, 500)
+		pkt.FromData(data)
+		pkt.SetPts(pts)
+		pkt.SetDts(dts)
+		pkt.SetDuration(3600)
+		if kf {
+			pkt.SetFlags(pkt.Flags().Add(astiav.PacketFlagKey))
+		}
+		m.WriteVideoPacket(pkt)
+		pkt.Free()
+	}
+
+	// Pre-seek: write at movie time 0-1s
+	writePkt(0, 0, true)
+	writePkt(3600, 3600, false)
+	writePkt(7200, 7200, false)
+	writePkt(10800, 10800, true) // second keyframe flushes segment
+	writePkt(14400, 14400, false)
+
+	segsBefore, _ := filepath.Glob(filepath.Join(dir, "video_*.m4s"))
+	t.Logf("before reset: %d segments", len(segsBefore))
+
+	// Simulate seek — Reset muxer
+	m.Reset()
+
+	// Post-seek: write at movie time 60s+ (higher DTS, seek forward)
+	writePkt(5400000, 5400000, true) // 60s at 90kHz
+	writePkt(5403600, 5403600, false)
+	writePkt(5407200, 5407200, false)
+	writePkt(5410800, 5410800, true) // keyframe flushes
+	writePkt(5414400, 5414400, false)
+
+	segsAfter, _ := filepath.Glob(filepath.Join(dir, "video_*.m4s"))
+	newSegs := len(segsAfter) - len(segsBefore)
+	if newSegs <= 0 {
+		t.Error("no new segments after seek Reset")
+	} else {
+		t.Logf("after reset: %d new segments (seq continues)", newSegs)
+	}
+
+	// Post-seek backward: Reset again, write at movie time 30s (lower than 60s)
+	m.Reset()
+	writePkt(2700000, 2700000, true) // 30s
+	writePkt(2703600, 2703600, false)
+	writePkt(2707200, 2707200, true) // keyframe flushes
+
+	segsFinal, _ := filepath.Glob(filepath.Join(dir, "video_*.m4s"))
+	if len(segsFinal) <= len(segsAfter) {
+		t.Error("no segments after backward seek Reset")
+	} else {
+		t.Logf("after backward seek: %d total segments", len(segsFinal))
+	}
+}
+
 func TestFragmentedMuxer_MaxDurationFlush(t *testing.T) {
 	dir := t.TempDir()
 

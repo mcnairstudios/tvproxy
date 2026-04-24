@@ -92,6 +92,44 @@ videoDec, err := decode.NewVideoDecoderFromParams(dm.VideoCodecParameters(), dec
 })
 ```
 
+## Seek
+
+Based on ffmpeg's own implementation (analysed from fftools source).
+
+### Principles
+
+- **Never restart the stream.** `demuxer.RequestSeek(posMs)` seeks in-place on the read goroutine.
+- **PTS is movie time.** Seek to 60s = packets carry PTS at 60s+. No rebasing to 0.
+- **No decoder flush needed.** ffmpeg itself doesn't flush decoders on seek — new packets replace old state.
+- **Muxer needs DTS reset.** `muxer.Reset()` flushes the partial fragment and resets DTS tracking so backward seeks work.
+- **AudioFIFO needs reset.** `audioFifo.Reset()` discards stale pre-seek samples.
+
+### For copy mode (no decode/encode)
+
+Packets flow from demuxer → muxer with movie-time PTS. After seek, the demuxer returns packets from the nearest preceding keyframe. The muxer writes them into the next segment.
+
+### For transcode mode
+
+Same as copy, but packets go through decode → resample → encode → mux. The decoder handles the seek discontinuity implicitly (no flush needed).
+
+### Accurate seek (optional)
+
+ffmpeg uses a trim filter to discard frames between the keyframe and the exact seek target. Without trimming, seek to 60s might briefly show content from 58s. The pipeline can implement this by dropping packets with PTS < seekTarget in PushVideo/PushAudio.
+
+### Live rewind
+
+No av package change. Segments are already on disk with continuous PTS. The frontend requests earlier sequence numbers.
+
+## Fast Reconnect — CachedStreamInfo
+
+For RTSP/SAT>IP live sources, pass cached probe data to skip `FindStreamInfo`:
+
+```go
+dm, _ := demux.NewDemuxer(url, demux.DemuxOpts{CachedStreamInfo: previousInfo})
+```
+
+First tune: ~5-7s (tuner lock + analysis). Cached tune: ~200ms. Invalidate cache on stream errors.
+
 ## Tested Input Codecs
 
 All auto-detected, all working:
