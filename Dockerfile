@@ -1,7 +1,9 @@
-FROM golang:1.26-trixie AS builder
+FROM linuxserver/ffmpeg:latest AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
+    gcc \
+    libc6-dev \
     libavformat-dev \
     libavcodec-dev \
     libavutil-dev \
@@ -9,7 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavdevice-dev \
     libswscale-dev \
     libswresample-dev \
+    wget \
     && rm -rf /var/lib/apt/lists/*
+
+RUN wget -q https://go.dev/dl/go1.26.1.linux-$(dpkg --print-architecture).tar.gz \
+    && tar -C /usr/local -xzf go1.26.1.linux-$(dpkg --print-architecture).tar.gz \
+    && rm go1.26.1.linux-$(dpkg --print-architecture).tar.gz
+ENV PATH="/usr/local/go/bin:${PATH}"
 
 WORKDIR /app
 COPY go.mod go.sum ./
