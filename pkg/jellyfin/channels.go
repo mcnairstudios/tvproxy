@@ -92,21 +92,74 @@ func newLiveTvChannelItem(ch *models.Channel, index int, serverID string) BaseIt
 	return item
 }
 
+func (s *Server) rootFolderID() string {
+	h := hashString(s.serverID)
+	return fmt.Sprintf("e9d5%04x%08x%016x", h>>16, h, uint64(h)*6364136223846793005)[:32]
+}
+
+func (s *Server) newCollectionFolderItem(name, id, collectionType string, imgTags map[string]string) BaseItemDto {
+	dashlessID := stripDashes(id)
+	dashedID := addDashes(dashlessID)
+	return BaseItemDto{
+		Name:                     name,
+		ServerID:                 s.serverID,
+		ID:                       dashlessID,
+		DateCreated:              "2026-01-01T00:00:00.0000000Z",
+		DateLastMediaAdded:       "0001-01-01T00:00:00.0000000Z",
+		CanDelete:                boolPtr(false),
+		CanDownload:              boolPtr(false),
+		SortName:                 strings.ToLower(name),
+		ExternalUrls:             []any{},
+		EnableMediaSourceDisplay: true,
+		Taglines:                 []string{},
+		Genres:                   []string{},
+		PlayAccess:               "Full",
+		RemoteTrailers:           []any{},
+		ProviderIds:              map[string]string{},
+		IsFolder:                 true,
+		ParentID:                 s.rootFolderID(),
+		Type:                     "CollectionFolder",
+		CollectionType:           collectionType,
+		People:                   []PersonDto{},
+		Studios:                  []NameIDPair{},
+		GenreItems:               []NameIDPair{},
+		UserData: &UserItemData{
+			Key:    dashedID,
+			ItemID: dashlessID,
+		},
+		SpecialFeatureCount:  0,
+		DisplayPreferencesId: dashlessID,
+		Tags:                 []string{},
+		ImageTags:            imgTags,
+		BackdropImageTags:    []string{},
+		ImageBlurHashes:      map[string]any{},
+		LocationType:         "FileSystem",
+		MediaType:            "Unknown",
+		LockedFields:         []string{},
+		LockData:             boolPtr(false),
+	}
+}
+
 func (s *Server) userViews(w http.ResponseWriter, r *http.Request) {
 	views := []BaseItemDto{
-		{Name: "Movies", ServerID: s.serverID, ID: viewMoviesID, Type: "CollectionFolder", CollectionType: "movies", IsFolder: true, ImageTags: map[string]string{}},
-		{Name: "TV Shows", ServerID: s.serverID, ID: viewTVID, Type: "CollectionFolder", CollectionType: "tvshows", IsFolder: true, ImageTags: map[string]string{}},
+		s.newCollectionFolderItem("Movies", viewMoviesID, "movies", map[string]string{}),
+		s.newCollectionFolderItem("TV Shows", viewTVID, "tvshows", map[string]string{}),
 	}
 
-	channels, _ := s.channels.List(r.Context())
 	groupHasLogo := make(map[string]bool)
-	for _, ch := range channels {
-		if ch.ChannelGroupID != nil && (ch.LogoID != nil || ch.Logo != "") {
-			groupHasLogo[*ch.ChannelGroupID] = true
+	if s.channels != nil {
+		channels, _ := s.channels.List(r.Context())
+		for _, ch := range channels {
+			if ch.ChannelGroupID != nil && (ch.LogoID != nil || ch.Logo != "") {
+				groupHasLogo[*ch.ChannelGroupID] = true
+			}
 		}
 	}
 
-	groups, _ := s.channelGroups.List(r.Context())
+	var groups []models.ChannelGroup
+	if s.channelGroups != nil {
+		groups, _ = s.channelGroups.List(r.Context())
+	}
 	for _, g := range groups {
 		if !g.JellyfinEnabled {
 			continue
@@ -119,12 +172,7 @@ func (s *Server) userViews(w http.ResponseWriter, r *http.Request) {
 		if g.ImageURL != "" || groupHasLogo[g.ID] {
 			imgTags["Primary"] = "logo"
 		}
-		views = append(views, BaseItemDto{
-			Name: g.Name, ServerID: s.serverID,
-			ID:   "group_" + stripDashes(g.ID),
-			Type: "CollectionFolder", CollectionType: colType,
-			IsFolder: true, ImageTags: imgTags,
-		})
+		views = append(views, s.newCollectionFolderItem(g.Name, groupItemID(g.ID), colType, imgTags))
 	}
 
 	s.respondJSON(w, http.StatusOK, BaseItemDtoQueryResult{

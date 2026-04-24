@@ -1426,7 +1426,7 @@
       }
 
       var tmdbId = match.id;
-      var tmdbType = match.media_type;
+      var tmdbType = match.media_type || (opts.mediaType === 'series' ? 'tv' : 'movie');
       api.get('/api/tmdb/details?type=' + tmdbType + '&id=' + tmdbId).then(function(detail) {
         if (!detail) return;
 

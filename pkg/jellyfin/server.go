@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"strconv"
@@ -42,8 +42,10 @@ type Server struct {
 }
 
 func NewServer(serverName, baseURL string, auth *service.AuthService, activityService *service.ActivityService, favorites store.FavoriteStore, channels store.ChannelStore, channelGroups store.ChannelGroupStore, streams store.StreamReader, epg store.EPGStore, logoService *service.LogoService, tmdbClient *tmdb.Client, hlsManager *hls.Manager, log zerolog.Logger) *Server {
+	state := loadState()
 	return &Server{
-		serverID:        generateGUID(),
+		serverID:        state.ServerID,
+		tokens:          state.syncTokens(),
 		serverName:      serverName,
 		baseURL:         baseURL,
 		auth:            auth,
@@ -112,17 +114,21 @@ func (s *Server) registerWebRoutes(r chi.Router) {
 func (s *Server) registerPublicRoutes(r chi.Router) {
 	r.Get("/System/Info/Public", s.systemInfoPublic)
 	r.Get("/System/Info", s.systemInfo)
+	r.Get("/System/Info/Storage", s.systemInfoStorage)
 	r.Get("/System/Ping", s.ping)
 	r.Post("/System/Ping", s.ping)
+	r.Get("/System/Endpoint", s.systemEndpoint)
 	r.Get("/Branding/Configuration", s.brandingConfig)
 	r.Get("/Branding/Css", s.brandingCSS)
 	r.Get("/Branding/Splashscreen", notFound)
 	r.Get("/QuickConnect/Enabled", s.quickConnectEnabled)
+	r.Post("/QuickConnect/Initiate", s.quickConnectInitiate)
 	r.Get("/Users/Public", s.usersPublic)
 	r.Post("/Users/AuthenticateByName", s.authenticateByName)
 	r.Get("/UserImage", notFound)
 	r.Head("/UserImage", notFound)
 	r.Get("/socket", s.websocketStub)
+	r.Post("/ClientLog/Document", s.clientLog)
 }
 
 func (s *Server) registerMediaRoutes(r chi.Router) {
@@ -190,7 +196,7 @@ func (s *Server) registerLibraryRoutes(r chi.Router) {
 		name := chi.URLParam(r, "genreName")
 		s.respondJSON(w, http.StatusOK, BaseItemDto{
 			Name: name, ServerID: s.serverID,
-			ID: fmt.Sprintf("genre_%x", hashString(name)), Type: "Genre",
+			ID: genreItemID(name), Type: "Genre",
 		})
 	})
 
@@ -215,11 +221,13 @@ func (s *Server) registerLiveTvRoutes(r chi.Router) {
 
 func (s *Server) registerSessionRoutes(r chi.Router) {
 	r.Get("/Sessions", s.sessionsGet)
+	r.Get("/ScheduledTasks", s.scheduledTasks)
 	r.Get("/System/ActivityLog/Entries", s.emptyQueryResult)
 	r.Get("/Notifications/{userId}/Summary", func(w http.ResponseWriter, r *http.Request) {
 		s.respondJSON(w, http.StatusOK, map[string]int{"UnreadCount": 0, "MaxUnreadCount": 0})
 	})
 	r.Post("/Sessions/Capabilities/Full", noContent)
+	r.Post("/Sessions/Capabilities", noContent)
 	r.Post("/Sessions/Playing", noContent)
 	r.Post("/Sessions/Playing/Progress", noContent)
 	r.Post("/Sessions/Playing/Stopped", noContent)
@@ -233,6 +241,13 @@ func notFound(w http.ResponseWriter, r *http.Request) {
 
 func noContent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) clientLog(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	s.log.Warn().Str("body", string(body)).Msg("client crash log received")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`"ok"`))
 }
 
 func (s *Server) websocketStub(w http.ResponseWriter, r *http.Request) {
@@ -311,7 +326,7 @@ func (s *Server) systemInfoPublic(w http.ResponseWriter, r *http.Request) {
 		ServerName:             s.serverName,
 		Version:                "10.10.6",
 		ProductName:            "Jellyfin Server",
-		OperatingSystem:        "Linux",
+		OperatingSystem:        "",
 		ID:                     s.serverID,
 		StartupWizardCompleted: true,
 	})
@@ -324,7 +339,7 @@ func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
 			ServerName:             s.serverName,
 			Version:                "10.10.6",
 			ProductName:            "Jellyfin Server",
-			OperatingSystem:        "Linux",
+			OperatingSystem:        "",
 			ID:                     s.serverID,
 			StartupWizardCompleted: true,
 		},
@@ -364,6 +379,8 @@ func (s *Server) webFile(w http.ResponseWriter, r *http.Request) {
 			"name": "TVProxy", "short_name": "TVProxy", "start_url": "/web/index.html",
 			"display": "standalone", "background_color": "#1a1d23", "theme_color": "#3b82f6",
 		})
+	case "ConfigurationPages":
+		s.respondJSON(w, http.StatusOK, []any{})
 	default:
 		w.WriteHeader(http.StatusOK)
 	}
@@ -373,14 +390,18 @@ func (s *Server) usersPublic(w http.ResponseWriter, r *http.Request) {
 	users, _ := s.auth.ListUsers(r.Context())
 	var result []UserDto
 	for _, u := range users {
+		policy := defaultPolicy(u.IsAdmin)
+		if policy.IsHidden {
+			continue
+		}
 		result = append(result, UserDto{
 			Name:                  u.Username,
 			ServerID:              s.serverID,
 			ID:                    jellyfinID(u.ID),
 			HasPassword:           true,
 			HasConfiguredPassword: true,
-			Policy:                defaultPolicy(u.IsAdmin),
-			Configuration: defaultUserConfig(),
+			Policy:                policy,
+			Configuration:         defaultUserConfig(),
 		})
 	}
 	if result == nil {
@@ -416,16 +437,15 @@ func (s *Server) lookupUser(r *http.Request, userID string) UserDto {
 			break
 		}
 	}
-	now := time.Now().UTC()
+	nowJF := &JellyfinTime{time.Now().UTC()}
 	return UserDto{
 		Name:                  name,
 		ServerID:              s.serverID,
-		ServerName:            s.serverName,
 		ID:                    jellyfinID(userID),
 		HasPassword:           true,
 		HasConfiguredPassword: true,
-		LastLoginDate:         &now,
-		LastActivityDate:      &now,
+		LastLoginDate:         nowJF,
+		LastActivityDate:      nowJF,
 		Configuration: defaultUserConfig(),
 		Policy: defaultPolicy(isAdmin),
 	}
@@ -449,14 +469,37 @@ func (s *Server) getUserData(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) displayPreferences(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, map[string]any{
-		"Id":               chi.URLParam(r, "id"),
-		"SortBy":           "SortName",
-		"SortOrder":        "Ascending",
-		"RememberIndexing": false,
-		"RememberSorting":  false,
-		"Client":           s.extractAuthField(r, "Client"),
-		"CustomPrefs":      map[string]string{},
+	client := r.URL.Query().Get("client")
+	if client == "" {
+		client = s.extractAuthField(r, "Client")
+	}
+	s.respondJSON(w, http.StatusOK, DisplayPreferences{
+		ID:                 chi.URLParam(r, "id"),
+		SortBy:             "SortName",
+		RememberIndexing:   false,
+		PrimaryImageHeight: 250,
+		PrimaryImageWidth:  250,
+		CustomPrefs: DisplayPreferencesCustomPrefs{
+			ChromecastVersion:          "stable",
+			SkipForwardLength:          "30000",
+			SkipBackLength:             "10000",
+			EnableNextVideoInfoOverlay: "False",
+			TVHome:                     nil,
+			DashboardTheme:             nil,
+		},
+		ScrollDirection: "Horizontal",
+		ShowBackdrop:    true,
+		RememberSorting: false,
+		SortOrder:       "Ascending",
+		ShowSidebar:     false,
+		Client:          client,
+	})
+}
+
+func (s *Server) systemEndpoint(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, EndpointInfo{
+		IsLocal:     false,
+		IsInNetwork: true,
 	})
 }
 
@@ -505,4 +548,20 @@ func (s *Server) bitrateTest(w http.ResponseWriter, r *http.Request) {
 		w.Write(buf[:chunk])
 		written += chunk
 	}
+}
+
+func (s *Server) quickConnectInitiate(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusBadRequest, map[string]any{
+		"Message": "Quick Connect is disabled",
+	})
+}
+
+func (s *Server) scheduledTasks(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, []any{})
+}
+
+func (s *Server) systemInfoStorage(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, StorageInfo{
+		Drives: []StorageDrive{},
+	})
 }

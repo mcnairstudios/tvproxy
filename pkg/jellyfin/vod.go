@@ -74,13 +74,12 @@ func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.HasPrefix(parentID, "group_") {
-		groupID := addDashes(strings.TrimPrefix(parentID, "group_"))
-		s.groupChannels(w, r, groupID)
+	if isGroupItemID(parentID) {
+		s.groupChannels(w, r, groupUUIDFromItemID(parentID))
 		return
 	}
 
-	if strings.HasPrefix(parentID, "series_") {
+	if isSeriesItemID(parentID) {
 		if strings.Contains(itemTypes, "Episode") {
 			s.listEpisodes(w, r)
 			return
@@ -113,13 +112,13 @@ func (s *Server) itemDetail(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
 	ctx := r.Context()
 
-	if itemID == viewMoviesID || itemID == viewTVID || strings.HasPrefix(itemID, "group_") {
+	if itemID == viewMoviesID || itemID == viewTVID || isGroupItemID(itemID) {
 		s.userViews(w, r)
 		return
 	}
 
 	if stream, err := s.streams.GetByID(ctx, addDashes(itemID)); err == nil && stream != nil {
-		item := s.enrichMovieItem(stream)
+		item := s.enrichMovieDetail(stream)
 		if stream.VODType == "series" {
 			item.Type = "Episode"
 			key := seriesKey(stream)
@@ -144,7 +143,7 @@ func (s *Server) itemDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.HasPrefix(itemID, "series_") {
+	if isSeriesItemID(itemID) {
 		if item, ok := s.findSeriesItem(ctx, itemID); ok {
 			s.respondJSON(w, http.StatusOK, item)
 			return
@@ -455,14 +454,21 @@ func (s *Server) listSimilarItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allMovies := s.buildMovieItems(ctx, "", "")
+	allStreams, _ := s.streams.ListByVODType(ctx, "movie")
 	var similar []BaseItemDto
-	for _, item := range allMovies {
-		if item.ID == itemID {
+	for _, st := range allStreams {
+		if st.VODType != "movie" || st.CacheType != "local" {
 			continue
 		}
+		if stripDashes(st.ID) == itemID {
+			continue
+		}
+		var itemGenres []string
+		if m := s.tmdbClient.LookupMovie(st.Name); m != nil {
+			itemGenres = m.Genres
+		}
 		overlap := 0
-		for _, g := range item.Genres {
+		for _, g := range itemGenres {
 			for _, sg := range sourceGenres {
 				if g == sg {
 					overlap++
@@ -470,7 +476,7 @@ func (s *Server) listSimilarItems(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if overlap >= 2 {
-			similar = append(similar, item)
+			similar = append(similar, s.enrichMovieItem(&st))
 		}
 	}
 
@@ -512,11 +518,17 @@ func (s *Server) buildMovieItems(ctx context.Context, searchTerm, genres string)
 			}
 		}
 
-		item := s.enrichMovieItem(&st)
-		if len(genreFilter) > 0 && !matchesGenres(item.Genres, genreFilter) {
-			continue
+		if len(genreFilter) > 0 {
+			var movieGenres []string
+			if m := s.tmdbClient.LookupMovie(st.Name); m != nil {
+				movieGenres = m.Genres
+			}
+			if !matchesGenres(movieGenres, genreFilter) {
+				continue
+			}
 		}
-		items = append(items, item)
+
+		items = append(items, s.enrichMovieItem(&st))
 	}
 
 	return items
@@ -580,67 +592,58 @@ func (s *Server) enrichMovieItem(st *models.Stream) BaseItemDto {
 	}
 
 	item := BaseItemDto{
-		Name:         st.Name,
-		SortName:     sortName(st.Name),
-		Container:    container,
-		ServerID:     s.serverID,
-		ID:           itemID,
-		Type:         "Movie",
-		MediaType:    "Video",
-		IsFolder:     false,
-		LocationType: "FileSystem",
-		ImageTags:    map[string]string{},
-		UserData:     &UserItemData{Key: st.ID},
-		MediaSources: []MediaSource{{
-			Protocol: "Http", ID: itemID, Type: "Default", Name: st.Name,
-			Container: "mp4", IsRemote: true, SupportsTranscoding: true,
-			SupportsDirectStream: true, SupportsDirectPlay: false,
-			TranscodingURL:         channelStreamURL(itemID),
-			TranscodingSubProtocol: "http", TranscodingContainer: "mp4",
-			MediaStreams: s.buildMediaStreams(st),
-		}},
+		Name:              st.Name,
+		ServerID:          s.serverID,
+		ID:                itemID,
+		CanDelete:         boolPtr(true),
+		Container:         container,
+		ChannelID:         nil,
+		IsFolder:          false,
+		Type:              "Movie",
+		VideoType:         "VideoFile",
+		ImageTags:         map[string]string{},
+		BackdropImageTags: []string{},
+		ImageBlurHashes:   map[string]any{},
+		LocationType:      "FileSystem",
+		MediaType:         "Video",
+		UserData:          &UserItemData{Key: st.ID, ItemID: itemID},
 	}
 
 	if st.VODDuration > 0 {
 		item.RunTimeTicks = secondsToTicks(st.VODDuration)
-		item.MediaSources[0].RunTimeTicks = item.RunTimeTicks
 	}
 
-	if st.VODRes != "" {
-		switch strings.ToLower(st.VODRes) {
-		case "4k", "2160p":
-			item.Width, item.Height = 3840, 2160
-		case "1080p":
-			item.Width, item.Height = 1920, 1080
-		case "720p":
-			item.Width, item.Height = 1280, 720
+	if st.VODYear > 0 {
+		item.ProductionYear = st.VODYear
+		item.PremiereDate = fmt.Sprintf("%d-01-01T00:00:00.0000000Z", st.VODYear)
+	}
+
+	if m := s.tmdbClient.LookupMovie(st.Name); m != nil {
+		if m.Year != "" {
+			if yr, _ := strconv.Atoi(m.Year); yr > 0 {
+				item.ProductionYear = yr
+				item.PremiereDate = m.Year + "-01-01T00:00:00.0000000Z"
+			}
+		}
+		if m.PosterPath != "" {
+			item.ImageTags["Primary"] = "tmdb"
 		}
 	}
+
+	return item
+}
+
+func (s *Server) enrichMovieDetail(st *models.Stream) BaseItemDto {
+	item := s.enrichMovieItem(st)
 
 	if m := s.tmdbClient.LookupMovie(st.Name); m != nil {
 		item.Overview = m.Overview
 		item.CommunityRating = m.Rating
 		item.OfficialRating = m.Certification
 		item.Genres = m.Genres
-		item.GenreItems = genreItems(m.Genres)
-		if m.Year != "" {
-			if yr, _ := strconv.Atoi(m.Year); yr > 0 {
-				item.ProductionYear = yr
-				item.PremiereDate = m.Year + "-01-01T00:00:00.0000000Z"
-				item.DateCreated = m.Year + "-01-01T00:00:00.0000000Z"
-			}
-		}
-		if m.PosterPath != "" {
-			item.ImageTags["Primary"] = "tmdb"
-		}
 		if m.BackdropPath != "" {
 			item.BackdropImageTags = []string{"tmdb"}
 		}
-	}
-
-	if item.ProductionYear == 0 && st.VODYear > 0 {
-		item.ProductionYear = st.VODYear
-		item.PremiereDate = fmt.Sprintf("%d-01-01T00:00:00.0000000Z", st.VODYear)
 	}
 
 	return item
@@ -732,6 +735,35 @@ func (s *Server) lookupCast(name, mediaType string) []PersonDto {
 	}
 
 	var people []PersonDto
+
+	if crew, ok := credits["crew"].([]any); ok {
+		for _, c := range crew {
+			cm, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			job, _ := cm["job"].(string)
+			if job != "Director" {
+				continue
+			}
+			name, _ := cm["name"].(string)
+			pid := 0
+			if v, ok := cm["id"].(float64); ok {
+				pid = int(v)
+			}
+			profilePath, _ := cm["profile_path"].(string)
+			person := PersonDto{
+				Name: name,
+				ID:   personItemID(pid),
+				Type: "Director",
+			}
+			if profilePath != "" {
+				person.ImageTag = "tmdb"
+			}
+			people = append(people, person)
+		}
+	}
+
 	for _, c := range cast {
 		cm, ok := c.(map[string]any)
 		if !ok {
@@ -746,7 +778,7 @@ func (s *Server) lookupCast(name, mediaType string) []PersonDto {
 		profilePath, _ := cm["profile_path"].(string)
 		person := PersonDto{
 			Name: actorName,
-			ID:   fmt.Sprintf("person_%d", pid),
+			ID:   personItemID(pid),
 			Role: character,
 			Type: "Actor",
 		}

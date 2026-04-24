@@ -365,7 +365,7 @@ func (h *StreamHandler) VODLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.tmdb != nil && posterURL == "" && !seen[cacheKey] {
 			seen[lookupName+"_"+mediaType] = true
-			uncached = append(uncached, tmdb.VODItem{StreamID: s.ID, Name: lookupName, MediaType: mediaType, TMDBID: s.TMDBID})
+			uncached = append(uncached, tmdb.VODItem{StreamID: s.ID, Name: lookupName, MediaType: mediaType, TMDBID: s.TMDBID, IsLocal: s.CacheType == "local"})
 		}
 
 		item := vodItem{

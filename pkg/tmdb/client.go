@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -14,9 +16,15 @@ import (
 )
 
 type SyncStatus struct {
-	Syncing   bool `json:"syncing"`
-	Total     int  `json:"total"`
-	Completed int  `json:"completed"`
+	Syncing    bool                    `json:"syncing"`
+	Total      int                     `json:"total"`
+	Completed  int                     `json:"completed"`
+	Categories map[string]*SyncCategory `json:"categories,omitempty"`
+}
+
+type SyncCategory struct {
+	Total     int `json:"total"`
+	Completed int `json:"completed"`
 }
 
 type VODItem struct {
@@ -25,9 +33,27 @@ type VODItem struct {
 	MediaType  string
 	Collection string
 	TMDBID     int
+	IsLocal    bool
 }
 
 type ResolvedFunc func(streamID string, tmdbID int)
+
+func syncCategoryKey(item VODItem) string {
+	source := "iptv"
+	if item.IsLocal {
+		source = "local"
+	}
+	media := "movie"
+	if item.MediaType != "movie" {
+		media = "series"
+	}
+	return source + "_" + media
+}
+
+type syncCategoryCounts struct {
+	total atomic.Int64
+	done  atomic.Int64
+}
 
 type TMDBCache interface {
 	Get(key string) (any, bool)
@@ -59,9 +85,10 @@ type Client struct {
 	images   *ImageCache
 	apiKeyFn func() string
 
-	syncTotal atomic.Int64
-	syncDone  atomic.Int64
-	syncing   atomic.Bool
+	syncTotal    atomic.Int64
+	syncDone     atomic.Int64
+	syncing      atomic.Bool
+	syncCategories sync.Map
 }
 
 func NewClient(baseDir string, apiKeyFn func() string, log zerolog.Logger) *Client {
@@ -297,11 +324,21 @@ func (c *Client) ServeImage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Client) Status() SyncStatus {
-	return SyncStatus{
-		Syncing:   c.syncing.Load(),
-		Total:     int(c.syncTotal.Load()),
-		Completed: int(c.syncDone.Load()),
+	s := SyncStatus{
+		Syncing:    c.syncing.Load(),
+		Total:      int(c.syncTotal.Load()),
+		Completed:  int(c.syncDone.Load()),
+		Categories: map[string]*SyncCategory{},
 	}
+	c.syncCategories.Range(func(k, v any) bool {
+		counts := v.(*syncCategoryCounts)
+		s.Categories[k.(string)] = &SyncCategory{
+			Total:     int(counts.total.Load()),
+			Completed: int(counts.done.Load()),
+		}
+		return true
+	})
+	return s
 }
 
 func (c *Client) UpdateSearchCacheForName(name, mediaType string, tmdbID int) {
@@ -586,6 +623,10 @@ func (c *Client) Sync(items []VODItem, onResolved ResolvedFunc) {
 		toSync = append(toSync, item)
 	}
 
+	sort.SliceStable(toSync, func(i, j int) bool {
+		return toSync[i].IsLocal && !toSync[j].IsLocal
+	})
+
 	seriesNeedEpisodes := c.meta.SeriesNeedingEpisodes()
 
 	totalWork := len(toSync) + len(seriesNeedEpisodes)
@@ -595,6 +636,12 @@ func (c *Client) Sync(items []VODItem, onResolved ResolvedFunc) {
 
 	c.syncTotal.Store(int64(totalWork))
 	c.syncDone.Store(0)
+	c.syncCategories = sync.Map{}
+	for _, item := range toSync {
+		key := syncCategoryKey(item)
+		v, _ := c.syncCategories.LoadOrStore(key, &syncCategoryCounts{})
+		v.(*syncCategoryCounts).total.Add(1)
+	}
 	c.syncing.Store(true)
 
 	go func() {
@@ -616,6 +663,9 @@ func (c *Client) Sync(items []VODItem, onResolved ResolvedFunc) {
 			result, err := c.Search(query, item.MediaType)
 			if err != nil {
 				c.log.Debug().Err(err).Str("query", query).Msg("search failed")
+				if v, ok := c.syncCategories.Load(syncCategoryKey(item)); ok {
+					v.(*syncCategoryCounts).done.Add(1)
+				}
 				c.syncDone.Add(1)
 				time.Sleep(250 * time.Millisecond)
 				continue
@@ -632,6 +682,9 @@ func (c *Client) Sync(items []VODItem, onResolved ResolvedFunc) {
 				onResolved(item.StreamID, resolvedID)
 			}
 
+			if v, ok := c.syncCategories.Load(syncCategoryKey(item)); ok {
+				v.(*syncCategoryCounts).done.Add(1)
+			}
 			done := c.syncDone.Add(1)
 			if done%50 == 0 {
 				c.meta.Save()

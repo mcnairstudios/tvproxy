@@ -1,6 +1,39 @@
 package jellyfin
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+type JellyfinTime struct {
+	time.Time
+}
+
+func (jt JellyfinTime) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + jt.UTC().Format("2006-01-02T15:04:05.0000000Z") + `"`), nil
+}
+
+func (jt *JellyfinTime) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return nil
+	}
+	if len(data) < 2 {
+		return fmt.Errorf("invalid time: %s", data)
+	}
+	s := string(data[1 : len(data)-1])
+	formats := []string{
+		"2006-01-02T15:04:05.0000000Z",
+		time.RFC3339Nano,
+		time.RFC3339,
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			jt.Time = t
+			return nil
+		}
+	}
+	return fmt.Errorf("cannot parse time: %s", s)
+}
 
 type PublicSystemInfo struct {
 	LocalAddress           string `json:"LocalAddress"`
@@ -38,19 +71,18 @@ type AuthenticationResult struct {
 }
 
 type UserDto struct {
-	Name                  string     `json:"Name"`
-	ServerID              string     `json:"ServerId"`
-	ServerName            string     `json:"ServerName"`
-	ID                    string     `json:"Id"`
-	PrimaryImageTag       string     `json:"PrimaryImageTag,omitempty"`
-	HasPassword                bool       `json:"HasPassword"`
-	HasConfiguredPassword      bool       `json:"HasConfiguredPassword"`
-	HasConfiguredEasyPassword  bool       `json:"HasConfiguredEasyPassword"`
-	EnableAutoLogin       bool       `json:"EnableAutoLogin"`
-	LastLoginDate         *time.Time `json:"LastLoginDate,omitempty"`
-	LastActivityDate      *time.Time `json:"LastActivityDate,omitempty"`
-	Configuration         UserConfig `json:"Configuration"`
-	Policy                UserPolicy `json:"Policy"`
+	Name                      string         `json:"Name"`
+	ServerID                  string         `json:"ServerId"`
+	ID                        string         `json:"Id"`
+	PrimaryImageTag           string         `json:"PrimaryImageTag,omitempty"`
+	HasPassword               bool           `json:"HasPassword"`
+	HasConfiguredPassword     bool           `json:"HasConfiguredPassword"`
+	HasConfiguredEasyPassword bool           `json:"HasConfiguredEasyPassword"`
+	EnableAutoLogin           bool           `json:"EnableAutoLogin"`
+	LastLoginDate             *JellyfinTime  `json:"LastLoginDate,omitempty"`
+	LastActivityDate          *JellyfinTime  `json:"LastActivityDate,omitempty"`
+	Configuration             UserConfig     `json:"Configuration"`
+	Policy                    UserPolicy     `json:"Policy"`
 }
 
 type UserConfig struct {
@@ -68,6 +100,7 @@ type UserConfig struct {
 	RememberAudioSelections    bool     `json:"RememberAudioSelections"`
 	RememberSubtitleSelections bool     `json:"RememberSubtitleSelections"`
 	EnableNextEpisodeAutoPlay  bool     `json:"EnableNextEpisodeAutoPlay"`
+	CastReceiverId             string   `json:"CastReceiverId"`
 }
 
 type UserPolicy struct {
@@ -125,8 +158,8 @@ type SessionInfo struct {
 	UserID                string              `json:"UserId"`
 	UserName              string              `json:"UserName"`
 	Client                string              `json:"Client"`
-	LastActivityDate      time.Time           `json:"LastActivityDate"`
-	LastPlaybackCheckIn   string              `json:"LastPlaybackCheckIn,omitempty"`
+	LastActivityDate      JellyfinTime        `json:"LastActivityDate"`
+	LastPlaybackCheckIn   string              `json:"LastPlaybackCheckIn"`
 	DeviceName            string              `json:"DeviceName"`
 	DeviceID              string              `json:"DeviceId"`
 	ApplicationVersion    string              `json:"ApplicationVersion"`
@@ -156,46 +189,68 @@ type PlayState struct {
 }
 
 type BaseItemDto struct {
-	Name                   string            `json:"Name"`
-	ServerID               string            `json:"ServerId"`
-	ID                     string            `json:"Id"`
-	Etag                   string            `json:"Etag,omitempty"`
-	DateCreated            string            `json:"DateCreated,omitempty"`
-	Container              string            `json:"Container,omitempty"`
-	SortName               string            `json:"SortName,omitempty"`
-	PremiereDate           string            `json:"PremiereDate,omitempty"`
-	Path                   string            `json:"Path,omitempty"`
-	OfficialRating         string            `json:"OfficialRating,omitempty"`
-	Overview               string            `json:"Overview,omitempty"`
-	Genres                 []string          `json:"Genres,omitempty"`
-	CommunityRating        float64           `json:"CommunityRating,omitempty"`
-	RunTimeTicks           int64             `json:"RunTimeTicks,omitempty"`
-	ProductionYear         int               `json:"ProductionYear,omitempty"`
-	IsFolder               bool              `json:"IsFolder"`
-	Type                   string            `json:"Type"`
-	CollectionType         string            `json:"CollectionType,omitempty"`
-	ParentID               string            `json:"ParentId,omitempty"`
-	ImageTags              map[string]string `json:"ImageTags,omitempty"`
-	BackdropImageTags      []string          `json:"BackdropImageTags,omitempty"`
-	LocationType           string            `json:"LocationType,omitempty"`
-	MediaType              string            `json:"MediaType,omitempty"`
-	Width                  int               `json:"Width,omitempty"`
-	Height                 int               `json:"Height,omitempty"`
-	ChildCount             int               `json:"ChildCount,omitempty"`
-	SeriesName             string            `json:"SeriesName,omitempty"`
-	SeriesID               string            `json:"SeriesId,omitempty"`
-	SeasonID               string            `json:"SeasonId,omitempty"`
-	IndexNumber            int               `json:"IndexNumber,omitempty"`
-	ParentIndexNumber      int               `json:"ParentIndexNumber,omitempty"`
-	UserData               *UserItemData     `json:"UserData,omitempty"`
-	MediaSources           []MediaSource     `json:"MediaSources,omitempty"`
-	GenreItems             []NameIDPair      `json:"GenreItems,omitempty"`
-	Taglines               []string          `json:"Taglines,omitempty"`
-	People                 []PersonDto       `json:"People,omitempty"`
-	Studios                []NameIDPair      `json:"Studios,omitempty"`
-	ChannelNumber          string            `json:"ChannelNumber,omitempty"`
-	ChannelPrimaryImageTag string            `json:"ChannelPrimaryImageTag,omitempty"`
-	CurrentProgram         *BaseItemDto      `json:"CurrentProgram,omitempty"`
+	Name                     string            `json:"Name"`
+	ServerID                 string            `json:"ServerId"`
+	ID                       string            `json:"Id"`
+	Etag                     string            `json:"Etag,omitempty"`
+	CanDelete                *bool             `json:"CanDelete,omitempty"`
+	CanDownload              *bool             `json:"CanDownload,omitempty"`
+	DateCreated              string            `json:"DateCreated,omitempty"`
+	DateLastMediaAdded       string            `json:"DateLastMediaAdded,omitempty"`
+	HasSubtitles             bool              `json:"HasSubtitles,omitempty"`
+	Container                string            `json:"Container,omitempty"`
+	SortName                 string            `json:"SortName,omitempty"`
+	PremiereDate             string            `json:"PremiereDate,omitempty"`
+	Path                     string            `json:"Path,omitempty"`
+	EnableMediaSourceDisplay bool              `json:"EnableMediaSourceDisplay,omitempty"`
+	OfficialRating           string            `json:"OfficialRating,omitempty"`
+	Overview                 string            `json:"Overview,omitempty"`
+	Genres                   []string          `json:"Genres,omitempty"`
+	CommunityRating          float64           `json:"CommunityRating,omitempty"`
+	RunTimeTicks             int64             `json:"RunTimeTicks,omitempty"`
+	ProductionYear           int               `json:"ProductionYear,omitempty"`
+	IsFolder                 bool              `json:"IsFolder"`
+	Type                     string            `json:"Type"`
+	CollectionType           string            `json:"CollectionType,omitempty"`
+	ParentID                 string            `json:"ParentId,omitempty"`
+	ChannelID                *string           `json:"ChannelId,omitempty"`
+	VideoType                string            `json:"VideoType,omitempty"`
+	PlayAccess               string            `json:"PlayAccess,omitempty"`
+	IsHD                     bool              `json:"IsHD,omitempty"`
+	Width                    int               `json:"Width,omitempty"`
+	Height                   int               `json:"Height,omitempty"`
+	ExternalUrls             []any             `json:"ExternalUrls,omitempty"`
+	RemoteTrailers           []any             `json:"RemoteTrailers,omitempty"`
+	ProviderIds              map[string]string `json:"ProviderIds,omitempty"`
+	ProductionLocations      []string          `json:"ProductionLocations,omitempty"`
+	Chapters                 []any             `json:"Chapters,omitempty"`
+	Trickplay                map[string]any    `json:"Trickplay,omitempty"`
+	ImageTags                map[string]string `json:"ImageTags,omitempty"`
+	BackdropImageTags        []string          `json:"BackdropImageTags,omitempty"`
+	ImageBlurHashes          map[string]any    `json:"ImageBlurHashes,omitempty"`
+	LocationType             string            `json:"LocationType,omitempty"`
+	MediaType                string            `json:"MediaType,omitempty"`
+	ChildCount               int               `json:"ChildCount,omitempty"`
+	SpecialFeatureCount      int               `json:"SpecialFeatureCount,omitempty"`
+	LocalTrailerCount        int               `json:"LocalTrailerCount,omitempty"`
+	DisplayPreferencesId     string            `json:"DisplayPreferencesId,omitempty"`
+	Tags                     []string          `json:"Tags,omitempty"`
+	LockedFields             []string          `json:"LockedFields,omitempty"`
+	LockData                 *bool             `json:"LockData,omitempty"`
+	SeriesName               string            `json:"SeriesName,omitempty"`
+	SeriesID                 string            `json:"SeriesId,omitempty"`
+	SeasonID                 string            `json:"SeasonId,omitempty"`
+	IndexNumber              int               `json:"IndexNumber,omitempty"`
+	ParentIndexNumber        int               `json:"ParentIndexNumber,omitempty"`
+	UserData                 *UserItemData     `json:"UserData,omitempty"`
+	MediaSources             []MediaSource     `json:"MediaSources,omitempty"`
+	GenreItems               []NameIDPair      `json:"GenreItems,omitempty"`
+	Taglines                 []string          `json:"Taglines,omitempty"`
+	People                   []PersonDto       `json:"People,omitempty"`
+	Studios                  []NameIDPair      `json:"Studios,omitempty"`
+	ChannelNumber            string            `json:"ChannelNumber,omitempty"`
+	ChannelPrimaryImageTag   string            `json:"ChannelPrimaryImageTag,omitempty"`
+	CurrentProgram           *BaseItemDto      `json:"CurrentProgram,omitempty"`
 }
 
 type UserItemData struct {
@@ -204,6 +259,7 @@ type UserItemData struct {
 	IsFavorite            bool   `json:"IsFavorite"`
 	Played                bool   `json:"Played"`
 	Key                   string `json:"Key"`
+	ItemID                string `json:"ItemId,omitempty"`
 }
 
 type MediaSource struct {
@@ -272,7 +328,48 @@ type NameIDPair struct {
 }
 
 type BrandingConfiguration struct {
-	LoginDisclaimer     string `json:"LoginDisclaimer"`
-	CustomCSS           string `json:"CustomCss"`
+	LoginDisclaimer     string `json:"LoginDisclaimer,omitempty"`
+	CustomCSS           string `json:"CustomCss,omitempty"`
 	SplashscreenEnabled bool   `json:"SplashscreenEnabled"`
+}
+
+type DisplayPreferencesCustomPrefs struct {
+	ChromecastVersion          string  `json:"chromecastVersion"`
+	SkipForwardLength          string  `json:"skipForwardLength"`
+	SkipBackLength             string  `json:"skipBackLength"`
+	EnableNextVideoInfoOverlay string  `json:"enableNextVideoInfoOverlay"`
+	TVHome                     *string `json:"tvhome"`
+	DashboardTheme             *string `json:"dashboardTheme"`
+}
+
+type DisplayPreferences struct {
+	ID                 string                        `json:"Id"`
+	SortBy             string                        `json:"SortBy"`
+	RememberIndexing   bool                          `json:"RememberIndexing"`
+	PrimaryImageHeight int                           `json:"PrimaryImageHeight"`
+	PrimaryImageWidth  int                           `json:"PrimaryImageWidth"`
+	CustomPrefs        DisplayPreferencesCustomPrefs `json:"CustomPrefs"`
+	ScrollDirection    string                        `json:"ScrollDirection"`
+	ShowBackdrop       bool                          `json:"ShowBackdrop"`
+	RememberSorting    bool                          `json:"RememberSorting"`
+	SortOrder          string                        `json:"SortOrder"`
+	ShowSidebar        bool                          `json:"ShowSidebar"`
+	Client             string                        `json:"Client"`
+}
+
+type EndpointInfo struct {
+	IsLocal     bool `json:"IsLocal"`
+	IsInNetwork bool `json:"IsInNetwork"`
+}
+
+type StorageDrive struct {
+	Name         string `json:"Name"`
+	Path         string `json:"Path"`
+	Type         string `json:"Type"`
+	FreeSpaceGB  int    `json:"FreeSpaceGB"`
+	TotalSpaceGB int    `json:"TotalSpaceGB"`
+}
+
+type StorageInfo struct {
+	Drives []StorageDrive `json:"Drives"`
 }

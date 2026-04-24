@@ -18,18 +18,19 @@ func (s *Server) serveImage(w http.ResponseWriter, r *http.Request) {
 
 	isBackdrop := strings.EqualFold(imageType, "Backdrop")
 
-	if strings.HasPrefix(itemID, "person_") {
+	if strings.HasPrefix(stripDashes(itemID), "dddd0000") {
 		s.servePersonImage(w, r)
 		return
 	}
 
-	if strings.HasPrefix(itemID, "group_") {
-		s.serveGroupImage(w, r, addDashes(strings.TrimPrefix(itemID, "group_")))
+	cleanID := stripDashes(itemID)
+	if isGroupItemID(cleanID) {
+		s.serveGroupImage(w, r, groupUUIDFromItemID(cleanID))
 		return
 	}
 
-	if strings.HasPrefix(itemID, "series_") {
-		s.serveSeriesImage(w, r, itemID, isBackdrop)
+	if isSeriesItemID(cleanID) {
+		s.serveSeriesImage(w, r, cleanID, isBackdrop)
 		return
 	}
 
@@ -144,7 +145,14 @@ func (s *Server) servePersonImage(w http.ResponseWriter, r *http.Request) {
 	if personID == "" {
 		personID = chi.URLParam(r, "itemId")
 	}
-	tmdbID := strings.TrimPrefix(personID, "person_")
+	cleanPersonID := stripDashes(personID)
+	tmdbID := personID
+	if strings.HasPrefix(cleanPersonID, "dddd0000") {
+		hex := cleanPersonID[8:16]
+		var id uint32
+		fmt.Sscanf(hex, "%x", &id)
+		tmdbID = fmt.Sprintf("%d", id)
+	}
 	if tmdbID == "" || tmdbID == personID {
 		w.WriteHeader(http.StatusNotFound)
 		return
