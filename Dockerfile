@@ -76,16 +76,16 @@ RUN apt-get update \
         libdrm2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Intel VAAPI/QSV: Arc A380 (DG2), Alder Lake+, older Gen8-11
-# intel-media-va-driver-non-free: iHD driver with encode support (Arc, Gen8+)
-# i965-va-driver-shaders: legacy i965 driver for Gen5-7
-# libvpl2: OneVPL dispatcher for QSV on Gen12+ (Alder Lake, Arc)
-# libmfx1: MSDK dispatcher for QSV on Gen8-11
-# Only available on amd64 — arm64 has no Intel GPU support
+# GPU drivers + tools (amd64 only — arm64 has no Intel/AMD GPU support)
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
       apt-get update && apt-get install -y --no-install-recommends \
         intel-media-va-driver-non-free \
         i965-va-driver-shaders \
+        mesa-va-drivers \
+        mesa-utils \
+        intel-gpu-tools \
+        vulkan-tools \
+        vainfo \
       && (apt-get install -y --no-install-recommends libvpl2 2>/dev/null || true) \
       && (apt-get install -y --no-install-recommends libmfx1 2>/dev/null || true) \
       && rm -rf /var/lib/apt/lists/*; \
