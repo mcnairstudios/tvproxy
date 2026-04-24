@@ -89,6 +89,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
         intel-opencl-icd \
         intel-level-zero-gpu \
         intel-igc-core \
+      && (apt-get install -y --no-install-recommends libnvcuvid1 libnvidia-encode1 2>/dev/null || true) \
       && (apt-get install -y --no-install-recommends libvpl2 2>/dev/null || true) \
       && (apt-get install -y --no-install-recommends libmfx1 2>/dev/null || true) \
       && rm -rf /var/lib/apt/lists/*; \
