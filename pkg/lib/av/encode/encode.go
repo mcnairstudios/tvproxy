@@ -8,10 +8,11 @@ import (
 )
 
 type Encoder struct {
-	codecCtx   *astiav.CodecContext
-	hwCtx      *astiav.HardwareDeviceContext
-	closed     bool
-	hasEncoded bool
+	codecCtx    *astiav.CodecContext
+	hwCtx       *astiav.HardwareDeviceContext
+	hwFramesCtx *astiav.HardwareFramesContext
+	closed      bool
+	hasEncoded  bool
 }
 
 type EncodeOpts struct {
@@ -84,6 +85,31 @@ var hwDeviceType = map[string]string{
 	"nvenc":        "cuda",
 }
 
+var hwPixelFormat = map[string]astiav.PixelFormat{
+	"vaapi":        astiav.PixelFormatVaapi,
+	"qsv":          astiav.PixelFormatQsv,
+	"videotoolbox": astiav.PixelFormatVideotoolbox,
+	"nvenc":        astiav.PixelFormatCuda,
+	"cuda":         astiav.PixelFormatCuda,
+}
+
+var preferredSWFormats = []astiav.PixelFormat{
+	astiav.PixelFormatNv12,
+	astiav.PixelFormatYuv420P,
+}
+
+func isHWPixelFormat(pf astiav.PixelFormat) bool {
+	switch pf {
+	case astiav.PixelFormatVaapi, astiav.PixelFormatCuda,
+		astiav.PixelFormatQsv, astiav.PixelFormatVideotoolbox,
+		astiav.PixelFormatD3D11, astiav.PixelFormatD3D11VaVld,
+		astiav.PixelFormatDrmPrime, astiav.PixelFormatMediacodec,
+		astiav.PixelFormatOpencl:
+		return true
+	}
+	return false
+}
+
 func NewVideoEncoder(opts EncodeOpts) (*Encoder, error) {
 	if opts.Width <= 0 || opts.Height <= 0 {
 		return nil, fmt.Errorf("encode: width and height must be positive (got %dx%d)", opts.Width, opts.Height)
@@ -143,15 +169,60 @@ func NewVideoEncoder(opts EncodeOpts) (*Encoder, error) {
 		cc.SetGopSize(opts.KeyframeInterval)
 	}
 
-	cc.SetPixelFormat(astiav.PixelFormatYuv420P)
-
 	cc.SetTimeBase(astiav.NewRational(1, 25))
 	cc.SetFramerate(astiav.NewRational(25, 1))
 
 	cc.SetFlags(astiav.NewCodecContextFlags(astiav.CodecContextFlagGlobalHeader))
 
 	if enc.hwCtx != nil {
+		hwAccelKey := opts.HWAccel
+		if hwAccelKey == "" {
+			hwAccelKey = "none"
+		}
+		hwPF, hasHWPF := hwPixelFormat[hwAccelKey]
+		if hasHWPF {
+			cc.SetPixelFormat(hwPF)
+
+			hwFramesCtx := astiav.AllocHardwareFramesContext(enc.hwCtx)
+			if hwFramesCtx != nil {
+				swPF := astiav.PixelFormatNv12
+				constraints := enc.hwCtx.HardwareFramesConstraints()
+				if constraints != nil {
+					validSW := constraints.ValidSoftwarePixelFormats()
+					if len(validSW) > 0 {
+						swPF = validSW[0]
+						for _, pref := range preferredSWFormats {
+							for _, valid := range validSW {
+								if pref == valid {
+									swPF = pref
+									goto foundSW
+								}
+							}
+						}
+					foundSW:
+					}
+					constraints.Free()
+				}
+
+				hwFramesCtx.SetHardwarePixelFormat(hwPF)
+				hwFramesCtx.SetSoftwarePixelFormat(swPF)
+				hwFramesCtx.SetWidth(opts.Width)
+				hwFramesCtx.SetHeight(opts.Height)
+				hwFramesCtx.SetInitialPoolSize(20)
+
+				if initErr := hwFramesCtx.Initialize(); initErr != nil {
+					hwFramesCtx.Free()
+				} else {
+					enc.hwFramesCtx = hwFramesCtx
+					cc.SetHardwareFramesContext(hwFramesCtx)
+				}
+			}
+		} else {
+			cc.SetPixelFormat(astiav.PixelFormatYuv420P)
+		}
 		cc.SetHardwareDeviceContext(enc.hwCtx)
+	} else {
+		cc.SetPixelFormat(astiav.PixelFormatYuv420P)
 	}
 
 	var dict *astiav.Dictionary
@@ -267,7 +338,26 @@ func (e *Encoder) Encode(frame *astiav.Frame) ([]*astiav.Packet, error) {
 		return nil, fmt.Errorf("encode: encoder not initialized")
 	}
 
-	if err := e.codecCtx.SendFrame(frame); err != nil {
+	encFrame := frame
+	if frame != nil && e.hwFramesCtx != nil && !isHWPixelFormat(frame.PixelFormat()) {
+		hwFrame := astiav.AllocFrame()
+		if hwFrame == nil {
+			return nil, fmt.Errorf("encode: failed to allocate hardware frame")
+		}
+		if err := hwFrame.AllocHardwareBuffer(e.hwFramesCtx); err != nil {
+			hwFrame.Free()
+			return nil, fmt.Errorf("encode: alloc hardware buffer: %w", err)
+		}
+		if err := frame.TransferHardwareData(hwFrame); err != nil {
+			hwFrame.Free()
+			return nil, fmt.Errorf("encode: upload frame to hardware: %w", err)
+		}
+		hwFrame.SetPts(frame.Pts())
+		encFrame = hwFrame
+		defer hwFrame.Free()
+	}
+
+	if err := e.codecCtx.SendFrame(encFrame); err != nil {
 		return nil, fmt.Errorf("encode: send frame: %w", err)
 	}
 
@@ -341,6 +431,10 @@ func (e *Encoder) freeResources() {
 		}
 		e.codecCtx.Free()
 		e.codecCtx = nil
+	}
+	if e.hwFramesCtx != nil {
+		e.hwFramesCtx.Free()
+		e.hwFramesCtx = nil
 	}
 	if e.hwCtx != nil {
 		e.hwCtx.Free()
