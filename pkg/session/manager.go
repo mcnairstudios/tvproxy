@@ -798,6 +798,8 @@ func (m *Manager) runGoMSE(ctx context.Context, s *Session, ds *DemuxSession, in
 			OutputHeight:     s.startOpts.OutputHeight,
 			Deinterlace:      s.startOpts.Deinterlace,
 			MaxBitDepth:      maxBitDepth,
+			EncoderName:      s.startOpts.VideoEncoderElement,
+			DecoderName:      s.startOpts.VideoDecoderElement,
 			VideoCodecParams: ds.Demuxer().VideoCodecParameters(), AudioCodecParams: ds.Demuxer().AudioCodecParameters(),
 			Log:              m.log.With().Str("session_id", s.ID).Logger(),
 		})
@@ -923,6 +925,8 @@ func (m *Manager) runGoHLS(ctx context.Context, s *Session, ds *DemuxSession, in
 			OutputHeight:     s.startOpts.OutputHeight,
 			Deinterlace:      s.startOpts.Deinterlace,
 			MaxBitDepth:      maxBitDepth,
+			EncoderName:      s.startOpts.VideoEncoderElement,
+			DecoderName:      s.startOpts.VideoDecoderElement,
 			VideoCodecParams: ds.Demuxer().VideoCodecParameters(), AudioCodecParams: ds.Demuxer().AudioCodecParameters(),
 			Log:              m.log.With().Str("session_id", s.ID).Logger(),
 		})
@@ -1026,6 +1030,8 @@ func (m *Manager) runGoFullTranscode(ctx context.Context, s *Session, ds *DemuxS
 		OutputHeight:     s.startOpts.OutputHeight,
 		Deinterlace:      s.startOpts.Deinterlace,
 		MaxBitDepth:      maxBitDepth,
+		EncoderName:      s.startOpts.VideoEncoderElement,
+		DecoderName:      s.startOpts.VideoDecoderElement,
 		VideoCodecParams: ds.Demuxer().VideoCodecParameters(), AudioCodecParams: ds.Demuxer().AudioCodecParameters(),
 		Log:              m.log.With().Str("session_id", s.ID).Logger(),
 	})

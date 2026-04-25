@@ -502,6 +502,8 @@ type FullTranscodeOpts struct {
 	OutputHeight      int
 	MaxBitDepth       int
 	Deinterlace       bool
+	EncoderName       string
+	DecoderName       string
 	VideoCodecParams  *astiav.CodecParameters
 	AudioCodecParams  *astiav.CodecParameters
 	Log               zerolog.Logger
@@ -550,11 +552,13 @@ func NewFullTranscodePipeline(opts FullTranscodeOpts) (*FullTranscodePipeline, e
 		p.videoDec, err = decode.NewVideoDecoderFromParams(opts.VideoCodecParams, decode.DecodeOpts{
 			HWAccel:     decHW,
 			MaxBitDepth: opts.MaxBitDepth,
+			DecoderName: opts.DecoderName,
 		})
 	} else {
 		p.videoDec, err = decode.NewVideoDecoder(videoCodecID, info.Video.Extradata, decode.DecodeOpts{
 			HWAccel:     decHW,
 			MaxBitDepth: opts.MaxBitDepth,
+			DecoderName: opts.DecoderName,
 		})
 	}
 	if err != nil {
@@ -595,11 +599,12 @@ func NewFullTranscodePipeline(opts FullTranscodeOpts) (*FullTranscodePipeline, e
 		outCodec = "h264"
 	}
 	p.videoEnc, err = encode.NewVideoEncoder(encode.EncodeOpts{
-		Codec:   outCodec,
-		HWAccel: opts.HWAccel,
-		Bitrate: opts.Bitrate,
-		Width:   outW,
-		Height:  outH,
+		Codec:       outCodec,
+		HWAccel:     opts.HWAccel,
+		Bitrate:     opts.Bitrate,
+		Width:       outW,
+		Height:      outH,
+		EncoderName: opts.EncoderName,
 	})
 	if err != nil {
 		p.fullClose()
@@ -940,6 +945,8 @@ type MSETranscodeOpts struct {
 	OutputHeight      int
 	MaxBitDepth       int
 	Deinterlace       bool
+	EncoderName       string
+	DecoderName       string
 	VideoCodecParams  *astiav.CodecParameters
 	AudioCodecParams  *astiav.CodecParameters
 	Log               zerolog.Logger
@@ -967,6 +974,7 @@ func NewMSETranscodePipeline(opts MSETranscodeOpts) (*MSETranscodePipeline, erro
 		p.videoDec, err = decode.NewVideoDecoderFromParams(opts.VideoCodecParams, decode.DecodeOpts{
 			HWAccel:     decHW,
 			MaxBitDepth: opts.MaxBitDepth,
+			DecoderName: opts.DecoderName,
 		})
 	} else {
 		videoCodecID, cerr := conv.CodecIDFromString(info.Video.Codec)
@@ -976,6 +984,7 @@ func NewMSETranscodePipeline(opts MSETranscodeOpts) (*MSETranscodePipeline, erro
 		p.videoDec, err = decode.NewVideoDecoder(videoCodecID, info.Video.Extradata, decode.DecodeOpts{
 			HWAccel:     decHW,
 			MaxBitDepth: opts.MaxBitDepth,
+			DecoderName: opts.DecoderName,
 		})
 	}
 	if err != nil {
@@ -1015,11 +1024,12 @@ func NewMSETranscodePipeline(opts MSETranscodeOpts) (*MSETranscodePipeline, erro
 		outCodec = "h264"
 	}
 	p.videoEnc, err = encode.NewVideoEncoder(encode.EncodeOpts{
-		Codec:   outCodec,
-		HWAccel: opts.HWAccel,
-		Bitrate: opts.Bitrate,
-		Width:   outW,
-		Height:  outH,
+		Codec:       outCodec,
+		HWAccel:     opts.HWAccel,
+		Bitrate:     opts.Bitrate,
+		Width:       outW,
+		Height:      outH,
+		EncoderName: opts.EncoderName,
 	})
 	if err != nil {
 		p.closeAll()
@@ -1940,6 +1950,8 @@ type HLSTranscodeOpts struct {
 	OutputHeight     int
 	MaxBitDepth      int
 	Deinterlace      bool
+	EncoderName      string
+	DecoderName      string
 	VideoCodecParams *astiav.CodecParameters
 	AudioCodecParams *astiav.CodecParameters
 	Log              zerolog.Logger
@@ -1967,6 +1979,7 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 		p.videoDec, err = decode.NewVideoDecoderFromParams(opts.VideoCodecParams, decode.DecodeOpts{
 			HWAccel:     decHW,
 			MaxBitDepth: opts.MaxBitDepth,
+			DecoderName: opts.DecoderName,
 		})
 	} else {
 		videoCodecID, cerr := conv.CodecIDFromString(info.Video.Codec)
@@ -1976,6 +1989,7 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 		p.videoDec, err = decode.NewVideoDecoder(videoCodecID, info.Video.Extradata, decode.DecodeOpts{
 			HWAccel:     decHW,
 			MaxBitDepth: opts.MaxBitDepth,
+			DecoderName: opts.DecoderName,
 		})
 	}
 	if err != nil {
@@ -2015,11 +2029,12 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 		outCodec = "h264"
 	}
 	p.videoEnc, err = encode.NewVideoEncoder(encode.EncodeOpts{
-		Codec:   outCodec,
-		HWAccel: opts.HWAccel,
-		Bitrate: opts.Bitrate,
-		Width:   outW,
-		Height:  outH,
+		Codec:       outCodec,
+		HWAccel:     opts.HWAccel,
+		Bitrate:     opts.Bitrate,
+		Width:       outW,
+		Height:      outH,
+		EncoderName: opts.EncoderName,
 	})
 	if err != nil {
 		p.closeHLSTranscode()
