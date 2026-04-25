@@ -60,7 +60,7 @@ func ResolveEncoderName(opts EncodeOpts) (string, error) {
 	}
 
 	hwAccel := opts.HWAccel
-	if hwAccel == "" {
+	if hwAccel == "" || hwAccel == "default" {
 		hwAccel = "none"
 	}
 

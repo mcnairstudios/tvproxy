@@ -60,20 +60,18 @@ func (s *VODService) startRecordingInternal(ctx context.Context, sessionKey, tit
 		channelName = rs.ChannelName
 	}
 
-	defaultHWAccel, defaultCodec := s.settingsService.ResolveGlobalDefaults(ctx)
-
-	_ = defaultHWAccel
-	_ = defaultCodec
+	defaultHWAccel, _ := s.settingsService.ResolveGlobalDefaults(ctx)
 
 	newSess, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, session.StartOpts{
-		ChannelID:   sessionKey,
-		StreamID:    streamID,
-		StreamURL:   streamURL,
-		StreamName:  streamName,
-		ChannelName: channelName,
-		ProfileName:  session.ConsumerRecording,
-		UseWireGuard: useWG,
-		OutputDir:    s.config.VODOutputDir,
+		ChannelID:     sessionKey,
+		StreamID:      streamID,
+		StreamURL:     streamURL,
+		StreamName:    streamName,
+		ChannelName:   channelName,
+		ProfileName:   session.ConsumerRecording,
+		OutputHWAccel: defaultHWAccel,
+		UseWireGuard:  useWG,
+		OutputDir:     s.config.VODOutputDir,
 	}, session.ConsumerRecording)
 	if err != nil {
 		return err

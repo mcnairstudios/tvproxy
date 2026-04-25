@@ -359,6 +359,10 @@ func (s *ProxyService) startTranscoder(ctx context.Context, channelID string, st
 	if profile != nil {
 		hwAccel = profile.HWAccel
 	}
+	if hwAccel == "" || hwAccel == "default" {
+		globalHW, _ := s.settingsService.ResolveGlobalDefaults(ctx)
+		hwAccel = globalHW
+	}
 
 	s.log.Info().
 		Str("channel_id", channelID).

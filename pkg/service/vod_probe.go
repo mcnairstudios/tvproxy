@@ -84,12 +84,17 @@ func (s *VODService) TranscodeFile(ctx context.Context, filePath, profileName st
 		videoCodec = "copy"
 	}
 
+	hwAccel := sp.HWAccel
+	if hwAccel == "" || hwAccel == "default" {
+		hwAccel, _ = s.settingsService.ResolveGlobalDefaults(ctx)
+	}
+
 	reader, err := StartAVPipeline(ctx, AVPipelineOpts{
 		URL:        filePath,
 		Format:     format,
 		VideoCodec: videoCodec,
 		AudioCodec: "aac",
-		HWAccel:    sp.HWAccel,
+		HWAccel:    hwAccel,
 		IsLive:     false,
 		Log:        s.log,
 	})
