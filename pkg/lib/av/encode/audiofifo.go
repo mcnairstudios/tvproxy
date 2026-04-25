@@ -6,6 +6,11 @@ import (
 	"github.com/asticode/go-astiav"
 )
 
+type ptsEntry struct {
+	pts          int64
+	sampleOffset int64
+}
+
 type AudioFIFO struct {
 	encoder            *Encoder
 	fifo               *astiav.AudioFifo
@@ -14,9 +19,9 @@ type AudioFIFO struct {
 	sampleFmt          astiav.SampleFormat
 	layout             astiav.ChannelLayout
 	rate               int
+	totalInputSamples  int64
 	totalOutputSamples int64
-	basePTS            int64
-	basePTSSet         bool
+	ptsQueue           []ptsEntry
 }
 
 func NewAudioFIFOFromEncoder(encoder *Encoder, channels int, layout astiav.ChannelLayout, rate int) *AudioFIFO {
@@ -54,11 +59,8 @@ func (f *AudioFIFO) Write(frame *astiav.Frame) ([]*astiav.Packet, error) {
 		f.fifo = fifo
 	}
 
-	if f.fifo.Size() == 0 || !f.basePTSSet {
-		f.basePTS = frame.Pts()
-		f.totalOutputSamples = 0
-		f.basePTSSet = true
-	}
+	f.ptsQueue = append(f.ptsQueue, ptsEntry{pts: frame.Pts(), sampleOffset: f.totalInputSamples})
+	f.totalInputSamples += int64(frame.NbSamples())
 
 	if _, err := f.fifo.Write(frame); err != nil {
 		return nil, fmt.Errorf("audiofifo: write: %w", err)
@@ -82,8 +84,21 @@ func (f *AudioFIFO) Write(frame *astiav.Frame) ([]*astiav.Packet, error) {
 			outFrame.Free()
 			return allPkts, fmt.Errorf("audiofifo: read: %w", err)
 		}
-		outFrame.SetPts(f.basePTS + f.totalOutputSamples)
+		useIdx := 0
+		for i := 1; i < len(f.ptsQueue); i++ {
+			if f.ptsQueue[i].sampleOffset <= f.totalOutputSamples {
+				useIdx = i
+			} else {
+				break
+			}
+		}
+		entry := f.ptsQueue[useIdx]
+		outFrame.SetPts(entry.pts + (f.totalOutputSamples - entry.sampleOffset))
 		f.totalOutputSamples += int64(f.frameSize)
+
+		if useIdx > 0 {
+			f.ptsQueue = f.ptsQueue[useIdx:]
+		}
 
 		pkts, err := f.encoder.Encode(outFrame)
 		outFrame.Free()
@@ -101,8 +116,9 @@ func (f *AudioFIFO) Reset() {
 		f.fifo.Free()
 		f.fifo = nil
 	}
-	f.basePTSSet = false
+	f.totalInputSamples = 0
 	f.totalOutputSamples = 0
+	f.ptsQueue = nil
 }
 
 func (f *AudioFIFO) Close() {

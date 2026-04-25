@@ -384,17 +384,6 @@ func (d *Demuxer) readPacketOnce() (*Packet, error) {
 		ptsNs -= d.basePTS
 		dtsNs -= d.basePTS
 
-		if stype == Audio && d.audioSampleRate > 0 && !d.opts.AudioPassthrough {
-			if !d.audioPTSInited {
-				d.audioBasePTS = ptsNs
-				d.audioFrameCount = 0
-				d.audioPTSInited = true
-			}
-			ptsNs = d.audioBasePTS + d.audioFrameCount*int64(d.audioFrameSize)*1_000_000_000/int64(d.audioSampleRate)
-			dtsNs = ptsNs
-			d.audioFrameCount++
-		}
-
 		src := d.pkt.Data()
 		data := make([]byte, len(src))
 		copy(data, src)
