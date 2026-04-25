@@ -167,6 +167,8 @@ func NewVideoEncoder(opts EncodeOpts) (*Encoder, error) {
 
 	if opts.KeyframeInterval > 0 {
 		cc.SetGopSize(opts.KeyframeInterval)
+	} else {
+		cc.SetGopSize(50)
 	}
 
 	cc.SetTimeBase(astiav.NewRational(1, 25))

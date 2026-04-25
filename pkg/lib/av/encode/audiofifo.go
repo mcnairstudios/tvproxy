@@ -7,15 +7,16 @@ import (
 )
 
 type AudioFIFO struct {
-	encoder   *Encoder
-	fifo      *astiav.AudioFifo
-	frameSize int
-	channels  int
-	sampleFmt astiav.SampleFormat
-	layout    astiav.ChannelLayout
-	rate      int
-	pts       int64
-	inited    bool
+	encoder            *Encoder
+	fifo               *astiav.AudioFifo
+	frameSize          int
+	channels           int
+	sampleFmt          astiav.SampleFormat
+	layout             astiav.ChannelLayout
+	rate               int
+	totalOutputSamples int64
+	basePTS            int64
+	basePTSSet         bool
 }
 
 func NewAudioFIFOFromEncoder(encoder *Encoder, channels int, layout astiav.ChannelLayout, rate int) *AudioFIFO {
@@ -53,9 +54,10 @@ func (f *AudioFIFO) Write(frame *astiav.Frame) ([]*astiav.Packet, error) {
 		f.fifo = fifo
 	}
 
-	if !f.inited {
-		f.pts = frame.Pts()
-		f.inited = true
+	if f.fifo.Size() == 0 || !f.basePTSSet {
+		f.basePTS = frame.Pts()
+		f.totalOutputSamples = 0
+		f.basePTSSet = true
 	}
 
 	if _, err := f.fifo.Write(frame); err != nil {
@@ -80,8 +82,8 @@ func (f *AudioFIFO) Write(frame *astiav.Frame) ([]*astiav.Packet, error) {
 			outFrame.Free()
 			return allPkts, fmt.Errorf("audiofifo: read: %w", err)
 		}
-		outFrame.SetPts(f.pts)
-		f.pts += int64(f.frameSize)
+		outFrame.SetPts(f.basePTS + f.totalOutputSamples)
+		f.totalOutputSamples += int64(f.frameSize)
 
 		pkts, err := f.encoder.Encode(outFrame)
 		outFrame.Free()
@@ -99,7 +101,8 @@ func (f *AudioFIFO) Reset() {
 		f.fifo.Free()
 		f.fifo = nil
 	}
-	f.inited = false
+	f.basePTSSet = false
+	f.totalOutputSamples = 0
 }
 
 func (f *AudioFIFO) Close() {
