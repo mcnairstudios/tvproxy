@@ -59,6 +59,10 @@ type StartOpts struct {
 	OutputHeight       int
 }
 
+type StreamProbeUpdater interface {
+	UpdateStreamProbeData(ctx context.Context, id string, duration float64, vcodec, acodec string) error
+}
+
 type Manager struct {
 	sessions      map[string]*Session
 	config        *config.Config
@@ -67,6 +71,7 @@ type Manager struct {
 	wgProxyMgr    *WGProxyManager
 	wgProxyFunc   func(string) string
 	probeCache    store.ProbeCache
+	streamStore   StreamProbeUpdater
 	onCleanup     func(channelID string)
 	log           zerolog.Logger
 	mu            sync.RWMutex
@@ -91,7 +96,7 @@ func (m *Manager) SetOnCleanup(fn func(channelID string)) {
 	m.onCleanup = fn
 }
 
-func NewManager(cfg *config.Config, httpClient *http.Client, wgClient *http.Client, probeCache store.ProbeCache, log zerolog.Logger) *Manager {
+func NewManager(cfg *config.Config, httpClient *http.Client, wgClient *http.Client, probeCache store.ProbeCache, streamStore StreamProbeUpdater, log zerolog.Logger) *Manager {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -102,6 +107,7 @@ func NewManager(cfg *config.Config, httpClient *http.Client, wgClient *http.Clie
 		wgClient:    wgClient,
 		wgProxyMgr:  NewWGProxyManager(),
 		probeCache:  probeCache,
+		streamStore: streamStore,
 		log:         log.With().Str("component", "session_manager").Logger(),
 	}
 }
@@ -660,6 +666,11 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 		Int("audio_idx", audioIdx).
 		Msg("building pipeline")
 
+	if s.startOpts.Delivery == "hls" {
+		m.runGoHLS(ctx, s, ds, info, audioIdx, isLive, needsTranscode, encCodec, srcCodec, maxBitDepth)
+		return
+	}
+
 	if isMSE {
 		m.runGoMSE(ctx, s, ds, info, audioIdx, isLive, needsTranscode, encCodec, srcCodec, maxBitDepth)
 		return
@@ -869,6 +880,131 @@ func (m *Manager) runGoMSE(ctx context.Context, s *Session, ds *DemuxSession, in
 	s.setError(fmt.Errorf("live MSE failed: %w", demuxErr))
 }
 
+func (m *Manager) runGoHLS(ctx context.Context, s *Session, ds *DemuxSession, info *probe.StreamInfo, audioIdx int, isLive, needsTranscode bool, outCodec, srcCodec string, maxBitDepth int) {
+	forceDecode := needsTranscode || s.startOpts.EncoderBitrateKbps > 0 ||
+		(s.startOpts.OutputHeight > 0 && info.Video != nil && s.startOpts.OutputHeight < info.Video.Height)
+
+	segDuration := 6
+
+	var sink demuxloop.PacketSink
+	var stopFn func()
+
+	if !forceDecode {
+		gp, err := NewHLSCopyPipeline(HLSCopyOpts{
+			Info:             info,
+			AudioIndex:       audioIdx,
+			OutputDir:        s.OutputDir,
+			IsLive:           isLive,
+			SegmentDuration:  segDuration,
+			OutputAudioCodec: s.startOpts.OutputAudioCodec,
+			VideoCodecParams: ds.Demuxer().VideoCodecParameters(), AudioCodecParams: ds.Demuxer().AudioCodecParameters(),
+			Log:              m.log.With().Str("session_id", s.ID).Logger(),
+		})
+		if err != nil {
+			m.log.Error().Err(err).Str("session_id", s.ID).Msg("Go HLS copy pipeline failed")
+			s.setError(fmt.Errorf("HLS copy pipeline failed: %w", err))
+			return
+		}
+		sink = gp
+		stopFn = func() { gp.Stop() }
+		m.log.Info().Str("session_id", s.ID).Str("codec", srcCodec).Msg("HLS copy mode — no decode/encode")
+	} else {
+		gp, err := NewHLSTranscodePipeline(HLSTranscodeOpts{
+			Info:             info,
+			AudioIndex:       audioIdx,
+			OutputDir:        s.OutputDir,
+			IsLive:           isLive,
+			SegmentDuration:  segDuration,
+			HWAccel:          s.startOpts.OutputHWAccel,
+			DecodeHWAccel:    s.startOpts.DecodeHWAccel,
+			OutputCodec:      outCodec,
+			OutputAudioCodec: s.startOpts.OutputAudioCodec,
+			Bitrate:          s.startOpts.EncoderBitrateKbps,
+			OutputHeight:     s.startOpts.OutputHeight,
+			Deinterlace:      s.startOpts.Deinterlace,
+			MaxBitDepth:      maxBitDepth,
+			VideoCodecParams: ds.Demuxer().VideoCodecParameters(), AudioCodecParams: ds.Demuxer().AudioCodecParameters(),
+			Log:              m.log.With().Str("session_id", s.ID).Logger(),
+		})
+		if err != nil {
+			m.log.Error().Err(err).Str("session_id", s.ID).Msg("Go HLS transcode pipeline failed")
+			s.setError(fmt.Errorf("HLS pipeline failed: %w", err))
+			return
+		}
+		sink = gp
+		stopFn = func() { gp.Stop() }
+	}
+	s.SetStopPipeline(stopFn)
+
+	w, wErr := NewWatcher(s.OutputDir, m.log)
+	if wErr != nil {
+		m.log.Error().Err(wErr).Str("session_id", s.ID).Msg("failed to create watcher")
+		s.setError(fmt.Errorf("watcher creation failed: %w", wErr))
+		stopFn()
+		return
+	}
+	s.SessionWatcher = w
+
+	if s.startOpts.SeekOffset > 0 && !isLive {
+		seekMs := int64(s.startOpts.SeekOffset * 1000)
+		if seekErr := ds.Demuxer().SeekTo(seekMs); seekErr != nil {
+			m.log.Warn().Err(seekErr).Str("session_id", s.ID).Msg("initial seek failed")
+		}
+	}
+
+	type seekResetter interface {
+		ResetForSeek()
+	}
+	ds.Demuxer().SetOnSeek(func() {
+		if w != nil {
+			w.Reset()
+		}
+		if sr, ok := sink.(seekResetter); ok {
+			sr.ResetForSeek()
+		}
+		m.log.Info().Str("session_id", s.ID).Msg("seek: watcher+muxer reset (HLS)")
+	})
+
+	s.SetSeekFunc(func(position float64) {
+		seekMs := int64(position * 1000)
+		if err := ds.Demuxer().RequestSeek(seekMs); err != nil {
+			m.log.Warn().Err(err).Str("session_id", s.ID).Float64("position", position).Msg("seek request failed")
+		} else {
+			m.log.Info().Str("session_id", s.ID).Float64("position", position).Msg("seek requested")
+		}
+	})
+
+	go m.pollFileProgress(ctx, s)
+
+	if m.probeCache != nil && s.StreamID != "" {
+		go m.cachePassiveMetadata(ctx, s)
+	}
+
+	m.log.Info().Str("session_id", s.ID).Bool("transcode", forceDecode).Msg("Go HLS pipeline started")
+
+	demuxErr := ds.RunWithSink(ctx, sink)
+
+	stopFn()
+
+	if ctx.Err() != nil {
+		m.log.Info().Str("session_id", s.ID).Msg("HLS session ended (context cancelled)")
+		return
+	}
+
+	if demuxErr == nil {
+		m.log.Info().Str("session_id", s.ID).Msg("HLS session completed")
+		return
+	}
+
+	if !isLive {
+		s.setError(fmt.Errorf("HLS error: %w", demuxErr))
+		return
+	}
+
+	m.log.Warn().Err(demuxErr).Str("session_id", s.ID).Msg("live HLS failed")
+	s.setError(fmt.Errorf("live HLS failed: %w", demuxErr))
+}
+
 func (m *Manager) runGoFullTranscode(ctx context.Context, s *Session, ds *DemuxSession, info *probe.StreamInfo, audioIdx int, isLive bool, outCodec string, maxBitDepth int) {
 	format := "mpegts"
 	if s.startOpts.OutputContainer == "mp4" {
@@ -1063,6 +1199,20 @@ func (m *Manager) cachePassiveMetadata(ctx context.Context, s *Session) {
 		}
 		m.probeCache.SaveProbe(s.StreamID, result)
 		m.log.Debug().Str("stream_id", s.StreamID).Msg("passive metadata cached from playback")
+
+		if m.streamStore != nil && s.StreamID != "" {
+			vcodec := ""
+			acodec := ""
+			if video != nil {
+				vcodec = video.Codec
+			}
+			if len(audioTracks) > 0 {
+				acodec = audioTracks[0].Codec
+			}
+			if err := m.streamStore.UpdateStreamProbeData(ctx, s.StreamID, duration, vcodec, acodec); err != nil {
+				m.log.Debug().Err(err).Str("stream_id", s.StreamID).Msg("failed to update stream probe data")
+			}
+		}
 	}
 }
 

@@ -523,6 +523,60 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 	return streamID, consumerID, sa.Container, nil
 }
 
+func (s *VODService) StartWatchingStreamHLS(ctx context.Context, streamID string, userAgent string, remoteAddr string) (string, string, string, error) {
+	stream, err := s.streamStore.GetByID(ctx, streamID)
+	if err != nil {
+		return "", "", "", fmt.Errorf("%w: %w", ErrStreamNotFound, err)
+	}
+	if !stream.IsActive {
+		return "", "", "", fmt.Errorf("stream %s is inactive", streamID)
+	}
+
+	streamURL := stream.URL
+	globalHW, _ := s.settingsService.ResolveGlobalDefaults(ctx)
+
+	startOpts := session.StartOpts{
+		ChannelID:        streamID,
+		StreamID:         streamID,
+		StreamURL:        streamURL,
+		StreamName:       stream.Name,
+		ChannelName:      stream.Name,
+		ProfileName:      "Jellyfin",
+		OutputVideoCodec: "copy",
+		OutputAudioCodec: "aac",
+		OutputContainer:  "ts",
+		OutputHWAccel:    globalHW,
+		UseWireGuard:     stream.UseWireGuard,
+		KnownDuration:    stream.VODDuration,
+		OutputDir:        s.config.VODOutputDir,
+		Delivery:         "hls",
+	}
+	sp := s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID, streamURL)
+	applySourceProfile(&startOpts, sp)
+
+	_, consumerID, err := s.sessionMgr.GetOrCreateWithConsumer(ctx, startOpts, session.ConsumerViewer)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	s.log.Info().Str("stream_id", streamID).Str("user_agent", userAgent).Str("remote", remoteAddr).Msg("HLS viewer started")
+
+	if s.activity != nil {
+		s.activity.Add(ViewerOpts{
+			ID:           consumerID,
+			StreamID:     streamID,
+			StreamName:   stream.Name,
+			M3UAccountID: stream.M3UAccountID,
+			ProfileName:  "Jellyfin",
+			UserAgent:    userAgent,
+			RemoteAddr:   remoteAddr,
+			Type:         "vod",
+		})
+	}
+
+	return streamID, consumerID, s.sessionMgr.Get(streamID).OutputDir, nil
+}
+
 func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, profileName, userAgent, remoteAddr string) (string, string, string, float64, bool, error) {
 	sa := s.composeSessionArgs(ctx, profileName, filePath, "")
 

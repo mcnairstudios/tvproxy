@@ -482,6 +482,20 @@ func (s *BoltStreamStore) UpdateTMDBID(_ context.Context, id string, tmdbID int)
 	})
 }
 
+func (s *BoltStreamStore) UpdateStreamProbeData(_ context.Context, id string, duration float64, vcodec, acodec string) error {
+	return s.updateStreamField(id, func(st *models.Stream) {
+		if duration > 0 && st.VODDuration == 0 {
+			st.VODDuration = duration
+		}
+		if vcodec != "" && st.VODVCodec == "" {
+			st.VODVCodec = vcodec
+		}
+		if acodec != "" && st.VODACodec == "" {
+			st.VODACodec = acodec
+		}
+	})
+}
+
 func (s *BoltStreamStore) SetTMDBManual(_ context.Context, id string, tmdbID int) error {
 	return s.updateStreamField(id, func(st *models.Stream) {
 		st.TMDBID = tmdbID

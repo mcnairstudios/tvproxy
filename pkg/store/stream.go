@@ -424,6 +424,27 @@ func (s *StreamStoreImpl) ClearAutoTMDBByAccountID(_ context.Context, accountID 
 	return nil
 }
 
+func (s *StreamStoreImpl) UpdateStreamProbeData(_ context.Context, id string, duration float64, vcodec, acodec string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.items[id]
+	if !ok {
+		return fmt.Errorf("stream not found: %s", id)
+	}
+	if duration > 0 && st.VODDuration == 0 {
+		st.VODDuration = duration
+	}
+	if vcodec != "" && st.VODVCodec == "" {
+		st.VODVCodec = vcodec
+	}
+	if acodec != "" && st.VODACodec == "" {
+		st.VODACodec = acodec
+	}
+	st.UpdatedAt = time.Now()
+	s.items[id] = st
+	return nil
+}
+
 func (s *StreamStoreImpl) Clear() error {
 	s.mu.Lock()
 	s.items = make(map[string]models.Stream)

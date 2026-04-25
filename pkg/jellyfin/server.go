@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -18,7 +18,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/hls"
-	"github.com/gavinmcnair/tvproxy/pkg/models"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
 	"github.com/gavinmcnair/tvproxy/pkg/tmdb"
@@ -34,21 +33,21 @@ type Server struct {
 	channels        store.ChannelStore
 	channelGroups   store.ChannelGroupStore
 	streams         store.StreamReader
-	profiles        store.ProfileStore
 	epg             store.EPGStore
 	logoService     *service.LogoService
 	tmdbClient      *tmdb.Client
 	hlsManager      *hls.Manager
+	vodService      *service.VODService
 	WGProxyFunc     func(string) string
 	log             zerolog.Logger
 	tokens          sync.Map
+	state           *persistedState
 }
 
-func NewServer(serverName, baseURL string, auth *service.AuthService, activityService *service.ActivityService, favorites store.FavoriteStore, channels store.ChannelStore, channelGroups store.ChannelGroupStore, streams store.StreamReader, profiles store.ProfileStore, epg store.EPGStore, logoService *service.LogoService, tmdbClient *tmdb.Client, hlsManager *hls.Manager, log zerolog.Logger) *Server {
-	state := loadState()
-	return &Server{
-		serverID:        state.ServerID,
-		tokens:          state.syncTokens(),
+func NewServer(serverName, baseURL, stateDir string, auth *service.AuthService, activityService *service.ActivityService, favorites store.FavoriteStore, channels store.ChannelStore, channelGroups store.ChannelGroupStore, streams store.StreamReader, epg store.EPGStore, logoService *service.LogoService, tmdbClient *tmdb.Client, hlsManager *hls.Manager, vodService *service.VODService, log zerolog.Logger) *Server {
+	state := loadState(stateDir)
+	s := &Server{
+		serverID:        generateGUID(),
 		serverName:      serverName,
 		baseURL:         baseURL,
 		auth:            auth,
@@ -57,13 +56,16 @@ func NewServer(serverName, baseURL string, auth *service.AuthService, activitySe
 		channels:        channels,
 		channelGroups:   channelGroups,
 		streams:         streams,
-		profiles:        profiles,
 		epg:             epg,
 		logoService:     logoService,
 		tmdbClient:      tmdbClient,
 		hlsManager:      hlsManager,
+		vodService:      vodService,
 		log:             log.With().Str("component", "jellyfin").Logger(),
+		state:           state,
 	}
+	state.syncTokens(&s.tokens)
+	return s
 }
 
 func generateGUID() string {
@@ -119,9 +121,9 @@ func (s *Server) registerPublicRoutes(r chi.Router) {
 	r.Get("/System/Info/Public", s.systemInfoPublic)
 	r.Get("/System/Info", s.systemInfo)
 	r.Get("/System/Info/Storage", s.systemInfoStorage)
+	r.Get("/System/Endpoint", s.systemEndpoint)
 	r.Get("/System/Ping", s.ping)
 	r.Post("/System/Ping", s.ping)
-	r.Get("/System/Endpoint", s.systemEndpoint)
 	r.Get("/Branding/Configuration", s.brandingConfig)
 	r.Get("/Branding/Css", s.brandingCSS)
 	r.Get("/Branding/Splashscreen", notFound)
@@ -132,7 +134,9 @@ func (s *Server) registerPublicRoutes(r chi.Router) {
 	r.Get("/UserImage", notFound)
 	r.Head("/UserImage", notFound)
 	r.Get("/socket", s.websocketStub)
-	r.Post("/ClientLog/Document", s.clientLog)
+	r.Post("/ClientLog/Document", s.clientLogDocument)
+	r.Get("/web/ConfigurationPages", s.configurationPages)
+	r.Get("/ScheduledTasks", s.scheduledTasks)
 }
 
 func (s *Server) registerMediaRoutes(r chi.Router) {
@@ -177,13 +181,13 @@ func (s *Server) registerLibraryRoutes(r chi.Router) {
 	r.Get("/Shows/{seriesId}/Seasons", s.listSeasons)
 	r.Get("/Shows/{seriesId}/Episodes", s.listEpisodes)
 	r.Get("/Items/{itemId}/Similar", s.listSimilarItems)
-	r.Get("/Items/{itemId}/Intros", s.emptyQueryResult)
 	r.Get("/Items/{itemId}/LocalTrailers", s.listSpecialFeatures)
 	r.Get("/Items/{itemId}/SpecialFeatures", s.listSpecialFeatures)
 	r.Get("/Items/{itemId}/ThemeMedia", s.listSpecialFeatures)
 	r.Get("/Items/{itemId}/ThemeSongs", s.listSpecialFeatures)
 	r.Get("/Items/{itemId}/ThemeVideos", s.listSpecialFeatures)
 	r.Get("/Items/{itemId}/InstantMix", s.listSpecialFeatures)
+	r.Get("/Items/{itemId}/Intros", s.emptyQueryResult)
 	r.Post("/Items/{itemId}/PlaybackInfo", s.playbackInfo)
 	r.Get("/Playback/BitrateTest", s.bitrateTest)
 
@@ -201,7 +205,7 @@ func (s *Server) registerLibraryRoutes(r chi.Router) {
 		name := chi.URLParam(r, "genreName")
 		s.respondJSON(w, http.StatusOK, BaseItemDto{
 			Name: name, ServerID: s.serverID,
-			ID: genreItemID(name), Type: "Genre",
+			ID: fmt.Sprintf("genre_%x", hashString(name)), Type: "Genre",
 		})
 	})
 
@@ -226,13 +230,12 @@ func (s *Server) registerLiveTvRoutes(r chi.Router) {
 
 func (s *Server) registerSessionRoutes(r chi.Router) {
 	r.Get("/Sessions", s.sessionsGet)
-	r.Get("/ScheduledTasks", s.scheduledTasks)
 	r.Get("/System/ActivityLog/Entries", s.emptyQueryResult)
 	r.Get("/Notifications/{userId}/Summary", func(w http.ResponseWriter, r *http.Request) {
 		s.respondJSON(w, http.StatusOK, map[string]int{"UnreadCount": 0, "MaxUnreadCount": 0})
 	})
-	r.Post("/Sessions/Capabilities/Full", noContent)
 	r.Post("/Sessions/Capabilities", noContent)
+	r.Post("/Sessions/Capabilities/Full", noContent)
 	r.Post("/Sessions/Playing", noContent)
 	r.Post("/Sessions/Playing/Progress", noContent)
 	r.Post("/Sessions/Playing/Stopped", noContent)
@@ -246,21 +249,6 @@ func notFound(w http.ResponseWriter, r *http.Request) {
 
 func noContent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) jellyfinProfile(ctx context.Context) *models.StreamProfile {
-	if s.profiles == nil {
-		return nil
-	}
-	p, _ := s.profiles.GetByName(ctx, "Jellyfin")
-	return p
-}
-
-func (s *Server) clientLog(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(r.Body)
-	s.log.Warn().Str("body", string(body)).Msg("client crash log received")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`"ok"`))
 }
 
 func (s *Server) websocketStub(w http.ResponseWriter, r *http.Request) {
@@ -339,7 +327,7 @@ func (s *Server) systemInfoPublic(w http.ResponseWriter, r *http.Request) {
 		ServerName:             s.serverName,
 		Version:                "10.10.6",
 		ProductName:            "Jellyfin Server",
-		OperatingSystem:        "",
+		OperatingSystem:        "Linux",
 		ID:                     s.serverID,
 		StartupWizardCompleted: true,
 	})
@@ -352,7 +340,7 @@ func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
 			ServerName:             s.serverName,
 			Version:                "10.10.6",
 			ProductName:            "Jellyfin Server",
-			OperatingSystem:        "",
+			OperatingSystem:        "Linux",
 			ID:                     s.serverID,
 			StartupWizardCompleted: true,
 		},
@@ -392,8 +380,6 @@ func (s *Server) webFile(w http.ResponseWriter, r *http.Request) {
 			"name": "TVProxy", "short_name": "TVProxy", "start_url": "/web/index.html",
 			"display": "standalone", "background_color": "#1a1d23", "theme_color": "#3b82f6",
 		})
-	case "ConfigurationPages":
-		s.respondJSON(w, http.StatusOK, []any{})
 	default:
 		w.WriteHeader(http.StatusOK)
 	}
@@ -403,18 +389,14 @@ func (s *Server) usersPublic(w http.ResponseWriter, r *http.Request) {
 	users, _ := s.auth.ListUsers(r.Context())
 	var result []UserDto
 	for _, u := range users {
-		policy := defaultPolicy(u.IsAdmin)
-		if policy.IsHidden {
-			continue
-		}
 		result = append(result, UserDto{
 			Name:                  u.Username,
 			ServerID:              s.serverID,
 			ID:                    jellyfinID(u.ID),
 			HasPassword:           true,
 			HasConfiguredPassword: true,
-			Policy:                policy,
-			Configuration:         defaultUserConfig(),
+			Policy:                defaultPolicy(u.IsAdmin),
+			Configuration: defaultUserConfig(),
 		})
 	}
 	if result == nil {
@@ -450,15 +432,16 @@ func (s *Server) lookupUser(r *http.Request, userID string) UserDto {
 			break
 		}
 	}
-	nowJF := &JellyfinTime{time.Now().UTC()}
+	now := time.Now().UTC()
 	return UserDto{
 		Name:                  name,
 		ServerID:              s.serverID,
+		ServerName:            s.serverName,
 		ID:                    jellyfinID(userID),
 		HasPassword:           true,
 		HasConfiguredPassword: true,
-		LastLoginDate:         nowJF,
-		LastActivityDate:      nowJF,
+		LastLoginDate:         &now,
+		LastActivityDate:      &now,
 		Configuration: defaultUserConfig(),
 		Policy: defaultPolicy(isAdmin),
 	}
@@ -482,38 +465,57 @@ func (s *Server) getUserData(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) displayPreferences(w http.ResponseWriter, r *http.Request) {
-	client := r.URL.Query().Get("client")
-	if client == "" {
-		client = s.extractAuthField(r, "Client")
-	}
-	s.respondJSON(w, http.StatusOK, DisplayPreferences{
-		ID:                 chi.URLParam(r, "id"),
-		SortBy:             "SortName",
-		RememberIndexing:   false,
-		PrimaryImageHeight: 250,
-		PrimaryImageWidth:  250,
-		CustomPrefs: DisplayPreferencesCustomPrefs{
-			ChromecastVersion:          "stable",
-			SkipForwardLength:          "30000",
-			SkipBackLength:             "10000",
-			EnableNextVideoInfoOverlay: "False",
-			TVHome:                     nil,
-			DashboardTheme:             nil,
+	s.respondJSON(w, http.StatusOK, map[string]any{
+		"Id":                  chi.URLParam(r, "id"),
+		"SortBy":              "SortName",
+		"SortOrder":           "Ascending",
+		"RememberIndexing":    false,
+		"RememberSorting":     false,
+		"Client":              s.extractAuthField(r, "Client"),
+		"PrimaryImageHeight":  250,
+		"PrimaryImageWidth":   166,
+		"ScrollDirection":     "Horizontal",
+		"ShowBackdrop":        true,
+		"ShowSidebar":         false,
+		"CustomPrefs": map[string]string{
+			"chromecastVersion":          "stable",
+			"skipForwardLength":          "30000",
+			"skipBackLength":             "10000",
+			"enableNextVideoInfoOverlay": "true",
+			"tvhome":                     "",
 		},
-		ScrollDirection: "Horizontal",
-		ShowBackdrop:    true,
-		RememberSorting: false,
-		SortOrder:       "Ascending",
-		ShowSidebar:     false,
-		Client:          client,
 	})
 }
 
 func (s *Server) systemEndpoint(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, EndpointInfo{
-		IsLocal:     false,
-		IsInNetwork: true,
+	s.respondJSON(w, http.StatusOK, map[string]any{
+		"IsLocal":     true,
+		"IsInNetwork": true,
 	})
+}
+
+func (s *Server) systemInfoStorage(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, map[string]any{
+		"Drives": []any{},
+	})
+}
+
+func (s *Server) quickConnectInitiate(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "QuickConnect not supported", http.StatusBadRequest)
+}
+
+func (s *Server) clientLogDocument(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	s.log.Debug().Str("body", string(body)).Msg("client log document")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) configurationPages(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, []any{})
+}
+
+func (s *Server) scheduledTasks(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, []any{})
 }
 
 func (s *Server) markPlayed(w http.ResponseWriter, r *http.Request) {
@@ -561,20 +563,4 @@ func (s *Server) bitrateTest(w http.ResponseWriter, r *http.Request) {
 		w.Write(buf[:chunk])
 		written += chunk
 	}
-}
-
-func (s *Server) quickConnectInitiate(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusBadRequest, map[string]any{
-		"Message": "Quick Connect is disabled",
-	})
-}
-
-func (s *Server) scheduledTasks(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, []any{})
-}
-
-func (s *Server) systemInfoStorage(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, StorageInfo{
-		Drives: []StorageDrive{},
-	})
 }

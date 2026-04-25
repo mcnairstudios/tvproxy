@@ -1426,7 +1426,7 @@
       }
 
       var tmdbId = match.id;
-      var tmdbType = match.media_type || (opts.mediaType === 'series' ? 'tv' : 'movie');
+      var tmdbType = match.media_type;
       api.get('/api/tmdb/details?type=' + tmdbType + '&id=' + tmdbId).then(function(detail) {
         if (!detail) return;
 
@@ -6057,7 +6057,7 @@
         { key: 'video_codec', label: 'Video', render: item => ({'default':'Match Source',h264:'H.264',h265:'H.265',hvc1:'H.265 (hvc1)',hev1:'H.265 (hev1)',av1:'AV1',vp8:'VP8',vp9:'VP9'})[item.video_codec] || item.video_codec || 'Match Source' },
         { key: 'audio_codec', label: 'Audio', render: item => ({copy:'Copy',aac:'AAC',ac3:'AC3',eac3:'EAC3',mp2:'MP2',mp3:'MP3',opus:'Opus',vorbis:'Vorbis',flac:'FLAC'})[item.audio_codec] || item.audio_codec || 'AAC' },
         { key: 'container', label: 'Container', render: item => ({mpegts:'MPEG-TS',matroska:'Matroska',mp4:'MP4',webm:'WebM'})[item.container] || item.container },
-        { key: 'delivery', label: 'Delivery', render: item => ({stream:'Stream',mse:'MSE'})[item.delivery] || item.delivery || 'Stream' },
+        { key: 'delivery', label: 'Delivery', render: item => ({stream:'Stream',mse:'MSE',hls:'HLS'})[item.delivery] || item.delivery || 'Stream' },
         { key: 'is_default', label: 'Type', render: item => {
           const badges = [];
           if (item.is_system) badges.push(h('span', { className: 'badge badge-info', style: 'margin-right:4px' }, 'System'));
@@ -6074,7 +6074,8 @@
         { key: 'delivery', label: 'Delivery', type: 'select', options: [
           { value: 'stream', label: 'Stream (direct)' },
           { value: 'mse', label: 'MSE (browser/web)' },
-        ], default: 'stream', help: 'MSE for browser playback. Stream for native clients (Plex, VLC, HDHR).' },
+          { value: 'hls', label: 'HLS (segmented)' },
+        ], default: 'stream', help: 'MSE for browser playback. Stream for native clients (Plex, VLC, HDHR). HLS for Jellyfin and Apple TV.' },
         { key: 'container', label: 'Container', type: 'select', options: function(form) {
           if (form.delivery === 'mse') return [
             { value: 'mp4', label: 'fMP4 (recommended)' },

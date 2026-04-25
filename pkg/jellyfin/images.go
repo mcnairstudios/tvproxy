@@ -18,19 +18,30 @@ func (s *Server) serveImage(w http.ResponseWriter, r *http.Request) {
 
 	isBackdrop := strings.EqualFold(imageType, "Backdrop")
 
-	if strings.HasPrefix(stripDashes(itemID), "dddd0000") {
+	if strings.HasPrefix(itemID, "person_") {
 		s.servePersonImage(w, r)
 		return
 	}
 
-	cleanID := stripDashes(itemID)
-	if isGroupItemID(cleanID) {
-		s.serveGroupImage(w, r, groupUUIDFromItemID(cleanID))
+	if strings.HasPrefix(itemID, "group_") {
+		s.serveGroupImage(w, r, addDashes(strings.TrimPrefix(itemID, "group_")))
 		return
 	}
 
-	if isSeriesItemID(cleanID) {
-		s.serveSeriesImage(w, r, cleanID, isBackdrop)
+	if isGroupItemID(itemID) {
+		s.serveGroupImage(w, r, groupUUIDFromItemID(itemID))
+		return
+	}
+
+	if strings.HasPrefix(itemID, "cccc") || isSeasonItemID(itemID) {
+		seriesID := itemID
+		if isSeasonItemID(itemID) {
+			h, _, ok := parseSeasonItemID(itemID)
+			if ok {
+				seriesID = fmt.Sprintf("cccc%028x", h)
+			}
+		}
+		s.serveSeriesImage(w, r, seriesID, isBackdrop)
 		return
 	}
 
@@ -145,14 +156,7 @@ func (s *Server) servePersonImage(w http.ResponseWriter, r *http.Request) {
 	if personID == "" {
 		personID = chi.URLParam(r, "itemId")
 	}
-	cleanPersonID := stripDashes(personID)
-	tmdbID := personID
-	if strings.HasPrefix(cleanPersonID, "dddd0000") {
-		hex := cleanPersonID[8:16]
-		var id uint32
-		fmt.Sscanf(hex, "%x", &id)
-		tmdbID = fmt.Sprintf("%d", id)
-	}
+	tmdbID := strings.TrimPrefix(personID, "person_")
 	if tmdbID == "" || tmdbID == personID {
 		w.WriteHeader(http.StatusNotFound)
 		return

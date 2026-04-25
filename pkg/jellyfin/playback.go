@@ -1,100 +1,67 @@
 package jellyfin
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/gavinmcnair/tvproxy/pkg/hls"
 	"github.com/gavinmcnair/tvproxy/pkg/service"
 )
 
 func (s *Server) playbackInfo(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
-	streamID := addDashes(stripDashes(itemID))
+	streamID := addDashes(itemID)
 
-	bodyBytes, _ := io.ReadAll(r.Body)
-	s.log.Debug().Str("body", string(bodyBytes)).Msg("PlaybackInfo request")
 	var reqBody map[string]any
-	json.Unmarshal(bodyBytes, &reqBody)
+	json.NewDecoder(r.Body).Decode(&reqBody)
 
 	stream, _ := s.streams.GetByID(r.Context(), streamID)
-	if stream == nil {
-		s.respondJSON(w, http.StatusOK, map[string]any{
-			"MediaSources":  []MediaSource{},
-			"PlaySessionId": "",
-		})
-		return
-	}
 
-	profile := s.jellyfinProfile(r.Context())
-	container := "mp4"
-	if profile != nil && profile.Container != "" {
-		container = profile.Container
-	}
-
+	videoCodec := "h264"
+	audioCodec := "aac"
 	var ticks int64
-	if stream.VODDuration > 0 {
-		ticks = secondsToTicks(stream.VODDuration)
-	}
-	if ticks == 0 && s.tmdbClient != nil {
-		if m := s.tmdbClient.LookupMovie(stream.Name); m != nil && m.TMDBID > 0 {
-			if details, err := s.tmdbClient.Details("movie", fmt.Sprintf("%d", m.TMDBID)); err == nil {
-				if dm, ok := details.(map[string]any); ok {
-					if rt, ok := dm["runtime"].(float64); ok && rt > 0 {
-						ticks = int64(rt) * 60 * 10000000
-					}
-				}
+
+	if stream != nil {
+		if stream.VODVCodec != "" {
+			vc := strings.ToLower(stream.VODVCodec)
+			if vc == "h264" || vc == "avc" {
+				videoCodec = "h264"
+			} else if vc == "hevc" || vc == "h265" {
+				videoCodec = "hevc"
 			}
 		}
-	}
-
-	videoCodec := "hevc"
-	audioCodec := "aac"
-	if profile != nil {
-		if profile.VideoCodec != "" && profile.VideoCodec != "copy" && profile.VideoCodec != "default" {
-			videoCodec = profile.VideoCodec
-		}
-		if profile.AudioCodec != "" && profile.AudioCodec != "copy" && profile.AudioCodec != "default" {
-			audioCodec = profile.AudioCodec
+		if stream.VODDuration > 0 {
+			ticks = secondsToTicks(stream.VODDuration)
 		}
 	}
 
-	mediaStreams := s.buildMediaStreams(stream)
-	for i := range mediaStreams {
-		if mediaStreams[i].Type == "Video" {
-			mediaStreams[i].Codec = videoCodec
-		} else if mediaStreams[i].Type == "Audio" && audioCodec != "copy" {
-			mediaStreams[i].Codec = audioCodec
+	var mediaStreams []MediaStream
+	if stream != nil {
+		mediaStreams = s.buildMediaStreams(stream)
+	} else {
+		mediaStreams = []MediaStream{
+			{Type: "Video", Codec: videoCodec, Index: 0, IsDefault: true, Width: 1920, Height: 1080},
+			{Type: "Audio", Codec: audioCodec, Index: 1, IsDefault: true, Channels: 2, SampleRate: 0},
 		}
 	}
 
-	cleanID := stripDashes(itemID)
-	playSessionID := cleanID[:min(16, len(cleanID))]
-
-	token := s.extractToken(r)
-	deviceID := s.extractAuthField(r, "DeviceId")
-	transcodingURL := fmt.Sprintf("/videos/%s/master.m3u8?DeviceId=%s&MediaSourceId=%s&VideoCodec=%s&AudioCodec=%s&AudioStreamIndex=1&SegmentContainer=ts&PlaySessionId=%s&ApiKey=%s&TranscodeReasons=DirectPlayError",
-		cleanID, url.QueryEscape(deviceID), cleanID, videoCodec, audioCodec, playSessionID, token)
-
+	playSessionID := itemID[:min(16, len(itemID))]
 	ms := MediaSource{
-		Protocol: "Http", ID: cleanID, Type: "Default", Name: stream.Name,
-		Container: container, IsRemote: true,
+		Protocol: "Http", ID: itemID, Type: "Default", Name: "Default",
+		Container: "mp4", IsRemote: true,
 		SupportsTranscoding:     true,
 		SupportsDirectStream:    false,
 		SupportsDirectPlay:      false,
-		IsInfiniteStream:        false,
-		RequiresOpening:         false,
-		RequiresClosing:         false,
 		RunTimeTicks:            ticks,
 		DefaultAudioStreamIndex: 1,
-		TranscodingURL:          transcodingURL,
+		TranscodingURL:          fmt.Sprintf("/Videos/%s/master.m3u8?MediaSourceId=%s&PlaySessionId=%s", itemID, itemID, playSessionID),
 		TranscodingSubProtocol:  "hls",
 		TranscodingContainer:    "ts",
 		MediaStreams:             mediaStreams,
@@ -111,92 +78,144 @@ func (s *Server) hlsMasterPlaylist(w http.ResponseWriter, r *http.Request) {
 	streamID := addDashes(itemID)
 	ctx := r.Context()
 
-	var streamURL string
-	var durationTicks int64
-	var isLive bool
-
 	if channel, err := s.channels.GetByID(ctx, streamID); err == nil && channel != nil {
-		streamURL = fmt.Sprintf("%s/channel/%s?_port=8096", s.mainServerURLFromRequest(r), streamID)
-		isLive = true
-		_ = channel
-	} else if stream, err := s.streams.GetByID(ctx, streamID); err == nil && stream != nil {
-		streamURL = stream.URL
-		if stream.VODDuration > 0 {
-			durationTicks = secondsToTicks(stream.VODDuration)
-		}
+		playlistURL := fmt.Sprintf("/Videos/%s/live.m3u8", itemID)
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		w.Header().Set("Cache-Control", "no-cache, no-store")
+		fmt.Fprintln(w, "#EXTM3U")
+		fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=10000000\n")
+		fmt.Fprintln(w, playlistURL)
+		return
 	}
 
-	if streamURL == "" {
+	if s.vodService == nil {
+		http.Error(w, "vod service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	stream, err := s.streams.GetByID(ctx, streamID)
+	if err != nil || stream == nil {
 		http.Error(w, "stream not found", http.StatusNotFound)
 		return
 	}
 
-	profile := hls.ProfileSettings{
-		VideoCodec: "copy",
-		AudioCodec: "aac",
+	sessionID, _, outputDir, err := s.vodService.StartWatchingStreamHLS(ctx, streamID, r.Header.Get("User-Agent"), r.RemoteAddr)
+	if err != nil {
+		s.log.Error().Err(err).Str("stream_id", streamID).Msg("failed to start HLS session")
+		http.Error(w, "failed to start session", http.StatusInternalServerError)
+		return
 	}
-	sess := s.hlsManager.GetOrCreateSession(itemID, streamURL, 6, durationTicks, isLive, profile)
+
+	s.log.Info().Str("stream_id", sessionID).Str("output_dir", outputDir).Msg("HLS master playlist requested")
+
 	playlistURL := fmt.Sprintf("/Videos/%s/main.m3u8", itemID)
-	if isLive {
-		playlistURL = fmt.Sprintf("/Videos/%s/live.m3u8", itemID)
-	}
-	hls.ServeMasterPlaylist(w, sess, playlistURL)
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-cache, no-store")
+	fmt.Fprintln(w, "#EXTM3U")
+	fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=10000000\n")
+	fmt.Fprintln(w, playlistURL)
 }
 
 func (s *Server) hlsMediaPlaylist(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
-	sess := s.hlsManager.GetSession(itemID)
-	if sess == nil {
+	streamID := addDashes(itemID)
+	ctx := r.Context()
+
+	var outputDir string
+
+	if channel, err := s.channels.GetByID(ctx, streamID); err == nil && channel != nil {
+		channelURL := fmt.Sprintf("%s/channel/%s?_port=8096", s.mainServerURLFromRequest(r), streamID)
+		s.log.Info().Str("channel_id", streamID).Str("url", channelURL).Msg("HLS live channel playlist — redirecting to proxy")
+		http.Redirect(w, r, channelURL, http.StatusTemporaryRedirect)
+		return
+	}
+
+	if s.vodService != nil {
+		sess := s.vodService.GetSession(streamID)
+		if sess != nil {
+			outputDir = filepath.Join(sess.OutputDir, "segments")
+		}
+	}
+
+	if outputDir == "" {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 
-	if !sess.IsLive && sess.IsDone() && sess.CurrentTranscodeIndex() == -1 {
-		if err := sess.StartTranscode(context.Background(), 0, 0); err != nil {
-			s.log.Error().Err(err).Str("session", itemID).Msg("failed to start initial transcode")
+	playlistPath := filepath.Join(outputDir, "playlist.m3u8")
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(playlistPath); err == nil && len(data) > 0 {
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			w.Header().Set("Cache-Control", "no-cache, no-store")
+			w.Write(data)
+			return
 		}
+		time.Sleep(200 * time.Millisecond)
 	}
 
-	hls.ServeMediaPlaylist(w, sess, fmt.Sprintf("hls1/main/"))
+	http.Error(w, "playlist not ready", http.StatusServiceUnavailable)
 }
 
 func (s *Server) hlsSegment(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemId")
 	segmentFile := chi.URLParam(r, "segment")
+	streamID := addDashes(itemID)
 
-	sess := s.hlsManager.GetSession(itemID)
-	if sess == nil {
+	var outputDir string
+
+	if s.vodService != nil {
+		sess := s.vodService.GetSession(streamID)
+		if sess != nil {
+			outputDir = filepath.Join(sess.OutputDir, "segments")
+		}
+	}
+
+	if outputDir == "" {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 
-	if segmentFile == "init.mp4" {
-		if err := s.hlsManager.RequestSegment(context.Background(), sess, 0, 0); err != nil {
-			http.Error(w, "init segment not available", http.StatusNotFound)
-			return
-		}
-		hls.ServeSegment(w, r, sess.InitSegmentPath())
-		return
-	}
-
 	var segmentIndex int
-	fmt.Sscanf(strings.TrimSuffix(segmentFile, ".mp4"), "seg%d", &segmentIndex)
+	fmt.Sscanf(strings.TrimSuffix(strings.TrimSuffix(segmentFile, ".ts"), ".mp4"), "seg%d", &segmentIndex)
 
-	var runtimeTicks int64
-	if rt := r.URL.Query().Get("runtimeTicks"); rt != "" {
-		fmt.Sscanf(rt, "%d", &runtimeTicks)
+	segPath := filepath.Join(outputDir, fmt.Sprintf("seg%d.ts", segmentIndex))
+	nextPath := filepath.Join(outputDir, fmt.Sprintf("seg%d.ts", segmentIndex+1))
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(segPath); err == nil {
+			if _, err := os.Stat(nextPath); err == nil {
+				break
+			}
+			if s.vodService.IsDone(streamID) {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	if err := s.hlsManager.RequestSegment(context.Background(), sess, segmentIndex, runtimeTicks); err != nil {
+	if _, err := os.Stat(segPath); err != nil {
 		s.log.Error().Err(err).Int("segment", segmentIndex).Str("session", itemID).Msg("segment not available")
 		http.Error(w, "segment not available", http.StatusNotFound)
 		return
 	}
 
-	hls.ServeSegment(w, r, sess.SegmentPath(segmentIndex))
+	w.Header().Set("Content-Type", "video/MP2T")
+	http.ServeFile(w, r, segPath)
 }
 
 func (s *Server) hlsLivePlaylist(w http.ResponseWriter, r *http.Request) {
+	itemID := chi.URLParam(r, "itemId")
+	streamID := addDashes(itemID)
+	ctx := r.Context()
+
+	if channel, err := s.channels.GetByID(ctx, streamID); err == nil && channel != nil {
+		channelURL := fmt.Sprintf("%s/channel/%s?_port=8096", s.mainServerURLFromRequest(r), streamID)
+		http.Redirect(w, r, channelURL, http.StatusTemporaryRedirect)
+		return
+	}
+
 	s.hlsMediaPlaylist(w, r)
 }
 
@@ -243,30 +262,14 @@ func (s *Server) videoStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	profile := s.jellyfinProfile(ctx)
-	videoCodec := "copy"
-	audioCodec := "aac"
-	format := "mp4"
-	if profile != nil {
-		if profile.VideoCodec != "" {
-			videoCodec = profile.VideoCodec
-		}
-		if profile.AudioCodec != "" {
-			audioCodec = profile.AudioCodec
-		}
-		if profile.Container != "" {
-			format = profile.Container
-		}
-	}
-
-	s.log.Info().Str("stream", streamID).Str("url", streamURL).Str("video", videoCodec).Str("audio", audioCodec).Bool("live", isLive).Msg("starting jellyfin video stream (avpipeline)")
+	s.log.Info().Str("stream", streamID).Str("url", streamURL).Bool("live", isLive).Msg("starting jellyfin video stream (avpipeline)")
 
 	if err := service.RunAVPipeline(ctx, service.AVPipelineOpts{
 		URL:          streamURL,
 		Writer:       w,
-		Format:       format,
-		VideoCodec:   videoCodec,
-		AudioCodec:   audioCodec,
+		Format:       "mp4",
+		VideoCodec:   "copy",
+		AudioCodec:   "aac",
 		IsLive:       isLive,
 		SeekOffsetMs: seekMs,
 		TimeoutSec:   10,

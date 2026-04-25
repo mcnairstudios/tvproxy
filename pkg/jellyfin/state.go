@@ -3,58 +3,48 @@ package jellyfin
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
-var stateFile = "jellyfin_state.json"
-
 type persistedState struct {
-	ServerID string            `json:"server_id"`
-	Tokens   map[string]string `json:"tokens"`
+	mu     sync.Mutex
+	path   string
+	Tokens map[string]string `json:"tokens"`
 }
 
-func loadState() persistedState {
-	data, err := os.ReadFile(stateFile)
-	if err != nil {
-		return persistedState{
-			ServerID: generateGUID(),
-			Tokens:   map[string]string{},
-		}
+func loadState(stateDir string) *persistedState {
+	ps := &persistedState{
+		path:   filepath.Join(stateDir, "jellyfin_state.json"),
+		Tokens: make(map[string]string),
 	}
-	var s persistedState
-	if err := json.Unmarshal(data, &s); err != nil || s.ServerID == "" {
-		return persistedState{
-			ServerID: generateGUID(),
-			Tokens:   map[string]string{},
-		}
+	data, err := os.ReadFile(ps.path)
+	if err == nil {
+		json.Unmarshal(data, ps)
 	}
-	if s.Tokens == nil {
-		s.Tokens = map[string]string{}
-	}
-	return s
+	return ps
 }
 
-func (s *persistedState) syncTokens() sync.Map {
-	var m sync.Map
-	for k, v := range s.Tokens {
-		m.Store(k, v)
-	}
-	return m
-}
-
-func (srv *Server) saveState() {
-	tokens := map[string]string{}
-	srv.tokens.Range(func(k, v any) bool {
-		tokens[k.(string)] = v.(string)
-		return true
-	})
-	state := persistedState{
-		ServerID: srv.serverID,
-		Tokens:   tokens,
-	}
-	data, err := json.MarshalIndent(state, "", "  ")
+func (ps *persistedState) saveState() {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	data, err := json.Marshal(ps)
 	if err != nil {
 		return
 	}
-	os.WriteFile(stateFile, data, 0644)
+	os.WriteFile(ps.path, data, 0600)
+}
+
+func (ps *persistedState) syncTokens(m *sync.Map) {
+	for token, userID := range ps.Tokens {
+		m.Store(token, userID)
+	}
+}
+
+func (ps *persistedState) storeToken(m *sync.Map, token, userID string) {
+	m.Store(token, userID)
+	ps.mu.Lock()
+	ps.Tokens[token] = userID
+	ps.mu.Unlock()
+	ps.saveState()
 }

@@ -114,7 +114,7 @@ func setupFullEnv(t *testing.T) *fullTestEnv {
 	hdhrService := service.NewHDHRService(hdhrStore, channelStore, cfg)
 	outputService := service.NewOutputService(channelStore, channelGroupStore, epgStore, logoService, cfg, log)
 	recordingStore := store.NewRecordingStore(filepath.Join(dir, "recordings"), log)
-	sessionMgr := session.NewManager(cfg, nil, nil, recordingStore, log)
+	sessionMgr := session.NewManager(cfg, nil, nil, recordingStore, nil, log)
 	vodService := service.NewVODService(channelStore, streamStore, profileStore, nil, nil, nil, settingsService, sessionMgr, recordingStore, activityService, cfg, log)
 	vodService.RecoverRecordings(context.Background())
 	schedulerService := service.NewSchedulerService(scheduledRecStore, channelStore, vodService, cfg, log)

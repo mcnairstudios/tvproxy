@@ -145,3 +145,71 @@ func TestBoltStreamStore_ETag(t *testing.T) {
 		t.Fatal("ETag should change after write")
 	}
 }
+
+func TestBoltStreamStore_UpdateStreamProbeData(t *testing.T) {
+	dir := t.TempDir()
+	log := zerolog.Nop()
+	s, err := NewBoltStreamStore(dir, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+
+	s.BulkUpsert(ctx, []models.Stream{
+		{ID: "s1", M3UAccountID: "acc1", Name: "Movie A", VODDuration: 0, VODVCodec: "", VODACodec: ""},
+	})
+
+	if err := s.UpdateStreamProbeData(ctx, "s1", 120.5, "hevc", "aac"); err != nil {
+		t.Fatalf("UpdateStreamProbeData failed: %v", err)
+	}
+
+	st, err := s.GetByID(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.VODDuration != 120.5 {
+		t.Fatalf("expected VODDuration=120.5, got %f", st.VODDuration)
+	}
+	if st.VODVCodec != "hevc" {
+		t.Fatalf("expected VODVCodec=hevc, got %q", st.VODVCodec)
+	}
+	if st.VODACodec != "aac" {
+		t.Fatalf("expected VODACodec=aac, got %q", st.VODACodec)
+	}
+
+	if err := s.UpdateStreamProbeData(ctx, "s1", 999.0, "h264", "mp3"); err != nil {
+		t.Fatalf("second UpdateStreamProbeData failed: %v", err)
+	}
+
+	st, err = s.GetByID(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.VODDuration != 120.5 {
+		t.Fatalf("VODDuration should not be overwritten, got %f", st.VODDuration)
+	}
+	if st.VODVCodec != "hevc" {
+		t.Fatalf("VODVCodec should not be overwritten, got %q", st.VODVCodec)
+	}
+	if st.VODACodec != "aac" {
+		t.Fatalf("VODACodec should not be overwritten, got %q", st.VODACodec)
+	}
+}
+
+func TestBoltStreamStore_UpdateStreamProbeData_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	log := zerolog.Nop()
+	s, err := NewBoltStreamStore(dir, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+
+	if err := s.UpdateStreamProbeData(ctx, "nonexistent", 120.5, "hevc", "aac"); err == nil {
+		t.Fatal("expected error for nonexistent stream")
+	}
+}

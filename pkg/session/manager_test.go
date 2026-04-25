@@ -19,7 +19,7 @@ func testManager(t *testing.T) (*Manager, string) {
 	dir := t.TempDir()
 	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
 	cfg := &config.Config{}
-	m := NewManager(cfg, nil, nil, nil, log)
+	m := NewManager(cfg, nil, nil, nil, nil, log)
 	t.Cleanup(func() { m.Shutdown() })
 	return m, dir
 }
@@ -150,7 +150,7 @@ func TestSession_RecordPreservesOnCleanup(t *testing.T) {
 
 	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
 	cfg := &config.Config{}
-	m := NewManager(cfg, nil, nil, nil, log)
+	m := NewManager(cfg, nil, nil, nil, nil, log)
 	defer m.Shutdown()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -188,7 +188,7 @@ func TestSession_UnrecordedCleanup(t *testing.T) {
 
 	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
 	cfg := &config.Config{}
-	m := NewManager(cfg, nil, nil, nil, log)
+	m := NewManager(cfg, nil, nil, nil, nil, log)
 	defer m.Shutdown()
 
 	_, cancel := context.WithCancel(context.Background())
@@ -217,7 +217,7 @@ func TestSession_UnrecordedCleanup(t *testing.T) {
 func TestManager_AddRecordingConsumerSetsFlag(t *testing.T) {
 	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
 	cfg := &config.Config{}
-	m := NewManager(cfg, nil, nil, nil, log)
+	m := NewManager(cfg, nil, nil, nil, nil, log)
 
 	_, cancel := context.WithCancel(context.Background())
 	s := &Session{
@@ -303,7 +303,7 @@ func TestMSESession_SurvivesWithoutBusMessages(t *testing.T) {
 	dir := t.TempDir()
 	log := zerolog.New(os.Stderr).Level(zerolog.Disabled)
 	cfg := &config.Config{}
-	m := NewManager(cfg, nil, nil, nil, log)
+	m := NewManager(cfg, nil, nil, nil, nil, log)
 
 	_, cancel := context.WithCancel(context.Background())
 	s := &Session{

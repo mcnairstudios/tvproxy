@@ -12,8 +12,6 @@ import (
 	"github.com/gavinmcnair/tvproxy/pkg/models"
 )
 
-
-func boolPtr(b bool) *bool { return &b }
 func (s *Server) isFavorite(r *http.Request, itemID string) bool {
 	if s.favorites == nil {
 		return false
@@ -27,30 +25,6 @@ func (s *Server) isFavorite(r *http.Request, itemID string) bool {
 
 func stripDashes(id string) string {
 	return strings.ReplaceAll(id, "-", "")
-}
-
-const groupIDPrefix = "aaaa0000"
-
-func groupItemID(groupUUID string) string {
-	hex := stripDashes(groupUUID)
-	if len(hex) > 24 {
-		hex = hex[:24]
-	}
-	return groupIDPrefix + hex
-}
-
-func isGroupItemID(id string) bool {
-	return strings.HasPrefix(id, groupIDPrefix)
-}
-
-func groupUUIDFromItemID(id string) string {
-	hex := strings.TrimPrefix(id, groupIDPrefix)
-	return addDashes(hex + "00000000")
-}
-
-func genreItemID(name string) string {
-	h := hashString(name)
-	return fmt.Sprintf("bbbb0000%08x0000000000000000", h)
 }
 
 func addDashes(id string) string {
@@ -88,21 +62,37 @@ func sortName(name string) string {
 
 func seriesIDFromName(name string) string {
 	h := hashString(name)
-	return fmt.Sprintf("cccc0000%08x0000000000000000", h)
+	return fmt.Sprintf("cccc%028x", h)
 }
 
-func isSeriesItemID(id string) bool {
-	return strings.HasPrefix(id, "cccc0000")
+func seasonItemID(seriesName string, seasonNum int) string {
+	h := hashString(seriesName)
+	return fmt.Sprintf("cccd%024x%04x", h, seasonNum)
 }
 
-func personItemID(tmdbID int) string {
-	return fmt.Sprintf("dddd0000%08x0000000000000000", uint32(tmdbID))
+func isSeasonItemID(id string) bool {
+	return len(id) == 32 && strings.HasPrefix(id, "cccd")
+}
+
+func parseSeasonItemID(id string) (seriesHash uint32, seasonNum int, ok bool) {
+	if !isSeasonItemID(id) {
+		return 0, 0, false
+	}
+	var h uint32
+	var n int
+	if _, err := fmt.Sscanf(id[4:28], "%x", &h); err != nil {
+		return 0, 0, false
+	}
+	if _, err := fmt.Sscanf(id[28:], "%x", &n); err != nil {
+		return 0, 0, false
+	}
+	return h, n, true
 }
 
 func genreItems(genres []string) []NameIDPair {
 	var items []NameIDPair
 	for _, g := range genres {
-		items = append(items, NameIDPair{Name: g, ID: genreItemID(g)})
+		items = append(items, NameIDPair{Name: g, ID: fmt.Sprintf("genre_%x", hashString(g))})
 	}
 	return items
 }
@@ -204,6 +194,29 @@ func (s *Server) paginateAndRespond(w http.ResponseWriter, r *http.Request, item
 
 func emptyResult() BaseItemDtoQueryResult {
 	return BaseItemDtoQueryResult{Items: []BaseItemDto{}, TotalRecordCount: 0}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+func groupItemID(uuid string) string {
+	stripped := stripDashes(uuid)
+	if len(stripped) >= 28 {
+		return "bbbb" + stripped[:28]
+	}
+	return "bbbb" + fmt.Sprintf("%-28s", stripped)[:28]
+}
+
+func isGroupItemID(id string) bool {
+	return len(id) == 32 && strings.HasPrefix(id, "bbbb")
+}
+
+func groupUUIDFromItemID(id string) string {
+	if len(id) < 32 || !strings.HasPrefix(id, "bbbb") {
+		return id
+	}
+	return addDashes(id[4:] + "0000")
 }
 
 func durationToTicks(d time.Duration) int64 {

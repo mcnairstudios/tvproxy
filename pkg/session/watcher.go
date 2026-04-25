@@ -173,6 +173,9 @@ func (w *Watcher) handleFile(path string) {
 	case strings.HasPrefix(name, "audio_") && strings.HasSuffix(name, ".m4s"):
 		n := w.audioSegs.Add(path)
 		w.log.Debug().Str("file", name).Int("count", n).Msg("audio segment")
+	case strings.HasPrefix(name, "seg") && strings.HasSuffix(name, ".ts"):
+		n := w.videoSegs.Add(path)
+		w.log.Debug().Str("file", name).Int("count", n).Msg("HLS segment")
 	}
 }
 
@@ -317,6 +320,14 @@ func (w *Watcher) Close() error {
 }
 
 func SegmentSeqFromFilename(name string) int {
+	if strings.HasPrefix(name, "seg") && strings.HasSuffix(name, ".ts") {
+		numStr := strings.TrimPrefix(strings.TrimSuffix(name, ".ts"), "seg")
+		n, err := strconv.Atoi(numStr)
+		if err != nil {
+			return 0
+		}
+		return n + 1
+	}
 	base := strings.TrimSuffix(name, ".m4s")
 	parts := strings.Split(base, "_")
 	if len(parts) < 2 {

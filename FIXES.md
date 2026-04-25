@@ -46,8 +46,51 @@
 - No search
 - WebSocket sends no events
 
+### WebRTC Delivery Mode (Fourth delivery option — HIGH PRIORITY)
+Previous GStreamer iteration had working WebRTC with sub-second live TV latency (~1s channel switch). "TV streaming has never been so quick or so much fun since we moved away from it."
+
+**Why WebRTC matters:**
+- Sub-second latency vs 10-30s for HLS. Instant channel surfing.
+- Frontend never complained about content — when picture was valid it played, when not it didn't. No format negotiation overhead.
+- Raw media stream, no container parsing, no segment boundaries, no playlist polling.
+
+**Architecture — breaks the Kafka model (and that's OK):**
+- Current model: one pipeline → file → consumers tail at own offsets
+- WebRTC model: direct fan-out from demuxer → N peer connections simultaneously
+- The demuxer is the shared point, not the file
+- Session model needs to support BOTH consumer types: file-based (MSE/HLS/stream) and direct (WebRTC)
+
+**Optimal path for live TV:**
+```
+source (MPEG-TS/RTSP) → demux → WebRTC (copy video + copy audio)  [viewer, minimum latency]
+                              → file sink                          [recording, parallel]
+```
+- Zero transcoding for live — most IPTV is already H.264/H.265
+- Transcode only if source codec doesn't match client (e.g. MPEG-2 → H.264)
+- Recording taps the same demuxed packets in parallel — doesn't affect viewer latency
+
+**Coexistence with other modes:**
+- WebRTC viewers: direct from demuxer, lowest latency
+- Recording: file sink from same demuxer, full quality  
+- Late-joining viewer: falls back to HLS/MSE from the recording
+- Channel can serve WebRTC + HLS + recording simultaneously
+
+**Implementation path:**
+- Check git history for old GStreamer WebRTC code
+- Check `/Users/gavinmcnair/claude/gstreamer-rtc/` for reference
+- Port to libavformat: Pion WebRTC (pure Go) is the likely choice for signalling + media
+- Signalling via WebSocket (already have websocket stub in Jellyfin)
+- ICE/STUN/TURN for NAT traversal
+- New PacketSink type: `WebRTCSink` — receives packets directly from demuxer, no file intermediate
+
+**VOD works too:**
+- Previous iteration worked well for VOD content, not just live
+- Seek = demuxer seeks in-place, packets flow immediately via WebRTC. No segment wait, no buffer refill.
+- Could replace MSE for browser playback entirely — lower latency, simpler, no SourceBuffer management
+- The universal delivery mode: live + VOD + browser + native apps
+
 ### Docker / Build
-- sdk_models.go reference from Opus agent needs copying from worktree branch
+- sdk_models.go reference from Opus agent needs copying from worktree branch — DONE, moved to pkg/jellyfinsdk/
 - HLS code in playback.go references old HLS manager — needs updating for AV pipeline
 
 ## How to Test

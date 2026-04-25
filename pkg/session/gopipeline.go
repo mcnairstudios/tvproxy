@@ -1608,3 +1608,705 @@ func (p *MSECopyPipeline) closeMSECopy() {
 		p.muxer.Close()
 	}
 }
+
+type HLSCopyPipeline struct {
+	muxer         *mux.HLSMuxer
+	audioDec      *decode.Decoder
+	audioResample *resample.Resampler
+	audioEnc      *encode.Encoder
+	audioFifo     *encode.AudioFIFO
+	videoTB       astiav.Rational
+	audioTB       astiav.Rational
+	audioLatched  bool
+	stopped       bool
+	mu            sync.Mutex
+	log           zerolog.Logger
+}
+
+type HLSCopyOpts struct {
+	Info             *probe.StreamInfo
+	AudioIndex       int
+	OutputDir        string
+	IsLive           bool
+	SegmentDuration  int
+	OutputAudioCodec string
+	VideoCodecParams *astiav.CodecParameters
+	AudioCodecParams *astiav.CodecParameters
+	Log              zerolog.Logger
+}
+
+func NewHLSCopyPipeline(opts HLSCopyOpts) (*HLSCopyPipeline, error) {
+	segDir := filepath.Join(opts.OutputDir, "segments")
+	if err := os.MkdirAll(segDir, 0755); err != nil {
+		return nil, fmt.Errorf("gopipeline: create segments dir: %w", err)
+	}
+
+	info := opts.Info
+	p := &HLSCopyPipeline{
+		log: opts.Log,
+	}
+
+	if info.Video == nil {
+		return nil, fmt.Errorf("gopipeline: no video track")
+	}
+
+	videoCodecID, err := conv.CodecIDFromString(info.Video.Codec)
+	if err != nil {
+		return nil, fmt.Errorf("gopipeline: video codec ID: %w", err)
+	}
+
+	var videoExtradata []byte
+	if opts.VideoCodecParams != nil {
+		videoExtradata = opts.VideoCodecParams.ExtraData()
+	}
+	if len(videoExtradata) == 0 {
+		videoExtradata = info.Video.Extradata
+	}
+
+	p.videoTB = astiav.NewRational(1, 90000)
+
+	var audioTrack *probe.AudioTrack
+	for i := range info.AudioTracks {
+		if info.AudioTracks[i].Index == opts.AudioIndex {
+			audioTrack = &info.AudioTracks[i]
+			break
+		}
+	}
+
+	hlsOpts := mux.HLSMuxOpts{
+		OutputDir:          segDir,
+		SegmentDurationSec: opts.SegmentDuration,
+		VideoCodecID:       videoCodecID,
+		VideoExtradata:     videoExtradata,
+		VideoWidth:         info.Video.Width,
+		VideoHeight:        info.Video.Height,
+		VideoTimeBase:      p.videoTB,
+	}
+
+	if audioTrack != nil {
+		p.audioTB = astiav.NewRational(1, 48000)
+
+		if opts.AudioCodecParams != nil {
+			p.audioDec, err = decode.NewAudioDecoderFromParams(opts.AudioCodecParams)
+			if err != nil {
+				p.log.Warn().Err(err).Msg("audio decoder init failed, video-only")
+				p.audioDec = nil
+			}
+		} else {
+			audioCodecID, cerr := conv.CodecIDFromString(audioTrack.Codec)
+			if cerr != nil {
+				p.log.Warn().Err(cerr).Msg("unknown audio codec, video-only")
+			} else {
+				p.audioDec, err = decode.NewAudioDecoder(audioCodecID, nil)
+				if err != nil {
+					p.log.Warn().Err(err).Msg("audio decoder init failed, video-only")
+					p.audioDec = nil
+				}
+			}
+		}
+
+		if p.audioDec != nil {
+			p.audioResample, err = resample.NewResampler(
+				audioTrack.Channels, audioTrack.SampleRate, astiav.SampleFormatFltp,
+				2, 48000, astiav.SampleFormatFltp,
+			)
+			if err != nil {
+				p.audioDec.Close()
+				p.audioDec = nil
+				p.log.Warn().Err(err).Msg("resampler init failed, video-only")
+			}
+		}
+
+		if p.audioDec != nil {
+			hlsCopyAudio := opts.OutputAudioCodec
+			if hlsCopyAudio == "" {
+				hlsCopyAudio = "aac"
+			}
+			hlsCopyEncName := encode.ResolveAudioEncoderName(hlsCopyAudio)
+			p.audioEnc, err = encode.NewAudioEncoder(encode.AudioEncodeOpts{
+				Codec: hlsCopyEncName, Channels: 2, SampleRate: 48000,
+			})
+			if err != nil {
+				if p.audioResample != nil {
+					p.audioResample.Close()
+				}
+				p.audioDec.Close()
+				p.audioDec = nil
+				p.log.Warn().Err(err).Str("codec", hlsCopyAudio).Msg("audio encoder init failed, video-only")
+			} else {
+				p.audioFifo = encode.NewAudioFIFOFromEncoder(p.audioEnc, 2, astiav.ChannelLayoutStereo, 48000)
+			}
+		}
+
+		if p.audioEnc != nil {
+			hlsCopyAudioID, _ := conv.CodecIDFromString(opts.OutputAudioCodec)
+			if hlsCopyAudioID == 0 {
+				hlsCopyAudioID = astiav.CodecIDAac
+			}
+			hlsOpts.AudioCodecID = hlsCopyAudioID
+			hlsOpts.AudioChannels = 2
+			hlsOpts.AudioSampleRate = 48000
+			hlsOpts.AudioExtradata = p.audioEnc.Extradata()
+			hlsOpts.AudioTimeBase = p.audioTB
+		}
+	}
+
+	p.muxer, err = mux.NewHLSMuxer(hlsOpts)
+	if err != nil {
+		p.closeHLSCopy()
+		return nil, fmt.Errorf("gopipeline: HLS muxer: %w", err)
+	}
+
+	probeAudio := opts.OutputAudioCodec
+	if probeAudio == "" {
+		probeAudio = "aac"
+	}
+	proto.EnrichProbeFile(
+		filepath.Join(opts.OutputDir, "probe.pb"),
+		"", probeAudio, 2, 48000,
+	)
+
+	return p, nil
+}
+
+func (p *HLSCopyPipeline) PushVideo(data []byte, pts, dts int64, keyframe bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped {
+		return nil
+	}
+
+	pkt := &demux.Packet{Type: demux.Video, Data: data, PTS: pts, DTS: dts, Keyframe: keyframe}
+	avPkt, err := conv.ToAVPacket(pkt, p.videoTB)
+	if err != nil {
+		return err
+	}
+	err = p.muxer.WriteVideoPacket(avPkt)
+	avPkt.Free()
+	return err
+}
+
+func (p *HLSCopyPipeline) PushAudio(data []byte, pts, dts int64) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped || p.audioLatched {
+		return nil
+	}
+
+	if p.audioDec == nil {
+		return nil
+	}
+
+	pkt := &demux.Packet{Type: demux.Audio, Data: data, PTS: pts, DTS: dts}
+	avPkt, err := conv.ToAVPacket(pkt, p.audioTB)
+	if err != nil {
+		p.audioLatched = true
+		return nil
+	}
+	frames, err := p.audioDec.Decode(avPkt)
+	avPkt.Free()
+	if err != nil {
+		for _, f := range frames {
+			f.Free()
+		}
+		p.audioLatched = true
+		p.log.Warn().Err(err).Msg("HLS copy audio decode error latched")
+		return nil
+	}
+	for _, frame := range frames {
+		outFrame := frame
+		if p.audioResample != nil {
+			outFrame, err = p.audioResample.Convert(frame)
+			frame.Free()
+			if err != nil {
+				p.audioLatched = true
+				return nil
+			}
+		}
+		encPkts, err := p.audioFifo.Write(outFrame)
+		outFrame.Free()
+		if err != nil {
+			p.audioLatched = true
+			p.log.Warn().Err(err).Msg("HLS copy audio encode error latched")
+			return nil
+		}
+		for _, ep := range encPkts {
+			if err := p.muxer.WriteAudioPacket(ep); err != nil {
+				ep.Free()
+				p.audioLatched = true
+				return nil
+			}
+			ep.Free()
+		}
+	}
+	return nil
+}
+
+func (p *HLSCopyPipeline) PushSubtitle(data []byte, pts int64, duration int64) error {
+	return nil
+}
+
+func (p *HLSCopyPipeline) EndOfStream() {
+	p.Stop()
+}
+
+func (p *HLSCopyPipeline) ResetForSeek() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.audioDec != nil {
+		p.audioDec.FlushBuffers()
+	}
+	if p.audioResample != nil {
+		p.audioResample.Reset()
+	}
+	if p.muxer != nil {
+		p.muxer.Reset()
+	}
+	if p.audioFifo != nil {
+		p.audioFifo.Reset()
+	}
+	p.audioLatched = false
+}
+
+func (p *HLSCopyPipeline) Stop() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped {
+		return
+	}
+	p.stopped = true
+	p.closeHLSCopy()
+}
+
+func (p *HLSCopyPipeline) closeHLSCopy() {
+	if p.audioFifo != nil {
+		p.audioFifo.Close()
+	}
+	if p.audioEnc != nil {
+		p.audioEnc.Close()
+	}
+	if p.audioResample != nil {
+		p.audioResample.Close()
+	}
+	if p.audioDec != nil {
+		p.audioDec.Close()
+	}
+	if p.muxer != nil {
+		p.muxer.Close()
+	}
+}
+
+type HLSTranscodePipeline struct {
+	muxer         *mux.HLSMuxer
+	videoDec      *decode.Decoder
+	videoEnc      *encode.Encoder
+	deint         *filter.Deinterlacer
+	scaler        *scale.Scaler
+	audioDec      *decode.Decoder
+	audioResample *resample.Resampler
+	audioEnc      *encode.Encoder
+	audioFifo     *encode.AudioFIFO
+	kfTracker     *keyframe.KeyframeTracker
+	videoCodec    string
+	videoTB       astiav.Rational
+	audioTB       astiav.Rational
+	audioLatched  bool
+	stopped       bool
+	mu            sync.Mutex
+	log           zerolog.Logger
+}
+
+type HLSTranscodeOpts struct {
+	Info             *probe.StreamInfo
+	AudioIndex       int
+	OutputDir        string
+	IsLive           bool
+	SegmentDuration  int
+	HWAccel          string
+	DecodeHWAccel    string
+	OutputCodec      string
+	OutputAudioCodec string
+	Bitrate          int
+	OutputHeight     int
+	MaxBitDepth      int
+	Deinterlace      bool
+	VideoCodecParams *astiav.CodecParameters
+	AudioCodecParams *astiav.CodecParameters
+	Log              zerolog.Logger
+}
+
+func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, error) {
+	segDir := filepath.Join(opts.OutputDir, "segments")
+	if err := os.MkdirAll(segDir, 0755); err != nil {
+		return nil, fmt.Errorf("gopipeline: create segments dir: %w", err)
+	}
+
+	info := opts.Info
+	p := &HLSTranscodePipeline{
+		kfTracker:  keyframe.NewKeyframeTracker(!opts.IsLive),
+		videoCodec: info.Video.Codec,
+		log:        opts.Log,
+	}
+
+	decHW := opts.DecodeHWAccel
+	if decHW == "" {
+		decHW = opts.HWAccel
+	}
+	var err error
+	if opts.VideoCodecParams != nil {
+		p.videoDec, err = decode.NewVideoDecoderFromParams(opts.VideoCodecParams, decode.DecodeOpts{
+			HWAccel:     decHW,
+			MaxBitDepth: opts.MaxBitDepth,
+		})
+	} else {
+		videoCodecID, cerr := conv.CodecIDFromString(info.Video.Codec)
+		if cerr != nil {
+			return nil, fmt.Errorf("gopipeline: video codec ID: %w", cerr)
+		}
+		p.videoDec, err = decode.NewVideoDecoder(videoCodecID, info.Video.Extradata, decode.DecodeOpts{
+			HWAccel:     decHW,
+			MaxBitDepth: opts.MaxBitDepth,
+		})
+	}
+	if err != nil {
+		return nil, fmt.Errorf("gopipeline: video decoder: %w", err)
+	}
+
+	if opts.Deinterlace || info.Video.Interlaced {
+		p.deint, err = filter.NewDeinterlacer(
+			info.Video.Width, info.Video.Height,
+			astiav.PixelFormatYuv420P,
+			astiav.NewRational(info.Video.FramerateD, info.Video.FramerateN),
+		)
+		if err != nil {
+			p.closeHLSTranscode()
+			return nil, fmt.Errorf("gopipeline: deinterlacer: %w", err)
+		}
+	}
+
+	outW := info.Video.Width
+	outH := info.Video.Height
+	if opts.OutputHeight > 0 && opts.OutputHeight < info.Video.Height {
+		outH = opts.OutputHeight
+		outW = info.Video.Width * opts.OutputHeight / info.Video.Height
+		outW = outW &^ 1
+		p.scaler, err = scale.NewScaler(
+			info.Video.Width, info.Video.Height, astiav.PixelFormatYuv420P,
+			outW, outH, astiav.PixelFormatYuv420P,
+		)
+		if err != nil {
+			p.closeHLSTranscode()
+			return nil, fmt.Errorf("gopipeline: scaler: %w", err)
+		}
+	}
+
+	outCodec := opts.OutputCodec
+	if outCodec == "" {
+		outCodec = "h264"
+	}
+	p.videoEnc, err = encode.NewVideoEncoder(encode.EncodeOpts{
+		Codec:   outCodec,
+		HWAccel: opts.HWAccel,
+		Bitrate: opts.Bitrate,
+		Width:   outW,
+		Height:  outH,
+	})
+	if err != nil {
+		p.closeHLSTranscode()
+		return nil, fmt.Errorf("gopipeline: video encoder: %w", err)
+	}
+
+	outVideoCodecID, err := conv.CodecIDFromString(outCodec)
+	if err != nil {
+		p.closeHLSTranscode()
+		return nil, fmt.Errorf("gopipeline: output video codec ID: %w", err)
+	}
+	p.videoTB = astiav.NewRational(1, 90000)
+
+	var audioTrack *probe.AudioTrack
+	for i := range info.AudioTracks {
+		if info.AudioTracks[i].Index == opts.AudioIndex {
+			audioTrack = &info.AudioTracks[i]
+			break
+		}
+	}
+
+	hlsOpts := mux.HLSMuxOpts{
+		OutputDir:          segDir,
+		SegmentDurationSec: opts.SegmentDuration,
+		VideoCodecID:       outVideoCodecID,
+		VideoExtradata:     p.videoEnc.Extradata(),
+		VideoWidth:         outW,
+		VideoHeight:        outH,
+		VideoTimeBase:      p.videoTB,
+	}
+
+	if audioTrack != nil {
+		p.audioTB = astiav.NewRational(1, 48000)
+
+		if opts.AudioCodecParams != nil {
+			p.audioDec, err = decode.NewAudioDecoderFromParams(opts.AudioCodecParams)
+		} else {
+			audioCodecID, cerr := conv.CodecIDFromString(audioTrack.Codec)
+			if cerr != nil {
+				p.closeHLSTranscode()
+				return nil, fmt.Errorf("gopipeline: audio codec ID: %w", cerr)
+			}
+			p.audioDec, err = decode.NewAudioDecoder(audioCodecID, nil)
+		}
+		if err != nil {
+			p.closeHLSTranscode()
+			return nil, fmt.Errorf("gopipeline: audio decoder: %w", err)
+		}
+
+		p.audioResample, err = resample.NewResampler(
+			audioTrack.Channels, audioTrack.SampleRate, astiav.SampleFormatFltp,
+			2, 48000, astiav.SampleFormatFltp,
+		)
+		if err != nil {
+			p.closeHLSTranscode()
+			return nil, fmt.Errorf("gopipeline: audio resampler: %w", err)
+		}
+
+		hlsAudio := opts.OutputAudioCodec
+		if hlsAudio == "" {
+			hlsAudio = "aac"
+		}
+		hlsEncName := encode.ResolveAudioEncoderName(hlsAudio)
+		p.audioEnc, err = encode.NewAudioEncoder(encode.AudioEncodeOpts{
+			Codec: hlsEncName, Channels: 2, SampleRate: 48000,
+		})
+		if err != nil {
+			p.closeHLSTranscode()
+			return nil, fmt.Errorf("gopipeline: audio encoder (%s): %w", hlsAudio, err)
+		}
+		p.audioFifo = encode.NewAudioFIFOFromEncoder(p.audioEnc, 2, astiav.ChannelLayoutStereo, 48000)
+
+		hlsAudioID, _ := conv.CodecIDFromString(hlsAudio)
+		hlsOpts.AudioCodecID = hlsAudioID
+		hlsOpts.AudioChannels = 2
+		hlsOpts.AudioSampleRate = 48000
+		hlsOpts.AudioExtradata = p.audioEnc.Extradata()
+		hlsOpts.AudioTimeBase = p.audioTB
+	}
+
+	p.muxer, err = mux.NewHLSMuxer(hlsOpts)
+	if err != nil {
+		p.closeHLSTranscode()
+		return nil, fmt.Errorf("gopipeline: HLS muxer: %w", err)
+	}
+
+	hlsOutAudio := opts.OutputAudioCodec
+	if hlsOutAudio == "" {
+		hlsOutAudio = "aac"
+	}
+	proto.EnrichProbeFile(
+		filepath.Join(opts.OutputDir, "probe.pb"),
+		"", hlsOutAudio, 2, 48000,
+	)
+
+	return p, nil
+}
+
+func (p *HLSTranscodePipeline) PushVideo(data []byte, pts, dts int64, keyframe bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped {
+		return nil
+	}
+
+	if p.kfTracker.ShouldDrop(data, p.videoCodec) {
+		return nil
+	}
+
+	pkt := &demux.Packet{Type: demux.Video, Data: data, PTS: pts, DTS: dts, Keyframe: keyframe}
+	avPkt, err := conv.ToAVPacket(pkt, p.videoTB)
+	if err != nil {
+		return err
+	}
+
+	frames, err := p.videoDec.Decode(avPkt)
+	avPkt.Free()
+	if err != nil {
+		for _, f := range frames {
+			f.Free()
+		}
+		return fmt.Errorf("video decode: %w", err)
+	}
+
+	for i, frame := range frames {
+		decFrame := frame
+		if p.deint != nil {
+			frame, err = p.deint.Process(frame)
+			decFrame.Free()
+			if err != nil {
+				for _, f := range frames[i+1:] {
+					f.Free()
+				}
+				return fmt.Errorf("deinterlace: %w", err)
+			}
+			if frame == nil {
+				continue
+			}
+			decFrame = frame
+		}
+		if p.scaler != nil {
+			frame, err = p.scaler.Scale(frame)
+			decFrame.Free()
+			if err != nil {
+				for _, f := range frames[i+1:] {
+					f.Free()
+				}
+				return fmt.Errorf("scale: %w", err)
+			}
+		}
+		encPkts, err := p.videoEnc.Encode(frame)
+		frame.Free()
+		if err != nil {
+			for _, f := range frames[i+1:] {
+				f.Free()
+			}
+			return fmt.Errorf("video encode: %w", err)
+		}
+		for _, encPkt := range encPkts {
+			if err := p.muxer.WriteVideoPacket(encPkt); err != nil {
+				encPkt.Free()
+				for _, f := range frames[i+1:] {
+					f.Free()
+				}
+				return fmt.Errorf("mux video: %w", err)
+			}
+			encPkt.Free()
+		}
+	}
+	return nil
+}
+
+func (p *HLSTranscodePipeline) PushAudio(data []byte, pts, dts int64) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped || p.audioLatched {
+		return nil
+	}
+
+	if p.audioDec == nil {
+		return nil
+	}
+
+	pkt := &demux.Packet{Type: demux.Audio, Data: data, PTS: pts, DTS: dts}
+	avPkt, err := conv.ToAVPacket(pkt, p.audioTB)
+	if err != nil {
+		p.latchHLSAudioError(err)
+		return nil
+	}
+
+	frames, err := p.audioDec.Decode(avPkt)
+	avPkt.Free()
+	if err != nil {
+		p.latchHLSAudioError(err)
+		return nil
+	}
+
+	for _, frame := range frames {
+		outFrame := frame
+		if p.audioResample != nil {
+			outFrame, err = p.audioResample.Convert(frame)
+			frame.Free()
+			if err != nil {
+				p.latchHLSAudioError(err)
+				return nil
+			}
+		}
+		encPkts, err := p.audioFifo.Write(outFrame)
+		outFrame.Free()
+		if err != nil {
+			p.latchHLSAudioError(err)
+			return nil
+		}
+		for _, encPkt := range encPkts {
+			if err := p.muxer.WriteAudioPacket(encPkt); err != nil {
+				encPkt.Free()
+				p.latchHLSAudioError(err)
+				return nil
+			}
+			encPkt.Free()
+		}
+	}
+	return nil
+}
+
+func (p *HLSTranscodePipeline) PushSubtitle(data []byte, pts int64, duration int64) error {
+	return nil
+}
+
+func (p *HLSTranscodePipeline) EndOfStream() {
+	p.Stop()
+}
+
+func (p *HLSTranscodePipeline) ResetForSeek() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.videoDec != nil {
+		p.videoDec.FlushBuffers()
+	}
+	if p.audioDec != nil {
+		p.audioDec.FlushBuffers()
+	}
+	if p.audioResample != nil {
+		p.audioResample.Reset()
+	}
+	if p.muxer != nil {
+		p.muxer.Reset()
+	}
+	if p.audioFifo != nil {
+		p.audioFifo.Reset()
+	}
+	p.audioLatched = false
+}
+
+func (p *HLSTranscodePipeline) latchHLSAudioError(err error) {
+	if !p.audioLatched {
+		p.audioLatched = true
+		p.log.Error().Err(err).Msg("HLS audio error latched — video continues")
+	}
+}
+
+func (p *HLSTranscodePipeline) Stop() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped {
+		return
+	}
+	p.stopped = true
+	p.closeHLSTranscode()
+}
+
+func (p *HLSTranscodePipeline) closeHLSTranscode() {
+	if p.audioFifo != nil {
+		p.audioFifo.Close()
+	}
+	if p.videoEnc != nil {
+		p.videoEnc.Close()
+	}
+	if p.scaler != nil {
+		p.scaler.Close()
+	}
+	if p.deint != nil {
+		p.deint.Close()
+	}
+	if p.videoDec != nil {
+		p.videoDec.Close()
+	}
+	if p.audioEnc != nil {
+		p.audioEnc.Close()
+	}
+	if p.audioResample != nil {
+		p.audioResample.Close()
+	}
+	if p.audioDec != nil {
+		p.audioDec.Close()
+	}
+	if p.muxer != nil {
+		p.muxer.Close()
+	}
+}

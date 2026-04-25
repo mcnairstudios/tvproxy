@@ -38,6 +38,7 @@ type StreamWriter interface {
 	SetTMDBManual(ctx context.Context, id string, tmdbID int) error
 	ClearAutoTMDBByAccountID(ctx context.Context, accountID string) error
 	UpdateWireGuardByAccountID(ctx context.Context, accountID string, useWireGuard bool) error
+	UpdateStreamProbeData(ctx context.Context, id string, duration float64, vcodec, acodec string) error
 	Clear() error
 }
 

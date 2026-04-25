@@ -21,14 +21,15 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if userID := s.firstUserID(r.Context()); userID != "" {
-				s.tokens.Store(token, userID)
-				s.saveState()
-				s.log.Info().Str("path", r.URL.Path).Msg("auto-registered unknown token")
+			userID := s.firstUserID(r.Context())
+			if userID != "" {
+				s.log.Info().Str("path", r.URL.Path).Str("token", token[:8]+"...").Str("user_id", userID).Msg("auto-registering unknown token to first user")
+				s.state.storeToken(&s.tokens, token, userID)
 				s.touchJellyfinSession(r, userID)
 				next.ServeHTTP(w, r)
 				return
 			}
+			s.log.Warn().Str("path", r.URL.Path).Str("token", token[:8]+"...").Msg("token not found in store")
 		} else {
 			s.log.Warn().Str("path", r.URL.Path).Msg("no token in request")
 		}
@@ -80,8 +81,6 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
-	s.log.Info().Str("username", req.Username).Msg("auth success")
-
 	users, _ := s.auth.ListUsers(r.Context())
 	var userID, userName string
 	var isAdmin bool
@@ -98,50 +97,43 @@ func (s *Server) authenticateByName(w http.ResponseWriter, r *http.Request) {
 	tokenBytes := make([]byte, 16)
 	rand.Read(tokenBytes)
 	token := hex.EncodeToString(tokenBytes)
-	s.tokens.Store(token, userID)
-	s.saveState()
+	s.log.Info().Str("username", req.Username).Str("token", token[:8]+"...").Msg("auth success")
+	s.state.storeToken(&s.tokens, token, userID)
 
-	nowJF := JellyfinTime{time.Now().UTC()}
-	sessionIDBytes := make([]byte, 16)
-	rand.Read(sessionIDBytes)
-	sessionID := hex.EncodeToString(sessionIDBytes)
+	now := time.Now().UTC()
 	s.respondJSON(w, http.StatusOK, AuthenticationResult{
 		User: &UserDto{
 			Name:                  userName,
 			ServerID:              s.serverID,
+			ServerName:            s.serverName,
 			ID:                    jfUserID,
 			HasPassword:           true,
 			HasConfiguredPassword: true,
-			LastLoginDate:         &nowJF,
-			LastActivityDate:      &nowJF,
-			Configuration:         defaultUserConfig(),
-			Policy:                defaultPolicy(isAdmin),
+			LastLoginDate:         &now,
+			LastActivityDate:      &now,
+			Configuration: defaultUserConfig(),
+			Policy: defaultPolicy(isAdmin),
 		},
 		SessionInfo: &SessionInfo{
-			PlayState:       &PlayState{RepeatMode: "RepeatNone", PlaybackOrder: "Default"},
-			AdditionalUsers: []any{},
-			Capabilities: &SessionCapabilities{
-				PlayableMediaTypes:           jellyfinPlayableMediaTypes(),
-				SupportedCommands:            jellyfinSupportedCommands(),
-				SupportsMediaControl:         true,
-				SupportsPersistentIdentifier: false,
-			},
-			RemoteEndPoint:           r.RemoteAddr,
-			PlayableMediaTypes:       jellyfinPlayableMediaTypes(),
-			ID:                       sessionID,
-			UserID:                   jfUserID,
-			UserName:                 userName,
-			Client:                   s.extractAuthField(r, "Client"),
-			LastActivityDate:         nowJF,
-			LastPlaybackCheckIn:      "0001-01-01T00:00:00.0000000Z",
-			DeviceName:               s.extractAuthField(r, "Device"),
-			DeviceID:                 s.extractAuthField(r, "DeviceId"),
-			ApplicationVersion:       s.extractAuthField(r, "Version"),
-			IsActive:                 true,
-			NowPlayingQueue:          []any{},
+			PlayState: &PlayState{RepeatMode: "RepeatNone", PlaybackOrder: "Default"},
+			AdditionalUsers:       []any{},
+			Capabilities:          &SessionCapabilities{PlayableMediaTypes: []string{}, SupportedCommands: []string{}, SupportsPersistentIdentifier: true},
+			RemoteEndPoint:        r.RemoteAddr,
+			PlayableMediaTypes:    []string{},
+			ID:                    token[:16],
+			UserID:                jfUserID,
+			UserName:              userName,
+			Client:                s.extractAuthField(r, "Client"),
+			LastActivityDate:      now,
+			LastPlaybackCheckIn:   "0001-01-01T00:00:00.0000000Z",
+			DeviceName:            s.extractAuthField(r, "Device"),
+			DeviceID:              s.extractAuthField(r, "DeviceId"),
+			ApplicationVersion:    s.extractAuthField(r, "Version"),
+			IsActive:              true,
+			NowPlayingQueue:       []any{},
 			NowPlayingQueueFullItems: []any{},
-			ServerID:                 s.serverID,
-			SupportedCommands:        jellyfinSupportedCommands(),
+			ServerID:              s.serverID,
+			SupportedCommands:     []string{},
 		},
 		AccessToken: token,
 		ServerID:    s.serverID,
@@ -226,36 +218,16 @@ func (s *Server) firstUserID(ctx context.Context) string {
 
 func defaultUserConfig() UserConfig {
 	return UserConfig{
-		PlayDefaultAudioTrack:      true,
-		SubtitleMode:               "Default",
-		GroupedFolders:             []string{},
-		OrderedViews:               []string{},
-		LatestItemsExcludes:        []string{},
-		MyMediaExcludes:            []string{},
-		HidePlayedInLatest:         true,
-		RememberAudioSelections:    true,
+		PlayDefaultAudioTrack:     true,
+		SubtitleMode:              "Default",
+		GroupedFolders:            []string{},
+		OrderedViews:              []string{},
+		LatestItemsExcludes:       []string{},
+		MyMediaExcludes:           []string{},
+		HidePlayedInLatest:        true,
+		RememberAudioSelections:   true,
 		RememberSubtitleSelections: true,
-		EnableNextEpisodeAutoPlay:  true,
-		CastReceiverId:             "F007D354",
-	}
-}
-
-func jellyfinPlayableMediaTypes() []string {
-	return []string{"Audio", "Video"}
-}
-
-func jellyfinSupportedCommands() []string {
-	return []string{
-		"MoveUp", "MoveDown", "MoveLeft", "MoveRight",
-		"PageUp", "PageDown", "PreviousLetter", "NextLetter",
-		"ToggleOsd", "ToggleContextMenu", "Select", "Back",
-		"SendKey", "SendString", "GoHome", "GoToSettings",
-		"VolumeUp", "VolumeDown", "Mute", "Unmute", "ToggleMute",
-		"SetVolume", "SetAudioStreamIndex", "SetSubtitleStreamIndex",
-		"DisplayContent", "GoToSearch", "DisplayMessage",
-		"SetRepeatMode", "SetShuffleQueue",
-		"ChannelUp", "ChannelDown",
-		"PlayMediaSource", "PlayTrailers",
+		EnableNextEpisodeAutoPlay: true,
 	}
 }
 

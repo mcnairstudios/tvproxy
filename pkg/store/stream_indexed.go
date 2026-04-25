@@ -612,6 +612,26 @@ func (s *IndexedStreamStore) UpdateWireGuardByAccountID(_ context.Context, accou
 	return nil
 }
 
+func (s *IndexedStreamStore) UpdateStreamProbeData(_ context.Context, id string, duration float64, vcodec, acodec string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.index[id]; !ok {
+		return fmt.Errorf("stream not found: %s", id)
+	}
+	s.updateStreamField(id, func(st *models.Stream) {
+		if duration > 0 && st.VODDuration == 0 {
+			st.VODDuration = duration
+		}
+		if vcodec != "" && st.VODVCodec == "" {
+			st.VODVCodec = vcodec
+		}
+		if acodec != "" && st.VODACodec == "" {
+			st.VODACodec = acodec
+		}
+	})
+	return nil
+}
+
 func (s *IndexedStreamStore) Clear() error {
 	s.mu.Lock()
 	s.index = make(map[string]StreamIndex)

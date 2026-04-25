@@ -249,7 +249,7 @@ func main() {
 	hdhrSourceService := service.NewHDHRSourceService(hdhrSourceStore, streamStore, channelStore, probeCache, log)
 	wgMultiClient := wgMultiService.HTTPClient()
 	m3uService.SetWGClient(wgMultiClient)
-	sessionMgr := session.NewManager(cfg, wgHTTPClient, wgMultiClient, probeCache, log)
+	sessionMgr := session.NewManager(cfg, wgHTTPClient, wgMultiClient, probeCache, streamStore, log)
 
 	wgPool := session.NewWGPool(log)
 	for profileID, client := range wgMultiService.ConnectedTransports() {
@@ -360,7 +360,7 @@ func main() {
 	staticRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "static")
 	registerStaticRoutes(r, staticRoot, distFS, versionedIndexBytes)
 
-	jellyfinServer := jellyfin.NewServer("TVProxy", cfg.BaseURL, authService, activityService, favoriteStore, channelStore, channelGroupStore, streamStore, profileStore, epgStore, logoService, tmdbClient, hlsManager, log)
+	jellyfinServer := jellyfin.NewServer("TVProxy", cfg.BaseURL, dataDir, authService, activityService, favoriteStore, channelStore, channelGroupStore, streamStore, epgStore, logoService, tmdbClient, hlsManager, vodService, log)
 	if wgClientForSessions != nil {
 		jellyfinServer.WGProxyFunc = wgProxyFunc
 	}
