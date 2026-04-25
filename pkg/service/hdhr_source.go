@@ -20,7 +20,6 @@ type HDHRSourceService struct {
 	hdhrSourceStore store.HDHRSourceStore
 	streamStore     store.StreamStore
 	channelStore    store.ChannelStore
-	profileStore    store.ProfileStore
 	probeCache      store.ProbeCache
 	log             zerolog.Logger
 	StatusTracker
@@ -30,7 +29,6 @@ func NewHDHRSourceService(
 	hdhrSourceStore store.HDHRSourceStore,
 	streamStore store.StreamStore,
 	channelStore store.ChannelStore,
-	profileStore store.ProfileStore,
 	probeCache store.ProbeCache,
 	log zerolog.Logger,
 ) *HDHRSourceService {
@@ -38,7 +36,6 @@ func NewHDHRSourceService(
 		hdhrSourceStore: hdhrSourceStore,
 		streamStore:     streamStore,
 		channelStore:    channelStore,
-		profileStore:    profileStore,
 		probeCache:      probeCache,
 		log:             log.With().Str("service", "hdhr_source").Logger(),
 		StatusTracker:   NewStatusTracker(),
@@ -48,9 +45,6 @@ func NewHDHRSourceService(
 func (s *HDHRSourceService) Log() *zerolog.Logger { return &s.log }
 
 func (s *HDHRSourceService) CreateSource(ctx context.Context, source *models.HDHRSource) error {
-	if source.SourceProfileID == "" {
-		source.SourceProfileID = s.findSystemProfileID("HDHomeRun")
-	}
 	if err := s.hdhrSourceStore.Create(ctx, source); err != nil {
 		return err
 	}
@@ -58,19 +52,6 @@ func (s *HDHRSourceService) CreateSource(ctx context.Context, source *models.HDH
 		s.autoLinkDevices(ctx, source)
 	}
 	return nil
-}
-
-func (s *HDHRSourceService) findSystemProfileID(name string) string {
-	if s.profileStore == nil {
-		return ""
-	}
-	profiles, _ := s.profileStore.List(context.Background())
-	for _, p := range profiles {
-		if p.IsSystem && p.Name == name {
-			return p.ID
-		}
-	}
-	return ""
 }
 
 func (s *HDHRSourceService) autoLinkDevices(ctx context.Context, source *models.HDHRSource) {

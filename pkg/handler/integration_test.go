@@ -731,7 +731,7 @@ func TestIntegration_StreamProfileCRUD(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		var profiles []map[string]any
 		decodeResponse(t, rec, &profiles)
-		assert.Len(t, profiles, 18)
+		assert.Len(t, profiles, 16)
 	})
 
 	t.Run("get", func(t *testing.T) {
@@ -2404,7 +2404,7 @@ func TestIntegration_SoftReset(t *testing.T) {
 		rec = doRequest(t, env, "GET", "/api/stream-profiles/", nil, env.adminToken)
 		assert.Equal(t, http.StatusOK, rec.Code)
 		decodeResponse(t, rec, &profiles)
-		assert.Equal(t, 15, len(profiles))
+		assert.Equal(t, 13, len(profiles))
 
 		rec = doRequest(t, env, "GET", "/api/channels/", nil, env.adminToken)
 		assert.Equal(t, http.StatusOK, rec.Code)
@@ -2438,7 +2438,7 @@ func TestIntegration_HardReset(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		var profiles []map[string]any
 		decodeResponse(t, rec, &profiles)
-		assert.Equal(t, 15, len(profiles))
+		assert.Equal(t, 13, len(profiles))
 
 		rec = doRequest(t, env, "GET", "/api/clients/", nil, newToken)
 		assert.Equal(t, http.StatusOK, rec.Code)
@@ -2901,7 +2901,7 @@ func TestIntegration_ClientSyncSurvival(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 		var profiles []map[string]any
 		decodeResponse(t, rec, &profiles)
-		assert.Equal(t, 16, len(profiles))
+		assert.Equal(t, 14, len(profiles))
 
 		var foundCustom bool
 		for _, p := range profiles {
