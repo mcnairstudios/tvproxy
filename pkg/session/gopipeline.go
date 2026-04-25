@@ -1673,6 +1673,14 @@ func NewHLSCopyPipeline(opts HLSCopyOpts) (*HLSCopyPipeline, error) {
 		}
 	}
 
+	videoFPS := 25
+	if info.Video.FramerateN > 0 && info.Video.FramerateD > 0 {
+		videoFPS = info.Video.FramerateN / info.Video.FramerateD
+		if videoFPS <= 0 {
+			videoFPS = 25
+		}
+	}
+
 	hlsOpts := mux.HLSMuxOpts{
 		OutputDir:          segDir,
 		SegmentDurationSec: opts.SegmentDuration,
@@ -1681,6 +1689,7 @@ func NewHLSCopyPipeline(opts HLSCopyOpts) (*HLSCopyPipeline, error) {
 		VideoWidth:         info.Video.Width,
 		VideoHeight:        info.Video.Height,
 		VideoTimeBase:      p.videoTB,
+		VideoFrameRate:     videoFPS,
 	}
 
 	if audioTrack != nil {
@@ -1748,6 +1757,7 @@ func NewHLSCopyPipeline(opts HLSCopyOpts) (*HLSCopyPipeline, error) {
 			hlsOpts.AudioSampleRate = 48000
 			hlsOpts.AudioExtradata = p.audioEnc.Extradata()
 			hlsOpts.AudioTimeBase = p.audioTB
+			hlsOpts.AudioFrameSize = p.audioEnc.FrameSize()
 		}
 	}
 
@@ -2031,6 +2041,14 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 		}
 	}
 
+	videoFPS := 25
+	if info.Video.FramerateN > 0 && info.Video.FramerateD > 0 {
+		videoFPS = info.Video.FramerateN / info.Video.FramerateD
+		if videoFPS <= 0 {
+			videoFPS = 25
+		}
+	}
+
 	hlsOpts := mux.HLSMuxOpts{
 		OutputDir:          segDir,
 		SegmentDurationSec: opts.SegmentDuration,
@@ -2039,6 +2057,7 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 		VideoWidth:         outW,
 		VideoHeight:        outH,
 		VideoTimeBase:      p.videoTB,
+		VideoFrameRate:     videoFPS,
 	}
 
 	if audioTrack != nil {
@@ -2088,6 +2107,7 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 		hlsOpts.AudioSampleRate = 48000
 		hlsOpts.AudioExtradata = p.audioEnc.Extradata()
 		hlsOpts.AudioTimeBase = p.audioTB
+		hlsOpts.AudioFrameSize = p.audioEnc.FrameSize()
 	}
 
 	p.muxer, err = mux.NewHLSMuxer(hlsOpts)

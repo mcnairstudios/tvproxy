@@ -246,7 +246,7 @@ func main() {
 	hdhrService := service.NewHDHRService(hdhrStore, channelStore, cfg)
 	outputService := service.NewOutputService(channelStore, channelGroupStore, epgStore, logoService, cfg, log)
 	satipService := service.NewSatIPService(satipSourceStore, streamStore, channelStore, probeCache, log)
-	hdhrSourceService := service.NewHDHRSourceService(hdhrSourceStore, streamStore, channelStore, probeCache, log)
+	hdhrSourceService := service.NewHDHRSourceService(hdhrSourceStore, streamStore, channelStore, profileStore, probeCache, log)
 	wgMultiClient := wgMultiService.HTTPClient()
 	m3uService.SetWGClient(wgMultiClient)
 	sessionMgr := session.NewManager(cfg, wgHTTPClient, wgMultiClient, probeCache, streamStore, log)

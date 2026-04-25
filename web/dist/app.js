@@ -5485,6 +5485,7 @@
                     scanBtn.disabled = false;
                     scanBtn.style.display = '';
                     reload();
+                    rebuildStreamNav();
                     if (status.state === 'done') toast.success(item.name + ': ' + status.message);
                     else toast.error(item.name + ': ' + status.message);
                   }
@@ -5537,6 +5538,7 @@
                     retuneBtn.disabled = false;
                     retuneBtn.style.display = '';
                     reload();
+                    rebuildStreamNav();
                     if (status.state === 'done') toast.success(item.name + ': ' + status.message);
                     else toast.error(item.name + ': ' + status.message);
                   }

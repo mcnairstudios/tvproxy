@@ -181,7 +181,7 @@ func finishDemuxerSetup(fc *astiav.FormatContext, url string, opts DemuxOpts) (*
 		videoIdx:   -1,
 		audioIdx:   -1,
 		subIdx:     -1,
-		basePTS:    0,
+		basePTS:    -1,
 		url:        url,
 		opts:       opts,
 		seekCh:     make(chan seekRequest, 1),
@@ -572,6 +572,7 @@ func (d *Demuxer) SeekTo(posMs int64) error {
 	if err := d.fc.SeekFrame(streamIdx, ts, flags); err != nil {
 		return fmt.Errorf("demux: seek to %d ms: %w", posMs, err)
 	}
+	d.basePTS = 0
 	d.audioPTSInited = false
 	d.audioFrameCount = 0
 	return nil

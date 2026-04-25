@@ -30,6 +30,14 @@
 - Remove TMDB runtime hack once probe duration is available
 - This feeds into accurate RunTimeTicks for Jellyfin and correct MediaStream codec info
 
+### Audio PTS Drift (Pre-existing)
+- ~1s audio/video sync offset on HDHR streams (aac_latm → aac transcode)
+- Root cause: AudioFIFO synthesizes PTS from frame counter (`pts += frameSize`) instead of preserving source PTS
+- Demuxer also synthesizes audio PTS from `audioFrameCount` when `AudioPassthrough` is false
+- Fix attempt: re-anchor basePTS when FIFO drains — correct direction but caused VideoToolbox decode errors when combined with demuxer PTS removal
+- Proper fix: preserve source PTS through the entire audio pipeline (demux → decode → FIFO → encode → mux). The FIFO needs to track which input PTS maps to which output frame's first sample. Demuxer PTS normalization may need to stay (converts MPEG-TS arbitrary PTS to nanoseconds) but should not synthesize from counters.
+- The keyframe mismatch warnings ("ISO-BMFF container metadata indicates keyframe but contents indicate opposite") are a separate issue — fMP4 muxer marking non-IDR frames as sync samples in copy mode
+
 ### Token Auth
 - Auto-register unknown tokens to first user is temporary hack
 - Need proper multi-user token validation, expiry, revocation
@@ -88,6 +96,13 @@ source (MPEG-TS/RTSP) → demux → WebRTC (copy video + copy audio)  [viewer, m
 - Seek = demuxer seeks in-place, packets flow immediately via WebRTC. No segment wait, no buffer refill.
 - Could replace MSE for browser playback entirely — lower latency, simpler, no SourceBuffer management
 - The universal delivery mode: live + VOD + browser + native apps
+
+### HDHomeRun Source Management
+- **Auto-link devices on source creation**: When a source is created, auto-discover HDHR devices on the network and attach unassigned ones. Currently requires explicit AddDevice call — user creates source, devices are discovered but not linked, scan fails with "no devices configured"
+- **System profiles for HDHR**: Source stream profile should be a system profile tied to the HDHR source type (like Jellyfin), not user-editable per source. HDHR always delivers MPEG-TS — the profile is a property of the input format, not a user choice. Should be undeletable but editable (codec settings etc)
+- **Edit screen shows wrong field**: Editing an HDHR source makes you edit the source stream profile, which is confusing. Device management (add/remove tuners, tuner status) should be the primary edit view
+- **Retune status stuck on "running"**: When RetuneDevice fails (e.g. no devices), RefreshStatus was never set to "error" — frontend polls forever. Fixed in d681361 but only for device index check; other error paths in retune may have same issue
+- **Stale status on scan failure**: ScanSource sets "error" on failures, but the frontend progress bar doesn't always pick it up if the error happens fast (race between 202 response and error status)
 
 ### Docker / Build
 - sdk_models.go reference from Opus agent needs copying from worktree branch — DONE, moved to pkg/jellyfinsdk/

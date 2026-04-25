@@ -20,6 +20,7 @@ type HDHRSourceService struct {
 	hdhrSourceStore store.HDHRSourceStore
 	streamStore     store.StreamStore
 	channelStore    store.ChannelStore
+	profileStore    store.ProfileStore
 	probeCache      store.ProbeCache
 	log             zerolog.Logger
 	StatusTracker
@@ -29,6 +30,7 @@ func NewHDHRSourceService(
 	hdhrSourceStore store.HDHRSourceStore,
 	streamStore store.StreamStore,
 	channelStore store.ChannelStore,
+	profileStore store.ProfileStore,
 	probeCache store.ProbeCache,
 	log zerolog.Logger,
 ) *HDHRSourceService {
@@ -36,6 +38,7 @@ func NewHDHRSourceService(
 		hdhrSourceStore: hdhrSourceStore,
 		streamStore:     streamStore,
 		channelStore:    channelStore,
+		profileStore:    profileStore,
 		probeCache:      probeCache,
 		log:             log.With().Str("service", "hdhr_source").Logger(),
 		StatusTracker:   NewStatusTracker(),
@@ -45,7 +48,69 @@ func NewHDHRSourceService(
 func (s *HDHRSourceService) Log() *zerolog.Logger { return &s.log }
 
 func (s *HDHRSourceService) CreateSource(ctx context.Context, source *models.HDHRSource) error {
-	return s.hdhrSourceStore.Create(ctx, source)
+	if source.SourceProfileID == "" {
+		source.SourceProfileID = s.findSystemProfileID("HDHomeRun")
+	}
+	if err := s.hdhrSourceStore.Create(ctx, source); err != nil {
+		return err
+	}
+	if len(source.Devices) == 0 {
+		s.autoLinkDevices(ctx, source)
+	}
+	return nil
+}
+
+func (s *HDHRSourceService) findSystemProfileID(name string) string {
+	if s.profileStore == nil {
+		return ""
+	}
+	profiles, _ := s.profileStore.List(context.Background())
+	for _, p := range profiles {
+		if p.IsSystem && p.Name == name {
+			return p.ID
+		}
+	}
+	return ""
+}
+
+func (s *HDHRSourceService) autoLinkDevices(ctx context.Context, source *models.HDHRSource) {
+	ips, err := udpDiscoverHDHR(s.log)
+	if err != nil {
+		return
+	}
+	existingDeviceIDs := make(map[string]bool)
+	sources, _ := s.hdhrSourceStore.List(ctx)
+	for _, src := range sources {
+		for _, d := range src.Devices {
+			existingDeviceIDs[d.DeviceID] = true
+		}
+	}
+	for _, ip := range ips {
+		baseURL := "http://" + ip
+		discover, err := s.fetchDiscover(ctx, baseURL)
+		if err != nil {
+			continue
+		}
+		if existingDeviceIDs[discover.DeviceID] {
+			continue
+		}
+		source.Devices = append(source.Devices, models.HDHRTuner{
+			Host:            ip,
+			DeviceID:        discover.DeviceID,
+			DeviceModel:     discover.ModelNumber,
+			FirmwareVersion: discover.FirmwareVersion,
+			TunerCount:      discover.TunerCount,
+		})
+		existingDeviceIDs[discover.DeviceID] = true
+	}
+	if len(source.Devices) > 0 {
+		source.TunerCount = 0
+		for _, d := range source.Devices {
+			source.TunerCount += d.TunerCount
+		}
+		s.hdhrSourceStore.Update(ctx, source)
+		s.log.Info().Int("devices", len(source.Devices)).Str("source", source.Name).Msg("auto-linked discovered HDHR devices")
+	}
 }
 
 func (s *HDHRSourceService) GetSource(ctx context.Context, id string) (*models.HDHRSource, error) {
@@ -453,9 +518,11 @@ func hdhrProbeFromLineup(entry hdhrLineupEntry) *media.ProbeResult {
 func (s *HDHRSourceService) RetuneDevice(ctx context.Context, sourceID string, deviceIdx int) error {
 	source, err := s.hdhrSourceStore.GetByID(ctx, sourceID)
 	if err != nil {
+		s.Set(sourceID, RefreshStatus{State: "error", Message: "source not found"})
 		return fmt.Errorf("source not found: %w", err)
 	}
 	if deviceIdx >= len(source.Devices) {
+		s.Set(sourceID, RefreshStatus{State: "error", Message: "no devices configured"})
 		return fmt.Errorf("device index %d out of range", deviceIdx)
 	}
 
@@ -467,6 +534,7 @@ func (s *HDHRSourceService) RetuneDevice(ctx context.Context, sourceID string, d
 	scanURL := baseURL + "/lineup.post?scan=start&source=Antenna"
 	req, err := http.NewRequestWithContext(ctx, "POST", scanURL, nil)
 	if err != nil {
+		s.Set(sourceID, RefreshStatus{State: "error", Message: "Failed to create request: " + err.Error()})
 		return err
 	}
 	resp, err := http.DefaultClient.Do(req)

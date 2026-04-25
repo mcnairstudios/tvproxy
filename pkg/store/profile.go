@@ -212,6 +212,8 @@ func (s *ProfileStoreImpl) SeedSystemProfiles() {
 	systemProfiles := []models.StreamProfile{
 		{Name: "Direct", StreamMode: "direct", HWAccel: "none", VideoCodec: "copy", Container: "mpegts", IsSystem: true},
 		{Name: "Proxy", StreamMode: "proxy", HWAccel: "none", VideoCodec: "copy", Container: "mpegts", IsDefault: true, IsSystem: true},
+		{Name: "HDHomeRun", StreamMode: "proxy", HWAccel: "none", VideoCodec: "copy", Container: "mpegts", IsSystem: true},
+		{Name: "Jellyfin", StreamMode: "proxy", HWAccel: "none", VideoCodec: "copy", Container: "ts", Delivery: "hls", IsSystem: true},
 	}
 
 	for _, sp := range systemProfiles {

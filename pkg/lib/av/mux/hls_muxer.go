@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 
 	"github.com/asticode/go-astiav"
@@ -18,37 +19,24 @@ type HLSMuxOpts struct {
 	VideoWidth         int
 	VideoHeight        int
 	VideoTimeBase      astiav.Rational
+	VideoFrameRate     int
 	AudioCodecID       astiav.CodecID
 	AudioExtradata     []byte
 	AudioChannels      int
 	AudioSampleRate    int
 	AudioTimeBase      astiav.Rational
+	AudioFrameSize     int
 }
 
 type HLSMuxer struct {
-	opts           HLSMuxOpts
-	seg            *hlsSegment
-	segCount       int
-	segDurations   []float64
-	targetDuration int
-	closed         bool
-	mu             sync.Mutex
-}
-
-type hlsSegment struct {
-	muxer        *StreamMuxer
-	file         *os.File
-	path         string
+	opts         HLSMuxOpts
+	fc           *astiav.FormatContext
 	videoIdx     int
 	audioIdx     int
-	startPTS     int64
-	startPTSSet  bool
-	pktCount     int
-	videoPktCount int
-	videoDTS      int64
-	videoDTSInit  bool
-	audioDTS      int64
-	audioDTSInit  bool
+	videoOutTB   astiav.Rational
+	audioOutTB   astiav.Rational
+	closed       bool
+	mu           sync.Mutex
 }
 
 func NewHLSMuxer(opts HLSMuxOpts) (*HLSMuxer, error) {
@@ -63,153 +51,139 @@ func NewHLSMuxer(opts HLSMuxOpts) (*HLSMuxer, error) {
 	}
 
 	m := &HLSMuxer{
-		opts:           opts,
-		targetDuration: opts.SegmentDurationSec + 1,
+		opts:     opts,
+		videoIdx: -1,
+		audioIdx: -1,
 	}
 
-	if err := m.openSegment(); err != nil {
-		return nil, fmt.Errorf("avmux: open initial segment: %w", err)
+	if err := m.openFormatContext(); err != nil {
+		return nil, fmt.Errorf("avmux: open hls muxer: %w", err)
 	}
 
 	return m, nil
 }
 
-func (m *HLSMuxer) openSegment() error {
-	segName := fmt.Sprintf("seg%d.ts", m.segCount)
-	segPath := filepath.Join(m.opts.OutputDir, segName)
+func (m *HLSMuxer) openFormatContext() error {
+	playlistPath := filepath.Join(m.opts.OutputDir, "playlist.m3u8")
 
-	f, err := os.Create(segPath)
+	fc, err := astiav.AllocOutputFormatContext(nil, "hls", playlistPath)
 	if err != nil {
-		return fmt.Errorf("create segment file: %w", err)
+		return fmt.Errorf("alloc output format context: %w", err)
 	}
-
-	sm, err := NewStreamMuxer("mpegts", f)
-	if err != nil {
-		f.Close()
-		return fmt.Errorf("create stream muxer: %w", err)
-	}
-
-	seg := &hlsSegment{
-		muxer:    sm,
-		file:     f,
-		path:     segPath,
-		videoIdx: -1,
-		audioIdx: -1,
-	}
+	m.fc = fc
 
 	if m.opts.VideoCodecID != astiav.CodecIDNone {
-		videoCP := astiav.AllocCodecParameters()
-		videoCP.SetCodecID(m.opts.VideoCodecID)
-		videoCP.SetMediaType(astiav.MediaTypeVideo)
-		videoCP.SetWidth(m.opts.VideoWidth)
-		videoCP.SetHeight(m.opts.VideoHeight)
+		vs := fc.NewStream(nil)
+		if vs == nil {
+			fc.Free()
+			m.fc = nil
+			return errors.New("failed to allocate video stream")
+		}
+		cp := vs.CodecParameters()
+		cp.SetCodecID(m.opts.VideoCodecID)
+		cp.SetMediaType(astiav.MediaTypeVideo)
+		cp.SetWidth(m.opts.VideoWidth)
+		cp.SetHeight(m.opts.VideoHeight)
 		if len(m.opts.VideoExtradata) > 0 {
-			if err := videoCP.SetExtraData(m.opts.VideoExtradata); err != nil {
-				videoCP.Free()
-				sm.Close()
-				f.Close()
+			if err := cp.SetExtraData(m.opts.VideoExtradata); err != nil {
+				fc.Free()
+				m.fc = nil
 				return fmt.Errorf("set video extradata: %w", err)
 			}
 		}
-		vs, err := sm.AddStream(videoCP)
-		videoCP.Free()
-		if err != nil {
-			sm.Close()
-			f.Close()
-			return fmt.Errorf("add video stream: %w", err)
-		}
-		seg.videoIdx = vs.Index()
+		vs.SetTimeBase(m.opts.VideoTimeBase)
+		m.videoIdx = vs.Index()
 	}
 
 	if m.opts.AudioCodecID != astiav.CodecIDNone {
-		audioCP := astiav.AllocCodecParameters()
-		audioCP.SetCodecID(m.opts.AudioCodecID)
-		audioCP.SetMediaType(astiav.MediaTypeAudio)
+		as := fc.NewStream(nil)
+		if as == nil {
+			fc.Free()
+			m.fc = nil
+			return errors.New("failed to allocate audio stream")
+		}
+		cp := as.CodecParameters()
+		cp.SetCodecID(m.opts.AudioCodecID)
+		cp.SetMediaType(astiav.MediaTypeAudio)
 		if m.opts.AudioSampleRate > 0 {
-			audioCP.SetSampleRate(m.opts.AudioSampleRate)
+			cp.SetSampleRate(m.opts.AudioSampleRate)
 		}
 		switch m.opts.AudioChannels {
 		case 1:
-			audioCP.SetChannelLayout(astiav.ChannelLayoutMono)
+			cp.SetChannelLayout(astiav.ChannelLayoutMono)
 		case 2:
-			audioCP.SetChannelLayout(astiav.ChannelLayoutStereo)
+			cp.SetChannelLayout(astiav.ChannelLayoutStereo)
 		case 6:
-			audioCP.SetChannelLayout(astiav.ChannelLayout5Point1)
+			cp.SetChannelLayout(astiav.ChannelLayout5Point1)
 		case 8:
-			audioCP.SetChannelLayout(astiav.ChannelLayout7Point1)
+			cp.SetChannelLayout(astiav.ChannelLayout7Point1)
 		}
 		if len(m.opts.AudioExtradata) > 0 {
-			if err := audioCP.SetExtraData(m.opts.AudioExtradata); err != nil {
-				audioCP.Free()
-				sm.Close()
-				f.Close()
+			if err := cp.SetExtraData(m.opts.AudioExtradata); err != nil {
+				fc.Free()
+				m.fc = nil
 				return fmt.Errorf("set audio extradata: %w", err)
 			}
 		}
-		as, err := sm.AddStream(audioCP)
-		audioCP.Free()
-		if err != nil {
-			sm.Close()
-			f.Close()
-			return fmt.Errorf("add audio stream: %w", err)
-		}
-		seg.audioIdx = as.Index()
+		as.SetTimeBase(m.opts.AudioTimeBase)
+		m.audioIdx = as.Index()
 	}
 
-	if err := sm.WriteHeader(); err != nil {
-		sm.Close()
-		f.Close()
+	dict := astiav.NewDictionary()
+	defer dict.Free()
+	dict.Set("hls_time", strconv.Itoa(m.opts.SegmentDurationSec), 0)
+	dict.Set("hls_segment_filename", filepath.Join(m.opts.OutputDir, "seg%d.ts"), 0)
+	dict.Set("hls_list_size", "0", 0)
+	dict.Set("hls_flags", "append_list", 0)
+
+	if err := fc.WriteHeader(dict); err != nil {
+		fc.Free()
+		m.fc = nil
 		return fmt.Errorf("write header: %w", err)
 	}
 
-	m.seg = seg
+	if m.videoIdx >= 0 {
+		m.videoOutTB = fc.Streams()[m.videoIdx].TimeBase()
+		fmt.Printf("[HLS_DEBUG] video input TB: %d/%d output TB: %d/%d\n", m.opts.VideoTimeBase.Num(), m.opts.VideoTimeBase.Den(), m.videoOutTB.Num(), m.videoOutTB.Den())
+	}
+	if m.audioIdx >= 0 {
+		m.audioOutTB = fc.Streams()[m.audioIdx].TimeBase()
+		fmt.Printf("[HLS_DEBUG] audio input TB: %d/%d output TB: %d/%d\n", m.opts.AudioTimeBase.Num(), m.opts.AudioTimeBase.Den(), m.audioOutTB.Num(), m.audioOutTB.Den())
+	}
+
 	return nil
 }
 
-func (m *HLSMuxer) closeSegmentWithDTS(nextDTS int64) (float64, error) {
-	if m.seg == nil {
-		return 0, nil
+func (m *HLSMuxer) fixVideoDuration(pkt *astiav.Packet) {
+	if pkt.Duration() > 0 {
+		return
 	}
-
-	var dur float64
-	if m.seg.startPTSSet {
-		endDTS := nextDTS
-		if endDTS == 0 && m.seg.videoDTSInit {
-			endDTS = m.seg.videoDTS
-		}
-		tb := m.opts.VideoTimeBase
-		if tb.Den() > 0 && endDTS > m.seg.startPTS {
-			dur = float64(endDTS-m.seg.startPTS) * float64(tb.Num()) / float64(tb.Den())
-		}
+	fps := m.opts.VideoFrameRate
+	if fps <= 0 {
+		fps = 25
 	}
-	if dur <= 0 {
-		dur = float64(m.opts.SegmentDurationSec)
+	outTB := m.videoOutTB
+	if outTB.Den() > 0 && outTB.Num() > 0 {
+		pkt.SetDuration(int64(outTB.Den()) / (int64(fps) * int64(outTB.Num())))
 	}
-
-	if err := m.seg.muxer.Close(); err != nil {
-		m.seg.file.Close()
-		return dur, fmt.Errorf("close segment muxer: %w", err)
-	}
-	m.seg.file.Close()
-
-	m.segDurations = append(m.segDurations, dur)
-	m.segCount++
-	m.seg = nil
-
-	m.writePlaylist(false)
-
-	return dur, nil
 }
 
-func (m *HLSMuxer) segmentDurationAtDTS(dts int64) float64 {
-	if m.seg == nil || !m.seg.startPTSSet {
-		return 0
+func (m *HLSMuxer) fixAudioDuration(pkt *astiav.Packet) {
+	if pkt.Duration() > 0 {
+		return
 	}
-	tb := m.opts.VideoTimeBase
-	if tb.Den() == 0 {
-		return 0
+	frameSize := m.opts.AudioFrameSize
+	if frameSize <= 0 {
+		frameSize = 1024
 	}
-	return float64(dts-m.seg.startPTS) * float64(tb.Num()) / float64(tb.Den())
+	sampleRate := m.opts.AudioSampleRate
+	if sampleRate <= 0 {
+		sampleRate = 48000
+	}
+	outTB := m.audioOutTB
+	if outTB.Den() > 0 && outTB.Num() > 0 {
+		pkt.SetDuration(int64(frameSize) * int64(outTB.Den()) / (int64(sampleRate) * int64(outTB.Num())))
+	}
 }
 
 func (m *HLSMuxer) WriteVideoPacket(pkt *astiav.Packet) error {
@@ -218,52 +192,17 @@ func (m *HLSMuxer) WriteVideoPacket(pkt *astiav.Packet) error {
 	if m.closed {
 		return errors.New("avmux: muxer is closed")
 	}
-	if m.seg == nil || m.seg.videoIdx < 0 {
+	if m.fc == nil || m.videoIdx < 0 {
 		return errors.New("avmux: no video track configured")
 	}
 
-	isKeyframe := pkt.Flags().Has(astiav.PacketFlagKey)
+	pkt.RescaleTs(m.opts.VideoTimeBase, m.videoOutTB)
+	pkt.SetStreamIndex(m.videoIdx)
+	m.fixVideoDuration(pkt)
 
-	if isKeyframe && m.seg.videoPktCount > 0 {
-		dur := m.segmentDurationAtDTS(pkt.Dts())
-		if dur >= float64(m.opts.SegmentDurationSec) {
-			if _, err := m.closeSegmentWithDTS(pkt.Dts()); err != nil {
-				return err
-			}
-			if err := m.openSegment(); err != nil {
-				return err
-			}
-		}
-	}
-
-	if !m.seg.startPTSSet {
-		m.seg.startPTS = pkt.Dts()
-		if m.seg.startPTS == astiav.NoPtsValue {
-			m.seg.startPTS = pkt.Pts()
-		}
-		m.seg.startPTSSet = true
-	}
-
-	pkt.SetStreamIndex(m.seg.videoIdx)
-
-	dts := pkt.Dts()
-	if m.seg.videoDTSInit && dts <= m.seg.videoDTS {
-		dts = m.seg.videoDTS + 1
-		pts := pkt.Pts()
-		if pts < dts {
-			pts = dts
-		}
-		pkt.SetDts(dts)
-		pkt.SetPts(pts)
-	}
-	m.seg.videoDTS = dts
-	m.seg.videoDTSInit = true
-
-	if err := m.seg.muxer.WritePacket(pkt); err != nil {
+	if err := m.fc.WriteInterleavedFrame(pkt); err != nil {
 		return fmt.Errorf("avmux: write video packet: %w", err)
 	}
-	m.seg.pktCount++
-	m.seg.videoPktCount++
 	return nil
 }
 
@@ -273,29 +212,17 @@ func (m *HLSMuxer) WriteAudioPacket(pkt *astiav.Packet) error {
 	if m.closed {
 		return errors.New("avmux: muxer is closed")
 	}
-	if m.seg == nil || m.seg.audioIdx < 0 {
+	if m.fc == nil || m.audioIdx < 0 {
 		return errors.New("avmux: no audio track configured")
 	}
 
-	pkt.SetStreamIndex(m.seg.audioIdx)
+	pkt.RescaleTs(m.opts.AudioTimeBase, m.audioOutTB)
+	pkt.SetStreamIndex(m.audioIdx)
+	m.fixAudioDuration(pkt)
 
-	dts := pkt.Dts()
-	if m.seg.audioDTSInit && dts <= m.seg.audioDTS {
-		dts = m.seg.audioDTS + 1
-		pts := pkt.Pts()
-		if pts < dts {
-			pts = dts
-		}
-		pkt.SetDts(dts)
-		pkt.SetPts(pts)
-	}
-	m.seg.audioDTS = dts
-	m.seg.audioDTSInit = true
-
-	if err := m.seg.muxer.WritePacket(pkt); err != nil {
+	if err := m.fc.WriteInterleavedFrame(pkt); err != nil {
 		return fmt.Errorf("avmux: write audio packet: %w", err)
 	}
-	m.seg.pktCount++
 	return nil
 }
 
@@ -307,19 +234,16 @@ func (m *HLSMuxer) Close() error {
 	}
 	m.closed = true
 
-	var firstErr error
-	if m.seg != nil && m.seg.pktCount > 0 {
-		if _, err := m.closeSegmentWithDTS(0); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	} else if m.seg != nil {
-		m.seg.muxer.Close()
-		m.seg.file.Close()
-		os.Remove(m.seg.path)
-		m.seg = nil
+	if m.fc == nil {
+		return nil
 	}
 
-	m.writePlaylist(true)
+	var firstErr error
+	if err := m.fc.WriteTrailer(); err != nil {
+		firstErr = err
+	}
+	m.fc.Free()
+	m.fc = nil
 
 	return firstErr
 }
@@ -331,63 +255,37 @@ func (m *HLSMuxer) Reset() error {
 		return nil
 	}
 
-	if m.seg != nil {
-		m.seg.muxer.Close()
-		m.seg.file.Close()
-		m.seg = nil
+	if m.fc != nil {
+		m.fc.WriteTrailer() //nolint:errcheck
+		m.fc.Free()
+		m.fc = nil
 	}
 
-	for i := 0; i < m.segCount; i++ {
-		os.Remove(filepath.Join(m.opts.OutputDir, fmt.Sprintf("seg%d.ts", i)))
+	matches, _ := filepath.Glob(filepath.Join(m.opts.OutputDir, "seg*.ts"))
+	for _, f := range matches {
+		os.Remove(f)
 	}
 	os.Remove(filepath.Join(m.opts.OutputDir, "playlist.m3u8"))
 
-	m.segCount = 0
-	m.segDurations = nil
+	m.videoIdx = -1
+	m.audioIdx = -1
 
-	return m.openSegment()
+	return m.openFormatContext()
 }
 
 func (m *HLSMuxer) SegmentCount() int {
 	m.mu.Lock()
-	n := m.segCount
-	m.mu.Unlock()
-	return n
+	defer m.mu.Unlock()
+	matches, _ := filepath.Glob(filepath.Join(m.opts.OutputDir, "seg*.ts"))
+	return len(matches)
 }
 
 func (m *HLSMuxer) PlaylistContent() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.buildPlaylist(false)
-}
-
-func (m *HLSMuxer) buildPlaylist(endlist bool) string {
-	maxDur := m.opts.SegmentDurationSec + 1
-	for _, d := range m.segDurations {
-		if int(d)+1 > maxDur {
-			maxDur = int(d) + 1
-		}
+	data, err := os.ReadFile(filepath.Join(m.opts.OutputDir, "playlist.m3u8"))
+	if err != nil {
+		return ""
 	}
-
-	pl := "#EXTM3U\n"
-	pl += "#EXT-X-VERSION:3\n"
-	pl += fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", maxDur)
-	pl += "#EXT-X-MEDIA-SEQUENCE:0\n"
-
-	for i, dur := range m.segDurations {
-		pl += fmt.Sprintf("#EXTINF:%.3f,\n", dur)
-		pl += fmt.Sprintf("seg%d.ts\n", i)
-	}
-
-	if endlist {
-		pl += "#EXT-X-ENDLIST\n"
-	}
-
-	return pl
-}
-
-func (m *HLSMuxer) writePlaylist(endlist bool) {
-	content := m.buildPlaylist(endlist)
-	path := filepath.Join(m.opts.OutputDir, "playlist.m3u8")
-	atomicWrite(path, []byte(content)) //nolint:errcheck
+	return string(data)
 }
