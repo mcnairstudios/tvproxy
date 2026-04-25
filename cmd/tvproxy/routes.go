@@ -84,6 +84,8 @@ func registerRoutes(r chi.Router, h routeHandlers, authMW *middleware.AuthMiddle
 	r.Post("/vod/{sessionID}/mse/seek", h.vod.MSESeek)
 	r.Get("/vod/{sessionID}/mse/debug", h.vod.MSEDebug)
 	r.Get("/vod/mse-worker.js", h.vod.MSEWorkerJS)
+	r.Get("/vod/{sessionID}/hls/playlist.m3u8", h.vod.HLSPlaylist)
+	r.Get("/vod/{sessionID}/hls/{segment}", h.vod.HLSSegment)
 
 	r.Group(func(r chi.Router) {
 		r.Use(authMW.Authenticate)

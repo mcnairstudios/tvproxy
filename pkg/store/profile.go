@@ -56,10 +56,6 @@ func (s *ProfileStoreImpl) Load() error {
 	}
 	changed := false
 	for i := range profiles {
-		if profiles[i].Delivery == "hls" {
-			profiles[i].Delivery = "mse"
-			changed = true
-		}
 		if profiles[i].Name == "Browser" && profiles[i].IsClient && profiles[i].Delivery == "" {
 			profiles[i].Delivery = "mse"
 			changed = true
@@ -73,7 +69,7 @@ func (s *ProfileStoreImpl) Load() error {
 
 	if changed {
 		s.Save()
-		s.log.Info().Msg("migrated hls delivery to mse")
+		s.log.Info().Msg("migrated empty browser delivery to mse")
 	}
 	return nil
 }

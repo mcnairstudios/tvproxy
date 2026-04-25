@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -153,8 +155,8 @@ func (h *VODHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
 
 	delivery := "stream"
 	if sess := h.vodService.GetSession(sessionID); sess != nil {
-		if sess.Delivery == "mse" {
-			delivery = "mse"
+		if sess.Delivery == "mse" || sess.Delivery == "hls" {
+			delivery = sess.Delivery
 		}
 	}
 
@@ -191,8 +193,8 @@ func (h *VODHandler) CreateChannelSession(w http.ResponseWriter, r *http.Request
 
 	delivery := "stream"
 	if sess := h.vodService.GetSession(sessionID); sess != nil {
-		if sess.Delivery == "mse" {
-			delivery = "mse"
+		if sess.Delivery == "mse" || sess.Delivery == "hls" {
+			delivery = sess.Delivery
 		}
 	}
 
@@ -557,8 +559,10 @@ func (h *VODHandler) PlayCompletedRecording(w http.ResponseWriter, r *http.Reque
 	}
 
 	delivery := "stream"
-	if sess := h.vodService.GetSession(sessionID); sess != nil && sess.Delivery == "mse" {
-		delivery = "mse"
+	if sess := h.vodService.GetSession(sessionID); sess != nil {
+		if sess.Delivery == "mse" || sess.Delivery == "hls" {
+			delivery = sess.Delivery
+		}
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{
@@ -772,6 +776,54 @@ func (h *VODHandler) MSEWorkerJS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/javascript")
 	w.Header().Set("Cache-Control", "no-cache")
 	fmt.Fprint(w, mseWorkerJS)
+}
+
+func (h *VODHandler) HLSPlaylist(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	sess := h.vodService.GetSession(sessionID)
+	if sess == nil {
+		respondError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if sess.Delivery != "hls" {
+		respondError(w, http.StatusBadRequest, "session is not HLS delivery")
+		return
+	}
+	playlistPath := filepath.Join(sess.OutputDir, "segments", "playlist.m3u8")
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(playlistPath); err == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-cache, no-store")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	http.ServeFile(w, r, playlistPath)
+}
+
+func (h *VODHandler) HLSSegment(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	segment := chi.URLParam(r, "segment")
+	sess := h.vodService.GetSession(sessionID)
+	if sess == nil {
+		respondError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if sess.Delivery != "hls" {
+		respondError(w, http.StatusBadRequest, "session is not HLS delivery")
+		return
+	}
+	if strings.Contains(segment, "/") || strings.Contains(segment, "..") {
+		respondError(w, http.StatusBadRequest, "invalid segment name")
+		return
+	}
+	segmentPath := filepath.Join(sess.OutputDir, "segments", segment)
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Cache-Control", "no-cache, no-store")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	http.ServeFile(w, r, segmentPath)
 }
 
 const mseWorkerJS = `

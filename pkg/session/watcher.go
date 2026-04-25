@@ -118,7 +118,7 @@ func (w *Watcher) scanExisting() {
 	}
 	for _, e := range entries {
 		if !e.IsDir() {
-			w.handleFile(filepath.Join(w.dir, e.Name()))
+			w.handleFile(filepath.Join(w.dir, e.Name()), fsnotify.Create)
 		}
 	}
 
@@ -128,7 +128,7 @@ func (w *Watcher) scanExisting() {
 	}
 	for _, e := range segEntries {
 		if !e.IsDir() {
-			w.handleFile(filepath.Join(w.segDir, e.Name()))
+			w.handleFile(filepath.Join(w.segDir, e.Name()), fsnotify.Create)
 		}
 	}
 }
@@ -144,7 +144,7 @@ func (w *Watcher) run() {
 			if event.Op&(fsnotify.Create|fsnotify.Write) == 0 {
 				continue
 			}
-			w.handleFile(event.Name)
+			w.handleFile(event.Name, event.Op)
 
 		case err, ok := <-w.watcher.Errors:
 			if !ok {
@@ -155,7 +155,7 @@ func (w *Watcher) run() {
 	}
 }
 
-func (w *Watcher) handleFile(path string) {
+func (w *Watcher) handleFile(path string, op fsnotify.Op) {
 	name := filepath.Base(path)
 
 	switch {
@@ -174,6 +174,9 @@ func (w *Watcher) handleFile(path string) {
 		n := w.audioSegs.Add(path)
 		w.log.Debug().Str("file", name).Int("count", n).Msg("audio segment")
 	case strings.HasPrefix(name, "seg") && strings.HasSuffix(name, ".ts"):
+		if op&fsnotify.Create == 0 {
+			return
+		}
 		n := w.videoSegs.Add(path)
 		w.log.Debug().Str("file", name).Int("count", n).Msg("HLS segment")
 	}

@@ -3898,7 +3898,41 @@
     var mseSeekCounter = 0;
     var mseSeekingPct = -1;
     var mseDuration = 0;
+    var hlsInstance = null;
+    var bufferWatchInterval = null;
 
+    var currentBufferAhead = 0;
+
+    function startBufferWatch(vidEl) {
+      stopBufferWatch();
+      bufferWatchInterval = setInterval(function() {
+        if (!vidEl || vidEl.paused || !vidEl.buffered.length) return;
+        var buffered = vidEl.buffered;
+        var ahead = 0;
+        for (var i = 0; i < buffered.length; i++) {
+          if (buffered.start(i) <= vidEl.currentTime && buffered.end(i) > vidEl.currentTime) {
+            ahead = buffered.end(i) - vidEl.currentTime;
+            break;
+          }
+        }
+        currentBufferAhead = ahead;
+        var rate;
+        if (ahead < 6) {
+          rate = 0.9;
+        } else if (ahead < 8) {
+          rate = 0.95;
+        } else if (ahead < 9) {
+          rate = 0.99;
+        } else {
+          rate = 1.0;
+        }
+        if (vidEl.playbackRate !== rate) vidEl.playbackRate = rate;
+      }, 250);
+    }
+
+    function stopBufferWatch() {
+      if (bufferWatchInterval) { clearInterval(bufferWatchInterval); bufferWatchInterval = null; }
+    }
 
     function cleanup() {
       activePlayerCleanup = null;
@@ -3912,6 +3946,8 @@
       if (signalInterval) { clearInterval(signalInterval); signalInterval = null; }
       if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
       mseCleanup();
+      hlsCleanup();
+      stopBufferWatch();
       if (videoEl) {
         videoEl.pause();
         videoEl.removeAttribute('src');
@@ -4019,6 +4055,41 @@
       mseAudioSeq = 0;
     }
 
+    function hlsCleanup() {
+      if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+      }
+    }
+
+    function startHLSPlayback(vidEl, dvrObj) {
+      hlsCleanup();
+      var hlsUrl = '/vod/' + dvrObj.id + '/hls/playlist.m3u8';
+      if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+        hlsInstance = new Hls({ lowLatencyMode: false });
+        hlsInstance.loadSource(hlsUrl);
+        hlsInstance.attachMedia(vidEl);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
+          vidEl.play().catch(function() {});
+          startBufferWatch(vidEl);
+        });
+        hlsInstance.on(Hls.Events.ERROR, function(event, data) {
+          if (data.fatal) {
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              hlsInstance.startLoad();
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hlsInstance.recoverMediaError();
+            } else {
+              handleRetry();
+            }
+          }
+        });
+      } else if (vidEl.canPlayType('application/vnd.apple.mpegurl')) {
+        vidEl.src = hlsUrl;
+        vidEl.play().catch(function() {});
+      }
+    }
+
     function startMSEPlayback(vidEl, dvrObj, seekPos) {
       if (mseWorker) { mseWorker.postMessage({type: 'stop'}); mseWorker.terminate(); }
       mseAppendQueues.video = [];
@@ -4051,6 +4122,7 @@
                   console.error('play:', e);
                   setTimeout(tryPlay, 300);
                 });
+                startBufferWatch(vidEl);
               } else if (mseSeekTarget > 0) {
                 vidEl.currentTime = mseSeekTarget;
                 vidEl.play().catch(function(e) {
@@ -4571,7 +4643,8 @@
     }).catch(function() {}) : Promise.resolve();
 
     var isMSE = dvr && dvr.delivery === 'mse';
-    var streamReady = isMSE ? Promise.resolve() : waitForStream();
+    var isHLS = dvr && dvr.delivery === 'hls';
+    var streamReady = (isMSE || isHLS) ? Promise.resolve() : waitForStream();
 
     Promise.all([streamReady, epgReady]).then(function() {
       statusEl.style.color = '#ffa726';
@@ -4579,6 +4652,9 @@
 
       if (isMSE) {
         startMSEPlayback(videoEl, dvr, 0);
+      } else if (isHLS) {
+        statusEl.textContent = 'Buffering HLS...';
+        startHLSPlayback(videoEl, dvr);
       } else {
         videoEl.src = streamSrc;
         videoEl.play().catch(function() {});
@@ -4646,6 +4722,12 @@
         statusEl.style.color = '#ffa726';
         statusEl.textContent = 'Reconnecting...';
         startMSEPlayback(videoEl, dvr, 0);
+        return;
+      }
+      if (dvr && dvr.delivery === 'hls') {
+        statusEl.style.color = '#ffa726';
+        statusEl.textContent = 'Reconnecting HLS...';
+        startHLSPlayback(videoEl, dvr);
         return;
       }
       if (videoEl) {
@@ -4841,6 +4923,10 @@
       }
       var playbackParts = ['buf ' + esc(buf)];
       if (transcodeSpeed > 0) playbackParts.push(transcodeSpeed.toFixed(1) + 'x');
+      if (videoEl && videoEl.playbackRate !== 1.0) {
+        var rateColor = videoEl.playbackRate < 0.93 ? '#ff6b6b' : '#ffb300';
+        playbackParts.push('<span style="color:' + rateColor + '">' + videoEl.playbackRate.toFixed(2) + 'x rate</span>');
+      }
       var quality = videoEl && videoEl.getVideoPlaybackQuality ? videoEl.getVideoPlaybackQuality() : null;
       if (quality) {
         var dropColor = quality.droppedVideoFrames > 50 ? '#ff6b6b' : quality.droppedVideoFrames > 0 ? '#ffb300' : '#4caf50';
