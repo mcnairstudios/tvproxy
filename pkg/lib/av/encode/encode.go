@@ -24,6 +24,7 @@ type EncodeOpts struct {
 	Width            int
 	Height           int
 	EncoderName      string
+	Framerate        int
 }
 
 var encoderTable = map[string]map[string]string{
@@ -169,8 +170,12 @@ func NewVideoEncoder(opts EncodeOpts) (*Encoder, error) {
 		cc.SetGopSize(opts.KeyframeInterval)
 	}
 
-	cc.SetTimeBase(astiav.NewRational(1, 25))
-	cc.SetFramerate(astiav.NewRational(25, 1))
+	fps := opts.Framerate
+	if fps <= 0 {
+		fps = 25
+	}
+	cc.SetTimeBase(astiav.NewRational(1, fps))
+	cc.SetFramerate(astiav.NewRational(fps, 1))
 
 	cc.SetFlags(astiav.NewCodecContextFlags(astiav.CodecContextFlagGlobalHeader))
 

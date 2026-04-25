@@ -598,6 +598,13 @@ func NewFullTranscodePipeline(opts FullTranscodeOpts) (*FullTranscodePipeline, e
 	if outCodec == "" {
 		outCodec = "h264"
 	}
+	videoFPS := 25
+	if info.Video.FramerateN > 0 && info.Video.FramerateD > 0 {
+		videoFPS = info.Video.FramerateN / info.Video.FramerateD
+		if videoFPS <= 0 {
+			videoFPS = 25
+		}
+	}
 	p.videoEnc, err = encode.NewVideoEncoder(encode.EncodeOpts{
 		Codec:       outCodec,
 		HWAccel:     opts.HWAccel,
@@ -605,6 +612,7 @@ func NewFullTranscodePipeline(opts FullTranscodeOpts) (*FullTranscodePipeline, e
 		Width:       outW,
 		Height:      outH,
 		EncoderName: opts.EncoderName,
+		Framerate:   videoFPS,
 	})
 	if err != nil {
 		p.fullClose()
@@ -1023,6 +1031,13 @@ func NewMSETranscodePipeline(opts MSETranscodeOpts) (*MSETranscodePipeline, erro
 	if outCodec == "" {
 		outCodec = "h264"
 	}
+	videoFPS := 25
+	if info.Video.FramerateN > 0 && info.Video.FramerateD > 0 {
+		videoFPS = info.Video.FramerateN / info.Video.FramerateD
+		if videoFPS <= 0 {
+			videoFPS = 25
+		}
+	}
 	p.videoEnc, err = encode.NewVideoEncoder(encode.EncodeOpts{
 		Codec:       outCodec,
 		HWAccel:     opts.HWAccel,
@@ -1030,6 +1045,7 @@ func NewMSETranscodePipeline(opts MSETranscodeOpts) (*MSETranscodePipeline, erro
 		Width:       outW,
 		Height:      outH,
 		EncoderName: opts.EncoderName,
+		Framerate:   videoFPS,
 	})
 	if err != nil {
 		p.closeAll()
@@ -2028,6 +2044,13 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 	if outCodec == "" {
 		outCodec = "h264"
 	}
+	videoFPS := 25
+	if info.Video.FramerateN > 0 && info.Video.FramerateD > 0 {
+		videoFPS = info.Video.FramerateN / info.Video.FramerateD
+		if videoFPS <= 0 {
+			videoFPS = 25
+		}
+	}
 	p.videoEnc, err = encode.NewVideoEncoder(encode.EncodeOpts{
 		Codec:       outCodec,
 		HWAccel:     opts.HWAccel,
@@ -2035,6 +2058,7 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 		Width:       outW,
 		Height:      outH,
 		EncoderName: opts.EncoderName,
+		Framerate:   videoFPS,
 	})
 	if err != nil {
 		p.closeHLSTranscode()
@@ -2053,14 +2077,6 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 		if info.AudioTracks[i].Index == opts.AudioIndex {
 			audioTrack = &info.AudioTracks[i]
 			break
-		}
-	}
-
-	videoFPS := 25
-	if info.Video.FramerateN > 0 && info.Video.FramerateD > 0 {
-		videoFPS = info.Video.FramerateN / info.Video.FramerateD
-		if videoFPS <= 0 {
-			videoFPS = 25
 		}
 	}
 
