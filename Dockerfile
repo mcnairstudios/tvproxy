@@ -40,6 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libv4l-dev \
     libkvazaar-dev \
     librist-dev \
+    librtmp-dev \
+    libsmbclient-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN wget -q https://github.com/FFmpeg/nv-codec-headers/archive/refs/tags/n12.2.72.0.tar.gz \
@@ -63,7 +65,7 @@ RUN wget -q https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz \
        --enable-libsoxr --enable-libwebp --enable-libtheora --enable-libxvid \
        --enable-libzimg --enable-libzmq \
        --enable-libopenjpeg --enable-libopencore-amrnb --enable-libopencore-amrwb \
-       --enable-libv4l2 \
+       --enable-libv4l2 --enable-librtmp --enable-libsmbclient \
     && make -j$(nproc) \
     && make install \
     && ldconfig \
