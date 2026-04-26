@@ -102,6 +102,26 @@ RUN apt-get update \
         libva2 \
         libva-drm2 \
         libdrm2 \
+        libssl3t64 \
+        libsrt1.5-openssl \
+        libass9 \
+        libfreetype6 \
+        libfontconfig1 \
+        libfribidi0 \
+        libharfbuzz0b \
+        libsoxr0 \
+        libxml2 \
+        libwebp7 \
+        libtheora0 \
+        libxvidcore4 \
+        libzimg2 \
+        libzmq5 \
+        libopenjp2-7 \
+        libopencore-amrnb0 \
+        libopencore-amrwb0 \
+        libv4l-0 \
+        libsmbclient \
+        librist4 \
     && rm -rf /var/lib/apt/lists/*
 
 # GPU drivers + tools (amd64 only — arm64 has no Intel/AMD GPU support)
