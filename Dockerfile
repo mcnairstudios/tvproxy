@@ -38,9 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopencore-amrnb-dev \
     libopencore-amrwb-dev \
     libv4l-dev \
-    libkvazaar-dev \
     librist-dev \
-    librtmp-dev \
     libsmbclient-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -58,14 +56,14 @@ RUN wget -q https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz \
        --enable-openssl --enable-vaapi --enable-nvenc --enable-nvdec --enable-cuvid \
        --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libopus \
        --enable-libvorbis --enable-libvpx --enable-libdav1d --enable-libfdk-aac \
-       --enable-libaom --enable-libsvtav1 --enable-libkvazaar \
+       --enable-libaom --enable-libsvtav1 \
        --enable-libsrt --enable-librist --enable-libxml2 \
        --enable-libass --enable-libfreetype --enable-libfontconfig \
        --enable-libfribidi --enable-libharfbuzz \
        --enable-libsoxr --enable-libwebp --enable-libtheora --enable-libxvid \
        --enable-libzimg --enable-libzmq \
        --enable-libopenjpeg --enable-libopencore-amrnb --enable-libopencore-amrwb \
-       --enable-libv4l2 --enable-librtmp --enable-libsmbclient \
+       --enable-libv4l2 --enable-libsmbclient \
     && make -j$(nproc) \
     && make install \
     && ldconfig \
