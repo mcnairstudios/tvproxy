@@ -3,6 +3,8 @@ package encode
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/asticode/go-astiav"
 )
@@ -445,4 +447,55 @@ func (e *Encoder) freeResources() {
 		e.hwCtx.Free()
 		e.hwCtx = nil
 	}
+}
+
+var (
+	probedBitDepthMu    sync.Mutex
+	probedBitDepthCache = map[string]int{}
+)
+
+func ProbeMaxBitDepth(hwaccel string) int {
+	if hwaccel == "" || hwaccel == "none" || hwaccel == "default" {
+		return 0
+	}
+
+	probedBitDepthMu.Lock()
+	defer probedBitDepthMu.Unlock()
+
+	if cached, ok := probedBitDepthCache[hwaccel]; ok {
+		return cached
+	}
+
+	result := probeMaxBitDepthUncached(hwaccel)
+	probedBitDepthCache[hwaccel] = result
+	return result
+}
+
+func probeMaxBitDepthUncached(hwaccel string) int {
+	devTypeName, ok := hwDeviceType[hwaccel]
+	if !ok {
+		return 0
+	}
+
+	hwType := astiav.FindHardwareDeviceTypeByName(devTypeName)
+	ctx, err := astiav.CreateHardwareDeviceContext(hwType, "", nil, 0)
+	if err != nil {
+		return 0
+	}
+	defer ctx.Free()
+
+	constraints := ctx.HardwareFramesConstraints()
+	if constraints == nil {
+		return 0
+	}
+	defer constraints.Free()
+
+	for _, pf := range constraints.ValidSoftwarePixelFormats() {
+		name := pf.Name()
+		if strings.Contains(name, "10") {
+			return 0
+		}
+	}
+
+	return 8
 }

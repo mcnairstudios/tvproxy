@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/gavinmcnair/tvproxy/pkg/config"
+	"github.com/gavinmcnair/tvproxy/pkg/lib/av/encode"
 	"github.com/gavinmcnair/tvproxy/pkg/media"
 	"github.com/gavinmcnair/tvproxy/pkg/session"
 	"github.com/gavinmcnair/tvproxy/pkg/store"
@@ -187,7 +188,11 @@ func (s *VODService) resolveDecodeHWAccel(ctx context.Context) string {
 }
 
 func (s *VODService) resolveMaxBitDepth(ctx context.Context) int {
-	return s.settingsService.ResolveMaxBitDepth(ctx)
+	if manual := s.settingsService.ResolveMaxBitDepth(ctx); manual > 0 {
+		return manual
+	}
+	hwaccel, _ := s.settingsService.ResolveGlobalDefaults(ctx)
+	return encode.ProbeMaxBitDepth(hwaccel)
 }
 
 func (s *VODService) autoSelectSourceProfile(ctx context.Context, streamURL string) *models.SourceProfile {
