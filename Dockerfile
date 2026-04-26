@@ -20,7 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libva-dev \
     libdrm-dev \
     libssl-dev \
-    libsvtav1-dev \
     libsrt-openssl-dev \
     libass-dev \
     libfreetype-dev \
@@ -56,7 +55,7 @@ RUN wget -q https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz \
        --enable-openssl --enable-vaapi --enable-nvenc --enable-nvdec --enable-cuvid \
        --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libopus \
        --enable-libvorbis --enable-libvpx --enable-libdav1d --enable-libfdk-aac \
-       --enable-libaom --enable-libsvtav1 \
+       --enable-libaom \
        --enable-libsrt --enable-librist --enable-libxml2 \
        --enable-libass --enable-libfreetype --enable-libfontconfig \
        --enable-libfribidi --enable-libharfbuzz \
