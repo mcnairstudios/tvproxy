@@ -337,7 +337,8 @@ func (s *RecordingStoreImpl) scanRecordingDir(recDir, streamHash, userID string,
 		return
 	}
 	for _, f := range files {
-		if f.IsDir() || !strings.HasSuffix(f.Name(), ".mp4") {
+		ext := filepath.Ext(f.Name())
+		if f.IsDir() || (ext != ".mp4" && ext != ".ts" && ext != ".mkv") {
 			continue
 		}
 		info, err := f.Info()
@@ -352,7 +353,7 @@ func (s *RecordingStoreImpl) scanRecordingDir(recDir, streamHash, userID string,
 			ModTime:  info.ModTime().Format(time.RFC3339),
 		}
 
-		jsonName := strings.TrimSuffix(f.Name(), ".mp4") + ".json"
+		jsonName := strings.TrimSuffix(f.Name(), filepath.Ext(f.Name())) + ".json"
 		jsonPath := filepath.Join(recDir, jsonName)
 		if data, err := os.ReadFile(jsonPath); err == nil {
 			meta := s.parseRecordingMeta(data)
