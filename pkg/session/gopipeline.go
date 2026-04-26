@@ -605,6 +605,9 @@ func NewFullTranscodePipeline(opts FullTranscodeOpts) (*FullTranscodePipeline, e
 			videoFPS = 25
 		}
 	}
+	if info.Video.Interlaced && p.deint != nil && videoFPS > 25 {
+		videoFPS = videoFPS / 2
+	}
 	p.videoEnc, err = encode.NewVideoEncoder(encode.EncodeOpts{
 		Codec:       outCodec,
 		HWAccel:     opts.HWAccel,
@@ -1037,6 +1040,9 @@ func NewMSETranscodePipeline(opts MSETranscodeOpts) (*MSETranscodePipeline, erro
 		if videoFPS <= 0 {
 			videoFPS = 25
 		}
+	}
+	if info.Video.Interlaced && p.deint != nil && videoFPS > 25 {
+		videoFPS = videoFPS / 2
 	}
 	p.videoEnc, err = encode.NewVideoEncoder(encode.EncodeOpts{
 		Codec:       outCodec,
@@ -2050,6 +2056,9 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 		if videoFPS <= 0 {
 			videoFPS = 25
 		}
+	}
+	if info.Video.Interlaced && p.deint != nil && videoFPS > 25 {
+		videoFPS = videoFPS / 2
 	}
 	p.videoEnc, err = encode.NewVideoEncoder(encode.EncodeOpts{
 		Codec:       outCodec,
