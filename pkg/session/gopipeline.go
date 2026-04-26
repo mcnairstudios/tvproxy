@@ -566,10 +566,16 @@ func NewFullTranscodePipeline(opts FullTranscodeOpts) (*FullTranscodePipeline, e
 		return nil, fmt.Errorf("gopipeline: video decoder: %w", err)
 	}
 
+	srcPixFmt := astiav.PixelFormatYuv420P
+	needsBitDepthConversion := opts.MaxBitDepth > 0 && info.Video.BitDepth > opts.MaxBitDepth
+	if needsBitDepthConversion {
+		srcPixFmt = astiav.PixelFormatYuv420P10Le
+	}
+
 	if opts.Deinterlace || info.Video.Interlaced {
 		p.deint, err = filter.NewDeinterlacer(
 			info.Video.Width, info.Video.Height,
-			astiav.PixelFormatYuv420P,
+			srcPixFmt,
 			astiav.NewRational(1, 90000),
 		)
 		if err != nil {
@@ -580,12 +586,15 @@ func NewFullTranscodePipeline(opts FullTranscodeOpts) (*FullTranscodePipeline, e
 
 	outW := info.Video.Width
 	outH := info.Video.Height
-	if opts.OutputHeight > 0 && opts.OutputHeight < info.Video.Height {
+	needsResolutionScale := opts.OutputHeight > 0 && opts.OutputHeight < info.Video.Height
+	if needsResolutionScale {
 		outH = opts.OutputHeight
 		outW = info.Video.Width * opts.OutputHeight / info.Video.Height
 		outW = outW &^ 1
+	}
+	if needsResolutionScale || needsBitDepthConversion {
 		p.scaler, err = scale.NewScaler(
-			info.Video.Width, info.Video.Height, astiav.PixelFormatYuv420P,
+			info.Video.Width, info.Video.Height, srcPixFmt,
 			outW, outH, astiav.PixelFormatYuv420P,
 		)
 		if err != nil {
@@ -1002,10 +1011,16 @@ func NewMSETranscodePipeline(opts MSETranscodeOpts) (*MSETranscodePipeline, erro
 		return nil, fmt.Errorf("gopipeline: video decoder: %w", err)
 	}
 
+	mseSrcPixFmt := astiav.PixelFormatYuv420P
+	mseNeedsBitDepthConversion := opts.MaxBitDepth > 0 && info.Video.BitDepth > opts.MaxBitDepth
+	if mseNeedsBitDepthConversion {
+		mseSrcPixFmt = astiav.PixelFormatYuv420P10Le
+	}
+
 	if opts.Deinterlace || info.Video.Interlaced {
 		p.deint, err = filter.NewDeinterlacer(
 			info.Video.Width, info.Video.Height,
-			astiav.PixelFormatYuv420P,
+			mseSrcPixFmt,
 			astiav.NewRational(1, 90000),
 		)
 		if err != nil {
@@ -1016,12 +1031,15 @@ func NewMSETranscodePipeline(opts MSETranscodeOpts) (*MSETranscodePipeline, erro
 
 	outW := info.Video.Width
 	outH := info.Video.Height
-	if opts.OutputHeight > 0 && opts.OutputHeight < info.Video.Height {
+	mseNeedsResolutionScale := opts.OutputHeight > 0 && opts.OutputHeight < info.Video.Height
+	if mseNeedsResolutionScale {
 		outH = opts.OutputHeight
 		outW = info.Video.Width * opts.OutputHeight / info.Video.Height
 		outW = outW &^ 1
+	}
+	if mseNeedsResolutionScale || mseNeedsBitDepthConversion {
 		p.scaler, err = scale.NewScaler(
-			info.Video.Width, info.Video.Height, astiav.PixelFormatYuv420P,
+			info.Video.Width, info.Video.Height, mseSrcPixFmt,
 			outW, outH, astiav.PixelFormatYuv420P,
 		)
 		if err != nil {
@@ -2018,10 +2036,16 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 		return nil, fmt.Errorf("gopipeline: video decoder: %w", err)
 	}
 
+	hlsSrcPixFmt := astiav.PixelFormatYuv420P
+	hlsNeedsBitDepthConversion := opts.MaxBitDepth > 0 && info.Video.BitDepth > opts.MaxBitDepth
+	if hlsNeedsBitDepthConversion {
+		hlsSrcPixFmt = astiav.PixelFormatYuv420P10Le
+	}
+
 	if opts.Deinterlace || info.Video.Interlaced {
 		p.deint, err = filter.NewDeinterlacer(
 			info.Video.Width, info.Video.Height,
-			astiav.PixelFormatYuv420P,
+			hlsSrcPixFmt,
 			astiav.NewRational(1, 90000),
 		)
 		if err != nil {
@@ -2032,12 +2056,15 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 
 	outW := info.Video.Width
 	outH := info.Video.Height
-	if opts.OutputHeight > 0 && opts.OutputHeight < info.Video.Height {
+	hlsNeedsResolutionScale := opts.OutputHeight > 0 && opts.OutputHeight < info.Video.Height
+	if hlsNeedsResolutionScale {
 		outH = opts.OutputHeight
 		outW = info.Video.Width * opts.OutputHeight / info.Video.Height
 		outW = outW &^ 1
+	}
+	if hlsNeedsResolutionScale || hlsNeedsBitDepthConversion {
 		p.scaler, err = scale.NewScaler(
-			info.Video.Width, info.Video.Height, astiav.PixelFormatYuv420P,
+			info.Video.Width, info.Video.Height, hlsSrcPixFmt,
 			outW, outH, astiav.PixelFormatYuv420P,
 		)
 		if err != nil {

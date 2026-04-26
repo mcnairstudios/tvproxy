@@ -57,6 +57,7 @@ type StartOpts struct {
 	EncoderBitrateKbps int
 	Delivery           string
 	OutputHeight       int
+	MaxBitDepth        int
 }
 
 type StreamProbeUpdater interface {
@@ -649,7 +650,7 @@ func (m *Manager) runPipeline(ctx context.Context, s *Session) {
 
 	encCodec := media.BaseCodec(outCodec)
 
-	maxBitDepth := 0
+	maxBitDepth := s.startOpts.MaxBitDepth
 
 	m.log.Info().
 		Str("session_id", s.ID).

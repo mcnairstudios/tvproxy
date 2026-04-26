@@ -9,9 +9,12 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"unsafe"
 
 	"github.com/asticode/go-astiav"
+	"github.com/rs/zerolog/log"
 )
 
 var hwAccelMap = map[string]astiav.HardwareDeviceType{
@@ -37,6 +40,16 @@ type DecodeOpts struct {
 }
 
 func NewVideoDecoderFromParams(cp *astiav.CodecParameters, opts DecodeOpts) (*Decoder, error) {
+	if opts.MaxBitDepth > 0 && opts.HWAccel != "" && opts.HWAccel != "none" &&
+		exceedsMaxBitDepth(cp.PixelFormat(), opts.MaxBitDepth) {
+		log.Warn().
+			Int("source_bit_depth", bitDepthFromPixelFormat(cp.PixelFormat())).
+			Int("max_bit_depth", opts.MaxBitDepth).
+			Str("hwaccel", opts.HWAccel).
+			Msg("source bit depth exceeds max for HW decode, falling back to software")
+		return newVideoDecoderFromParamsSW(cp)
+	}
+
 	codecID := cp.CodecID()
 	var codec *astiav.Codec
 	var hwCtx *astiav.HardwareDeviceContext
@@ -328,6 +341,29 @@ var hwPixelFormats = map[astiav.PixelFormat]bool{
 
 func isHWPixelFormat(pf astiav.PixelFormat) bool {
 	return hwPixelFormats[pf]
+}
+
+var bitDepthRe = regexp.MustCompile(`(\d+)(le|be)?$`)
+
+func bitDepthFromPixelFormat(pf astiav.PixelFormat) int {
+	desc := pf.Descriptor()
+	if desc == nil {
+		return 8
+	}
+	name := desc.Name()
+	if m := bitDepthRe.FindStringSubmatch(name); m != nil {
+		if bits, err := strconv.Atoi(m[1]); err == nil && bits > 8 && bits <= 16 {
+			return bits
+		}
+	}
+	return 8
+}
+
+func exceedsMaxBitDepth(pf astiav.PixelFormat, maxBitDepth int) bool {
+	if maxBitDepth <= 0 {
+		return false
+	}
+	return bitDepthFromPixelFormat(pf) > maxBitDepth
 }
 
 func (d *Decoder) Flush() ([]*astiav.Frame, error) {

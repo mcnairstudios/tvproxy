@@ -72,6 +72,7 @@ func (s *VODService) startRecordingInternal(ctx context.Context, sessionKey, tit
 		OutputHWAccel: defaultHWAccel,
 		UseWireGuard:  useWG,
 		OutputDir:     s.config.VODOutputDir,
+		MaxBitDepth:  s.resolveMaxBitDepth(ctx),
 	}, session.ConsumerRecording)
 	if err != nil {
 		return err

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync/atomic"
 
 	"github.com/rs/zerolog"
@@ -90,6 +91,18 @@ func (s *SettingsService) ResolveDecoderElement(ctx context.Context, codec strin
 	return ""
 }
 
+func (s *SettingsService) ResolveMaxBitDepth(ctx context.Context) int {
+	val, err := s.Get(ctx, "max_bit_depth")
+	if err != nil || val == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
 func (s *SettingsService) ResolveDecodeHWAccel(ctx context.Context) string {
 	if val, _ := s.Get(ctx, "default_decode_hwaccel"); val != "" {
 		return val
@@ -117,6 +130,7 @@ var apiVisibleKeys = map[string]bool{
 	"dlna_enabled":               true,
 	"debug_enabled":              true,
 	"tmdb_api_key":               true,
+	"max_bit_depth":              true,
 }
 
 func IsAPISettable(key string) bool {

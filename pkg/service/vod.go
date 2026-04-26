@@ -186,6 +186,10 @@ func (s *VODService) resolveDecodeHWAccel(ctx context.Context) string {
 	return s.settingsService.ResolveDecodeHWAccel(ctx)
 }
 
+func (s *VODService) resolveMaxBitDepth(ctx context.Context) int {
+	return s.settingsService.ResolveMaxBitDepth(ctx)
+}
+
 func (s *VODService) autoSelectSourceProfile(ctx context.Context, streamURL string) *models.SourceProfile {
 	if streamURL == "" {
 		return nil
@@ -391,6 +395,7 @@ func (s *VODService) StartWatching(ctx context.Context, channelID string, profil
 		MetadataOnly:     strategy.MetadataOnly,
 		Delivery:         sa.Delivery,
 		OutputHeight:     sa.OutputHeight,
+		MaxBitDepth:     s.resolveMaxBitDepth(ctx),
 	}
 	startOpts.VideoEncoderElement = s.resolveEncoderElement(ctx, strategy.VideoCodec)
 	startOpts.VideoDecoderElement = s.resolveDecoderElement(ctx, probeVCodec)
@@ -494,6 +499,7 @@ func (s *VODService) StartWatchingStream(ctx context.Context, streamID string, p
 		MetadataOnly:     strategy.MetadataOnly,
 		Delivery:         sa.Delivery,
 		OutputHeight:     sa.OutputHeight,
+		MaxBitDepth:     s.resolveMaxBitDepth(ctx),
 	}
 	startOpts2.VideoEncoderElement = s.resolveEncoderElement(ctx, strategy.VideoCodec)
 	startOpts2.VideoDecoderElement = s.resolveDecoderElement(ctx, stream.VODVCodec)
@@ -550,6 +556,7 @@ func (s *VODService) StartWatchingStreamHLS(ctx context.Context, streamID string
 		KnownDuration:    stream.VODDuration,
 		OutputDir:        s.config.VODOutputDir,
 		Delivery:         "hls",
+		MaxBitDepth:     s.resolveMaxBitDepth(ctx),
 	}
 	sp := s.lookupSourceProfile(ctx, stream.M3UAccountID, stream.SatIPSourceID, streamURL)
 	applySourceProfile(&startOpts, sp)
@@ -612,6 +619,7 @@ func (s *VODService) StartWatchingFile(ctx context.Context, filePath, name, prof
 		MetadataOnly:         false,
 		Delivery:             sa.Delivery,
 		OutputHeight:         sa.OutputHeight,
+		MaxBitDepth:         s.resolveMaxBitDepth(ctx),
 	}, session.ConsumerViewer)
 	if err != nil {
 		return "", "", "", 0, false, err
