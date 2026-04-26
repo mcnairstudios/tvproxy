@@ -20,6 +20,7 @@ type EPGService struct {
 	epgStore       store.EPGStore
 	config         *config.Config
 	httpClient     *http.Client
+	wgClient       *http.Client
 	log            zerolog.Logger
 	StatusTracker
 }
@@ -43,6 +44,8 @@ func NewEPGService(
 		StatusTracker: NewStatusTracker(),
 	}
 }
+
+func (s *EPGService) SetWGClient(c *http.Client) { s.wgClient = c }
 
 func (s *EPGService) Log() *zerolog.Logger { return &s.log }
 
@@ -137,7 +140,11 @@ func (s *EPGService) refreshSource(ctx context.Context, source *models.EPGSource
 
 	s.log.Info().Str("source_id", source.ID).Str("name", source.Name).Msg("refreshing epg source")
 
-	result, err := httputil.FetchConditional(ctx, s.httpClient, s.config, source.URL, source.ETag, s.log)
+	client := s.httpClient
+	if source.UseWireGuard && s.wgClient != nil {
+		client = s.wgClient
+	}
+	result, err := httputil.FetchConditional(ctx, client, s.config, source.URL, source.ETag, s.log)
 	if err != nil {
 		return fmt.Errorf("fetching xmltv url: %w", err)
 	}

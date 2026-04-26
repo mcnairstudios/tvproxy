@@ -238,7 +238,7 @@ func main() {
 	m3uService.SetSourceProfileStore(sourceProfileStore)
 	m3uService.CleanupOrphanedStreams(ctx)
 	channelService := service.NewChannelService(channelStore, channelGroupStore, streamStore, log)
-	epgService := service.NewEPGService(epgSourceStore, epgStore, cfg, wgHTTPClient, log)
+	epgService := service.NewEPGService(epgSourceStore, epgStore, cfg, nil, log)
 	epgService.CleanupOrphanedEPGData(ctx)
 	activityService := service.NewActivityService()
 	clientService := service.NewClientService(clientStore, profileStore, settingsService, log)
@@ -249,6 +249,7 @@ func main() {
 	hdhrSourceService := service.NewHDHRSourceService(hdhrSourceStore, streamStore, channelStore, probeCache, log)
 	wgMultiClient := wgMultiService.HTTPClient()
 	m3uService.SetWGClient(wgMultiClient)
+	epgService.SetWGClient(wgMultiClient)
 	sessionMgr := session.NewManager(cfg, wgHTTPClient, wgMultiClient, probeCache, streamStore, log)
 
 	wgPool := session.NewWGPool(log)

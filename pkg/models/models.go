@@ -209,6 +209,7 @@ type EPGSource struct {
 	Name          string     `json:"name"`
 	URL           string     `json:"url"`
 	IsEnabled     bool       `json:"is_enabled"`
+	UseWireGuard  bool       `json:"use_wireguard"`
 	LastRefreshed *time.Time `json:"last_refreshed,omitempty"`
 	ChannelCount  int        `json:"channel_count"`
 	ProgramCount  int        `json:"program_count"`

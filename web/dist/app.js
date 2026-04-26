@@ -6063,6 +6063,7 @@
         fields: [
           { key: 'name', label: 'Source Name', placeholder: 'TV Guide' },
           { key: 'url', label: 'XMLTV URL', placeholder: 'http://epg-provider.com/guide.xml' },
+          { key: 'use_wireguard', label: 'Route via WireGuard', type: 'checkbox' },
         ],
         rowActions: isAdmin ? (item, reload) => [
           {
