@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libaom-dev \
     libva-dev \
     libdrm-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN wget -q https://github.com/FFmpeg/nv-codec-headers/archive/refs/tags/n12.2.72.0.tar.gz \
@@ -34,7 +35,7 @@ RUN wget -q https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz \
        --enable-gpl --enable-version3 --enable-nonfree \
        --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libopus \
        --enable-libvorbis --enable-libvpx --enable-libdav1d --enable-libfdk-aac \
-       --enable-libaom --enable-vaapi --enable-nvenc --enable-nvdec \
+       --enable-libaom --enable-vaapi --enable-nvenc --enable-nvdec --enable-openssl \
     && make -j$(nproc) \
     && make install \
     && ldconfig \
