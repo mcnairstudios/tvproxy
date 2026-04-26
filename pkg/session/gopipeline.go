@@ -570,7 +570,7 @@ func NewFullTranscodePipeline(opts FullTranscodeOpts) (*FullTranscodePipeline, e
 		p.deint, err = filter.NewDeinterlacer(
 			info.Video.Width, info.Video.Height,
 			astiav.PixelFormatYuv420P,
-			astiav.NewRational(info.Video.FramerateD, info.Video.FramerateN),
+			astiav.NewRational(1, 90000),
 		)
 		if err != nil {
 			p.fullClose()
@@ -1006,7 +1006,7 @@ func NewMSETranscodePipeline(opts MSETranscodeOpts) (*MSETranscodePipeline, erro
 		p.deint, err = filter.NewDeinterlacer(
 			info.Video.Width, info.Video.Height,
 			astiav.PixelFormatYuv420P,
-			astiav.NewRational(info.Video.FramerateD, info.Video.FramerateN),
+			astiav.NewRational(1, 90000),
 		)
 		if err != nil {
 			p.closeAll()
@@ -2022,7 +2022,7 @@ func NewHLSTranscodePipeline(opts HLSTranscodeOpts) (*HLSTranscodePipeline, erro
 		p.deint, err = filter.NewDeinterlacer(
 			info.Video.Width, info.Video.Height,
 			astiav.PixelFormatYuv420P,
-			astiav.NewRational(info.Video.FramerateD, info.Video.FramerateN),
+			astiav.NewRational(1, 90000),
 		)
 		if err != nil {
 			p.closeHLSTranscode()

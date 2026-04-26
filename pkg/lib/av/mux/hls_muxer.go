@@ -144,11 +144,9 @@ func (m *HLSMuxer) openFormatContext() error {
 
 	if m.videoIdx >= 0 {
 		m.videoOutTB = fc.Streams()[m.videoIdx].TimeBase()
-		fmt.Printf("[HLS_DEBUG] video input TB: %d/%d output TB: %d/%d\n", m.opts.VideoTimeBase.Num(), m.opts.VideoTimeBase.Den(), m.videoOutTB.Num(), m.videoOutTB.Den())
 	}
 	if m.audioIdx >= 0 {
 		m.audioOutTB = fc.Streams()[m.audioIdx].TimeBase()
-		fmt.Printf("[HLS_DEBUG] audio input TB: %d/%d output TB: %d/%d\n", m.opts.AudioTimeBase.Num(), m.opts.AudioTimeBase.Den(), m.audioOutTB.Num(), m.audioOutTB.Den())
 	}
 
 	return nil
