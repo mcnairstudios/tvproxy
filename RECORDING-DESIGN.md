@@ -1,5 +1,10 @@
 # TVProxy Architecture Design
 
+## Core Problem
+Every time we touch the pipeline, something else breaks because the boundaries aren't clean. MSE works, then HLS breaks it. HLS works, then recordings are gone. Fix recordings, break audio sync. The code is tangled — adding or fixing one thing destroys another.
+
+**The solution is modularity.** If the HLS output plugin can't touch the MSE output plugin or the recording sink, they can't break each other. If the recording is just a consumer of decoded frames, pipeline changes can't delete it. Each entity has clear purpose and clean boundaries.
+
 ## Media Cloud (Core)
 
 ### Media Store
@@ -92,7 +97,7 @@ Plugins provide streams into the media cloud. Extensible by design.
 - When you watch something, it ALWAYS writes to `<recorddir>/stream/<streamid>/`
 - Delivery to client (HLS/MSE/DASH/etc.) runs in parallel off the same decode
 - Recording is not a special mode — it's the default behaviour
-- One decode → fan out to recording sink + delivery sink
+- One decode → fan out to recording sink + delivery sink(s)
 
 ### On Player Close
 - Stream file is **deleted** by default
@@ -123,3 +128,22 @@ Plugins provide streams into the media cloud. Extensible by design.
 - The recording is ALWAYS in this format, regardless of what the client sees
 - Recording is treated as an input source for playback — it just happens to be local on disk
 - When playing back a recording, it goes through the normal output pipeline (client profile → output plugin → delivery)
+
+### Timeshift / Pause Live TV
+- Falls out of "always recording" for free
+- Pause = stop consuming, keep recording, resume from where you left off
+- The temp recording file is the timeshift buffer
+
+## Hardware Acceleration
+- Decode: VAAPI, QSV, NVENC, VideoToolbox — auto-detected with software fallback
+- Encode: same platforms — auto-detected, per-codec settings
+- MaxBitDepth: auto-detected from hardware constraints (e.g. A380 = 8-bit only)
+- Deinterlacing: yadif filter, framerate-aware (1080i/50 → 25fps progressive)
+
+## Key Architectural Rules
+1. **Modularity protects working code.** Each component has clean boundaries. Changing one output plugin cannot break another.
+2. **The media cloud is the heart.** Everything else is a plugin — inputs feed it, outputs consume it.
+3. **One decode, many outputs.** Decoded frames are the shared resource. Fan out to recording + delivery.
+4. **Recording is always happening.** The record button just preserves what's already being written.
+5. **Recordings are input sources.** Playing back a recording goes through the normal pipeline.
+6. **Plugin interfaces are pragmatic.** Defined by what they need to contain, not by abstract ideals.

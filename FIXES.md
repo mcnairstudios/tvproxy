@@ -1,5 +1,12 @@
 # Fixes & Ideas (Not on Critical Path)
 
+## CRITICAL — Recording Pipeline Broken
+- Completed recordings produce no media files on disk — all session directories are empty after cleanup
+- `s.Recorded` / `s.wasRecording` flags control whether TempDir is preserved, but recordings may not be creating the right consumer type or the output is going to the wrong location
+- The recording listing store was also filtering for `.mp4` only (fixed in v2.0.36 to accept .ts/.mkv)
+- Needs full trace: scheduled recording → VODService.CreateRecordingSession → session manager → consumer type → pipeline output → session cleanup → file preservation
+- Previously worked — regression from pipeline changes
+
 ## Jellyfin (NEW — April 2026)
 
 ### Playback (CRITICAL)
